@@ -13,8 +13,8 @@ export const metadata: Metadata = {
 export default function ImpressumPage() {
   const l = config.legal;
   return (
-    <div className="min-h-[100dvh] bg-parchment text-ink">
-      <header className="border-b border-bone">
+    <div className="min-h-[100dvh] bg-paper text-ink">
+      <header className="border-b border-mist">
         <div className="mx-auto flex h-16 max-w-[760px] items-center justify-between px-6">
           <Link href="/" className="flex items-center gap-2">
             <span className="block size-2 rotate-45 bg-ink" aria-hidden="true" />
@@ -22,7 +22,7 @@ export default function ImpressumPage() {
           </Link>
           <Link
             href="/"
-            className="text-[14px] text-dim transition-colors hover:text-ink"
+            className="text-[14px] text-smoke transition-colors hover:text-ink"
           >
             Zurück zur Startseite
           </Link>
@@ -34,7 +34,7 @@ export default function ImpressumPage() {
           Impressum
         </h1>
 
-        <div className="mt-12 space-y-10 text-[15px] leading-[1.6] text-charcoal">
+        <div className="mt-12 space-y-10 text-[15px] leading-[1.6] text-pewter">
           <section>
             <h2 className="text-[20px] font-bold text-ink">Angaben gemäß § 5 DDG</h2>
             <p className="mt-3">
@@ -75,7 +75,7 @@ export default function ImpressumPage() {
             </p>
           </section>
 
-          <p className="border-t border-bone pt-6 text-[13px] text-dim">
+          <p className="border-t border-mist pt-6 text-[13px] text-smoke">
             Hinweis: Dieser Text ist eine Vorlage mit Platzhaltern. Bitte vor dem
             Livegang mit echten Daten ausfüllen und rechtlich prüfen lassen.
           </p>

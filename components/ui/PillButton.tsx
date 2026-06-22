@@ -1,55 +1,87 @@
 import type { ReactNode } from "react";
+import { ArrowRight } from "@phosphor-icons/react";
 
-type Tone = "ink" | "white";
-type Variant = "pill" | "square";
+type Variant = "ghost" | "outline" | "filled";
+type Tone = "ink" | "paper";
 
 interface PillButtonProps {
   children: ReactNode;
   href?: string;
   onClick?: () => void;
   type?: "button" | "submit";
-  tone?: Tone;
+  /** ghost = bare text + arrow; outline = 80px pill outline; filled = dark char fill. */
   variant?: Variant;
+  /** ink = on light surfaces, paper = on dark photography/surfaces. */
+  tone?: Tone;
+  /** Trailing right-arrow. Defaults on for ghost/outline, off for filled. */
+  arrow?: boolean;
   className?: string;
   disabled?: boolean;
-  "aria-label"?: string;
   target?: string;
   rel?: string;
+  "aria-label"?: string;
 }
 
 /*
-  Outlined ghost button. Pravah primary CTAs use a 100px pill radius; secondary
-  actions in dense areas use a 4px square radius. No fills, no shadows. Tone
-  switches the stroke/text colour for use on light vs dark (aubergine) sections.
-  The hover/active states are intentionally subtle (Emil Kowalski restraint).
+  Aker action affordance. Most actions are ghost text-arrow pairs; outline adds an
+  80px pill stroke for emphasis; filled is the dark char pill used sparingly. Flat,
+  no shadows. Single chromatic accent (Ember) is reserved for inline links, not
+  these buttons.
 */
 export default function PillButton({
   children,
   href,
   onClick,
   type = "button",
+  variant = "ghost",
   tone = "ink",
-  variant = "pill",
+  arrow,
   className = "",
   disabled = false,
   target,
   rel,
   ...rest
 }: PillButtonProps) {
+  const showArrow = arrow ?? variant !== "filled";
+
   const base =
-    "inline-flex items-center justify-center gap-2 whitespace-nowrap border text-[15px] leading-none font-normal " +
-    "transition-[background-color,transform,opacity] duration-150 ease-out " +
-    "active:translate-y-px focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 " +
-    "disabled:opacity-50 disabled:pointer-events-none";
+    "group inline-flex items-center gap-2 whitespace-nowrap text-[15px] font-normal leading-none " +
+    "transition-[opacity,background-color,color] duration-200 ease-out focus-visible:outline-none " +
+    "focus-visible:ring-2 focus-visible:ring-offset-2 disabled:opacity-50 disabled:pointer-events-none";
 
-  const shape = variant === "pill" ? "rounded-[100px] px-5 py-2" : "rounded-[4px] px-4 py-1.5";
+  const inkRing = "focus-visible:ring-ink/40 focus-visible:ring-offset-paper";
+  const paperRing = "focus-visible:ring-paper/50 focus-visible:ring-offset-char";
 
-  const toneClasses =
-    tone === "ink"
-      ? "border-ink text-ink hover:bg-ink/[0.05] focus-visible:ring-ink/40 focus-visible:ring-offset-parchment"
-      : "border-pure-white/70 text-pure-white hover:bg-pure-white/10 focus-visible:ring-pure-white/50 focus-visible:ring-offset-aubergine";
+  let shape: string;
+  if (variant === "ghost") {
+    shape =
+      tone === "ink"
+        ? `text-ink hover:opacity-60 ${inkRing}`
+        : `text-paper hover:opacity-70 ${paperRing}`;
+  } else if (variant === "outline") {
+    shape =
+      tone === "ink"
+        ? `rounded-[80px] border border-ink px-5 py-3 text-ink hover:bg-ink hover:text-paper ${inkRing}`
+        : `rounded-[80px] border border-paper px-5 py-3 text-paper hover:bg-paper hover:text-ink ${paperRing}`;
+  } else {
+    shape = `rounded-[80px] bg-char px-5 py-3 font-medium text-paper hover:bg-iron ${inkRing}`;
+  }
 
-  const classes = `${base} ${shape} ${toneClasses} ${className}`;
+  const classes = `${base} ${shape} ${className}`;
+
+  const content = (
+    <>
+      {children}
+      {showArrow && (
+        <ArrowRight
+          size={16}
+          weight="regular"
+          aria-hidden
+          className="transition-transform duration-200 ease-out group-hover:translate-x-0.5"
+        />
+      )}
+    </>
+  );
 
   if (href) {
     return (
@@ -60,7 +92,7 @@ export default function PillButton({
         rel={rel}
         aria-label={rest["aria-label"]}
       >
-        {children}
+        {content}
       </a>
     );
   }
@@ -73,7 +105,7 @@ export default function PillButton({
       className={classes}
       aria-label={rest["aria-label"]}
     >
-      {children}
+      {content}
     </button>
   );
 }

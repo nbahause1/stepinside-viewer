@@ -11,13 +11,13 @@ import { config, SECTION_IDS } from "@/lib/config";
 
 /*
   Contact section: a Formspree-backed form on the left, direct contact details
-  on the right. Quiet Pravah surfaces, 1px hairlines, no shadows or gradients.
+  on the right. Aker treatment — light paper canvas, hairline mist borders,
+  ghost/filled pills, Ember reserved for the inline email/phone links. No shadows,
+  no gradients.
 */
 export default function Contact() {
   const { t } = useLang();
   const [status, setStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
-  const focusRing =
-    "rounded-[2px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/40 focus-visible:ring-offset-2 focus-visible:ring-offset-parchment";
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -45,24 +45,27 @@ export default function Contact() {
     }
   }
 
+  const fieldClass =
+    "mt-2 w-full rounded-[8px] border border-mist bg-paper px-4 py-3 text-[15px] text-ink transition-colors placeholder:text-smoke focus:border-ink focus:outline-none focus:ring-1 focus:ring-ink";
+
   return (
-    <section id={SECTION_IDS.contact} className="bg-parchment">
-      <div className="mx-auto max-w-[1200px] px-6 py-20 md:py-28">
+    <section id={SECTION_IDS.contact} className="bg-paper">
+      <div className="mx-auto max-w-[1200px] px-6 py-24 md:py-32">
         <Reveal>
           <SectionLabel tone="light">{t.contact.label}</SectionLabel>
-          <h2 className="mt-5 text-3xl font-bold tracking-[-0.02em] md:text-[40px]">
+          <h2 className="mt-4 font-light leading-[1.1] tracking-[-0.02em] text-ink text-[36px] md:text-[clamp(2.25rem,4vw,3.5rem)]">
             {t.contact.heading}
           </h2>
-          <p className="mt-4 max-w-[55ch] text-[17px] text-charcoal">{t.contact.intro}</p>
+          <p className="mt-5 max-w-[55ch] text-[17px] text-pewter">{t.contact.intro}</p>
         </Reveal>
 
-        <div className="mt-12 grid grid-cols-1 gap-12 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
+        <div className="mt-16 grid grid-cols-1 gap-12 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
           {/* LEFT: Formspree form. The endpoint id comes from config / NEXT_PUBLIC_FORMSPREE_ID. */}
           <Reveal as="div">
             <form onSubmit={onSubmit} noValidate>
-              <div className="space-y-5">
+              <div className="space-y-6">
                 <div>
-                  <label htmlFor="name" className="text-[14px] text-ink">
+                  <label htmlFor="name" className="mb-2 block text-[14px] text-pewter">
                     {t.contact.nameLabel}
                   </label>
                   <input
@@ -71,12 +74,12 @@ export default function Contact() {
                     type="text"
                     required
                     placeholder={t.contact.namePlaceholder}
-                    className="mt-2 w-full rounded-[4px] border border-bone bg-pure-white px-4 py-3 text-[15px] text-ink transition-colors placeholder:text-dim focus:border-ink focus:outline-none focus:ring-1 focus:ring-ink"
+                    className={fieldClass}
                   />
                 </div>
 
                 <div>
-                  <label htmlFor="email" className="text-[14px] text-ink">
+                  <label htmlFor="email" className="mb-2 block text-[14px] text-pewter">
                     {t.contact.emailLabel}
                   </label>
                   <input
@@ -85,12 +88,12 @@ export default function Contact() {
                     type="email"
                     required
                     placeholder={t.contact.emailPlaceholder}
-                    className="mt-2 w-full rounded-[4px] border border-bone bg-pure-white px-4 py-3 text-[15px] text-ink transition-colors placeholder:text-dim focus:border-ink focus:outline-none focus:ring-1 focus:ring-ink"
+                    className={fieldClass}
                   />
                 </div>
 
                 <div>
-                  <label htmlFor="message" className="text-[14px] text-ink">
+                  <label htmlFor="message" className="mb-2 block text-[14px] text-pewter">
                     {t.contact.messageLabel}
                   </label>
                   <textarea
@@ -99,7 +102,7 @@ export default function Contact() {
                     rows={5}
                     required
                     placeholder={t.contact.messagePlaceholder}
-                    className="mt-2 w-full rounded-[4px] border border-bone bg-pure-white px-4 py-3 text-[15px] text-ink transition-colors placeholder:text-dim focus:border-ink focus:outline-none focus:ring-1 focus:ring-ink"
+                    className={fieldClass}
                   />
                 </div>
               </div>
@@ -107,7 +110,7 @@ export default function Contact() {
               <div className="mt-6">
                 <PillButton
                   type="submit"
-                  variant="pill"
+                  variant="filled"
                   tone="ink"
                   disabled={status === "loading"}
                 >
@@ -120,7 +123,7 @@ export default function Contact() {
                   <span className="text-[14px] text-ink">{t.contact.success}</span>
                 )}
                 {status === "error" && (
-                  <span className="text-[14px] text-dim">{t.contact.error}</span>
+                  <span className="text-[14px] text-pewter">{t.contact.error}</span>
                 )}
               </p>
             </form>
@@ -128,17 +131,17 @@ export default function Contact() {
 
           {/* RIGHT: direct contact details. */}
           <Reveal as="div" delay={0.05}>
-            <h3 className="text-[15px] font-bold text-ink">{t.contact.directLabel}</h3>
-            <div className="mt-5 space-y-4 text-[15px] text-charcoal">
+            <h3 className="text-[14px] tracking-[0.12px] text-smoke">{t.contact.directLabel}</h3>
+            <div className="mt-5 space-y-4 text-[15px]">
               <p className="flex items-center gap-2">
-                <EnvelopeSimple size={18} aria-hidden className="text-dim" />
-                <a href={"mailto:" + config.email} className={"text-ink hover:opacity-70 " + focusRing}>
+                <EnvelopeSimple size={16} aria-hidden className="text-pewter" />
+                <a href={"mailto:" + config.email} className="text-ember hover:opacity-70">
                   {config.email}
                 </a>
               </p>
               <p className="flex items-center gap-2">
-                <Phone size={18} aria-hidden className="text-dim" />
-                <a href={"tel:" + config.phoneHref} className={"text-ink hover:opacity-70 " + focusRing}>
+                <Phone size={16} aria-hidden className="text-pewter" />
+                <a href={"tel:" + config.phoneHref} className="text-ember hover:opacity-70">
                   {config.phone}
                 </a>
               </p>
@@ -146,7 +149,7 @@ export default function Contact() {
               {config.calendlyUrl ? (
                 <p className="mt-2 block">
                   <PillButton
-                    variant="pill"
+                    variant="ghost"
                     tone="ink"
                     href={config.calendlyUrl}
                     target="_blank"

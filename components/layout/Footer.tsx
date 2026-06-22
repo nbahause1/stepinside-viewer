@@ -4,57 +4,55 @@ import Link from "next/link";
 import { useLang } from "@/components/i18n/LanguageProvider";
 
 /*
-  Site footer. Pravah quiet close: a parchment band with a single hairline top
-  border, the brand lockup with tagline on the left, the legal nav on the right,
-  and a thin copyright line below. No shadows, no fills, no chromatic colour.
+  Site footer. Aker quiet close: a paper band with a single hairline top border,
+  a monumental whisper-weight brand wordmark with tagline, then a hairline row
+  carrying the legal nav and copyright. Flat and editorial — no shadows, no
+  fills, no chromatic colour beyond the Ember link hover.
 */
 export default function Footer() {
   const { t } = useLang();
   const year = new Date().getFullYear();
   const focusRing =
-    "rounded-[2px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/40 focus-visible:ring-offset-2 focus-visible:ring-offset-parchment";
+    "rounded-[3.2px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/40 focus-visible:ring-offset-2 focus-visible:ring-offset-paper";
 
   return (
-    <footer className="bg-parchment border-t border-bone">
-      <div className="mx-auto max-w-[1200px] px-6 py-12">
-        <div className="flex flex-col gap-8 md:flex-row md:items-start md:justify-between">
-          {/* Brand lockup */}
-          <div>
-            <div className="flex items-center gap-2">
-              <span
-                className="block size-2 rotate-45 bg-ink"
-                aria-hidden="true"
-              />
-              <span className="text-[15px] font-bold text-ink">StepInside</span>
-            </div>
-            <p className="mt-3 max-w-[40ch] text-[14px] text-dim">
-              {t.footer.tagline}
-            </p>
-          </div>
+    <footer className="bg-paper border-t border-mist">
+      <div className="mx-auto max-w-[1200px] px-6 py-16">
+        {/* Brand wordmark — the Aker signature */}
+        <div className="text-[clamp(2.5rem,9vw,5.5rem)] font-light leading-[0.9] tracking-[-0.02em] text-ink">
+          StepInside
+        </div>
+        <p className="mt-4 max-w-[40ch] text-[15px] text-pewter">
+          {t.footer.tagline}
+        </p>
 
-          {/* Legal nav */}
+        {/* Legal nav + copyright */}
+        <div className="mt-12 flex flex-wrap items-center justify-between gap-6 border-t border-mist pt-8">
           <nav
             aria-label={t.footer.legalAria}
-            className="flex flex-col gap-3 sm:flex-row sm:gap-6"
+            className="flex flex-wrap items-center gap-6"
           >
             <Link
               href="/impressum"
-              className={"text-[14px] text-ink hover:opacity-70 " + focusRing}
+              className={
+                "text-[14px] text-ink transition-colors hover:text-ember " +
+                focusRing
+              }
             >
               {t.footer.impressum}
             </Link>
             <Link
               href="/datenschutz"
-              className={"text-[14px] text-ink hover:opacity-70 " + focusRing}
+              className={
+                "text-[14px] text-ink transition-colors hover:text-ember " +
+                focusRing
+              }
             >
               {t.footer.datenschutz}
             </Link>
           </nav>
-        </div>
 
-        {/* Copyright line */}
-        <div className="mt-10 flex border-t border-bone pt-6">
-          <p className="text-[13px] text-dim">
+          <p className="text-[13px] text-smoke">
             {"©"} {year} StepInside. {t.footer.rights}
           </p>
         </div>

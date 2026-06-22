@@ -1,11 +1,19 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
+import { Montserrat, Lora } from "next/font/google";
 import "./globals.css";
 
-const inter = Inter({
+const montserrat = Montserrat({
   subsets: ["latin"],
-  variable: "--font-inter",
+  variable: "--font-montserrat",
   display: "swap",
+  weight: ["300", "400", "500", "600"],
+});
+
+const lora = Lora({
+  subsets: ["latin"],
+  variable: "--font-lora",
+  display: "swap",
+  weight: ["400"],
 });
 
 export const metadata: Metadata = {
@@ -40,8 +48,11 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="de" className={`${inter.variable} h-full`}>
-      <body className="min-h-full flex flex-col bg-parchment text-ink">
+    <html
+      lang="de"
+      className={`${montserrat.variable} ${lora.variable} h-full`}
+    >
+      <body className="min-h-full flex flex-col bg-paper text-ink">
         {children}
       </body>
     </html>

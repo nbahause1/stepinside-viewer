@@ -1,25 +1,46 @@
 @import "tailwindcss";
 
 /*
-  StepInside design tokens, Pravah style system.
-  Warm, near-monochromatic, light-only theme. No accent colours, no shadows,
-  no gradients. Depth comes from tonal surface shifts and 1px borders only.
+  Aker design tokens, "darkroom gallery wall". Light paper canvas, dark
+  photographic bands, a single warm terracotta (Ember) accent, monumental
+  whisper-weight type (Montserrat as the Proxima Nova substitute, Lora as a
+  sparing serif accent). Flat by design: no shadows, no gradients.
 */
 @theme {
-  --color-parchment: #f3f1ed; /* page canvas */
-  --color-pure-white: #ffffff; /* card surfaces, badge fills */
-  --color-ink: #181011; /* primary text, borders, structural strokes */
-  --color-charcoal: #222222; /* secondary text */
-  --color-aubergine: #302023; /* full-bleed dark inversion band (used once) */
-  --color-ash: #aaaaaa; /* muted text, inactive states */
-  --color-dim: #666666; /* captions, tertiary metadata */
-  --color-bone: #d8d4d4; /* hairline borders, low-emphasis dividers */
+  --color-ink: #000000;
+  --color-paper: #ffffff;
+  --color-char: #1c1c1c;
+  --color-midnight: #070707;
+  --color-iron: #262626;
+  --color-slate: #38464a;
+  --color-mist: #e5e4e4;
+  --color-smoke: #8d8d8d;
+  --color-pewter: #666666;
+  --color-ember: #b75928;
+  --color-pine: #193f32;
+  --color-tide: #002934;
+  --color-driftwood: #537179;
+  --color-cedar: #776157;
+  --color-coral: #df6a6b;
+  --color-primary-action-fill: #494949;
 
-  --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system,
+  --font-sans: var(--font-montserrat), ui-sans-serif, system-ui, -apple-system,
     BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-serif: var(--font-lora), Georgia, "Times New Roman", serif;
 
-  --radius-card: 4px;
-  --radius-pill: 100px;
+  /* Type scale (generates text-* utilities) */
+  --text-body: 15px;
+  --text-subheading: 18px;
+  --text-heading-sm: 22px;
+  --text-heading: 36px;
+  --text-heading-lg: 62px;
+  --text-display: 168px;
+
+  /* Border radius */
+  --radius-sm: 3.2px;
+  --radius-card: 8px;
+  --radius-pill: 80px;
+  --radius-badge: 1584px;
 }
 
 :root {
@@ -37,7 +58,7 @@ html {
 }
 
 body {
-  background-color: var(--color-parchment);
+  background-color: var(--color-paper);
   color: var(--color-ink);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
@@ -45,17 +66,15 @@ body {
   text-rendering: optimizeLegibility;
 }
 
-/* A little breathing room when jumping to an anchor (the nav is not sticky). */
 [id] {
   scroll-margin-top: 32px;
 }
 
 ::selection {
   background: var(--color-ink);
-  color: var(--color-parchment);
+  color: var(--color-paper);
 }
 
-/* Safety net: collapse all motion when the user asks for reduced motion. */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

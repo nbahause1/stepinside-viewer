@@ -7,132 +7,124 @@ import PillButton from "@/components/ui/PillButton";
 import { SECTION_IDS } from "@/lib/config";
 
 /*
-  Top navigation bar. Not sticky. Light theme only, no shadows, no gradients.
-  Kept deliberately minimal: the start page is a single scroll, so there are no
-  in-page section anchors here (they only scrolled down and back up). The nav
-  carries the standalone "Ueber uns" route, the language switch, and the primary
-  contact CTA.
+  Aker "Navigation Pill". A single compact floating dark pill in the top-right
+  corner — the only chrome, floating over the hero video and every section.
+  Tapping the pill toggles a small dark menu panel anchored beneath it.
+
+  Content is unchanged from the previous version: the standalone "Über uns"
+  route, the DE/EN language switch, and the primary contact CTA. There are no
+  in-page section anchors (the start page is a single scroll). Flat char
+  surfaces, hairline borders, no shadows, no gradients.
 */
 export default function Nav() {
   const { t, lang, setLang } = useLang();
   const [open, setOpen] = useState(false);
 
-  // Shared visible focus state for the hand-rolled controls (PillButton has its own).
+  // Visible focus ring tuned for the dark char surfaces of the pill + panel.
   const focusRing =
-    "rounded-[2px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/40 focus-visible:ring-offset-2 focus-visible:ring-offset-parchment";
-
-  const LangSwitch = ({ className = "" }: { className?: string }) => (
-    <span
-      aria-label={t.nav.langSwitchAria}
-      className={"flex items-center gap-2 text-[13px] " + className}
-    >
-      <button
-        type="button"
-        onClick={() => setLang("de")}
-        aria-pressed={lang === "de"}
-        className={
-          "transition-colors " +
-          focusRing +
-          " " +
-          (lang === "de"
-            ? "font-bold text-ink"
-            : "text-dim hover:text-ink font-normal")
-        }
-      >
-        DE
-      </button>
-      <button
-        type="button"
-        onClick={() => setLang("en")}
-        aria-pressed={lang === "en"}
-        className={
-          "transition-colors " +
-          focusRing +
-          " " +
-          (lang === "en"
-            ? "font-bold text-ink"
-            : "text-dim hover:text-ink font-normal")
-        }
-      >
-        EN
-      </button>
-    </span>
-  );
+    "rounded-[3.2px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-paper/50 focus-visible:ring-offset-2 focus-visible:ring-offset-char";
 
   return (
-    <nav aria-label={t.nav.ariaLabel} className="bg-parchment border-b border-bone">
-      <div className="mx-auto flex h-16 max-w-[1200px] items-center justify-between px-6 md:h-[72px]">
-        {/* Logo lockup */}
-        <a href="/" className={"flex items-center gap-2.5 " + focusRing}>
-          <span aria-hidden className="block size-2 rotate-45 bg-ink" />
-          <span className="text-[15px] font-bold text-ink">StepInside</span>
-        </a>
+    <nav
+      aria-label={t.nav.ariaLabel}
+      className="fixed right-4 top-4 z-50 md:right-6 md:top-6"
+    >
+      <div className="relative">
+        {/* The pill itself toggles the menu. */}
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          aria-label={open ? t.nav.close : t.nav.menu}
+          aria-expanded={open}
+          className={
+            "inline-flex items-center gap-2 rounded-[1584px] bg-char px-4 py-2 text-paper " +
+            "transition-colors duration-200 ease-out hover:bg-iron " +
+            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-paper/50 focus-visible:ring-offset-2 focus-visible:ring-offset-paper"
+          }
+        >
+          <span className="text-[13px] font-medium tracking-[0.12px]">StepInside</span>
+          {open ? (
+            <X size={18} weight="regular" aria-hidden />
+          ) : (
+            <List size={18} weight="regular" aria-hidden />
+          )}
+        </button>
 
-        {/* Right cluster */}
-        <div className="flex items-center gap-4 lg:gap-5">
-          <a
-            href="/ueber-uns"
-            className={
-              "hidden text-[14px] text-ink transition-opacity hover:opacity-70 lg:inline-block " +
-              focusRing
-            }
-          >
-            {t.nav.about}
-          </a>
+        {/* Menu panel — anchored under the pill, flat char surface. */}
+        {open && (
+          <div className="absolute right-0 mt-2 w-[min(88vw,320px)] rounded-[8px] border border-paper/10 bg-char p-4 text-paper">
+            <div className="flex flex-col gap-4">
+              <a
+                href="/ueber-uns"
+                onClick={() => setOpen(false)}
+                className={
+                  "text-[15px] text-paper transition-colors hover:text-mist " + focusRing
+                }
+              >
+                {t.nav.about}
+              </a>
 
-          <div className="hidden lg:flex">
-            <LangSwitch />
+              {/* DE / EN language switch */}
+              <span
+                aria-label={t.nav.langSwitchAria}
+                className="flex items-center gap-3 text-[15px]"
+              >
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLang("de");
+                    setOpen(false);
+                  }}
+                  aria-pressed={lang === "de"}
+                  className={
+                    "transition-colors " +
+                    focusRing +
+                    " " +
+                    (lang === "de"
+                      ? "font-medium text-paper"
+                      : "font-normal text-mist hover:text-paper")
+                  }
+                >
+                  DE
+                </button>
+                <span aria-hidden className="text-paper/20">
+                  /
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLang("en");
+                    setOpen(false);
+                  }}
+                  aria-pressed={lang === "en"}
+                  className={
+                    "transition-colors " +
+                    focusRing +
+                    " " +
+                    (lang === "en"
+                      ? "font-medium text-paper"
+                      : "font-normal text-mist hover:text-paper")
+                  }
+                >
+                  EN
+                </button>
+              </span>
+
+              <div className="mt-1 border-t border-paper/10 pt-4">
+                <PillButton
+                  href={"/#" + SECTION_IDS.contact}
+                  variant="ghost"
+                  tone="paper"
+                  onClick={() => setOpen(false)}
+                  className="w-full justify-between"
+                >
+                  {t.nav.cta}
+                </PillButton>
+              </div>
+            </div>
           </div>
-
-          {/* Wrapper controls visibility: a `hidden` class on PillButton itself
-              loses to its base inline-flex, so gate it from the outside. */}
-          <div className="hidden sm:block">
-            <PillButton href={"/#" + SECTION_IDS.contact} variant="pill" tone="ink">
-              {t.nav.cta}
-            </PillButton>
-          </div>
-
-          {/* Mobile menu toggle */}
-          <button
-            type="button"
-            onClick={() => setOpen((v) => !v)}
-            aria-label={open ? t.nav.close : t.nav.menu}
-            aria-expanded={open}
-            className={
-              "text-ink transition-opacity hover:opacity-70 lg:hidden " + focusRing
-            }
-          >
-            {open ? <X size={22} aria-hidden /> : <List size={22} aria-hidden />}
-          </button>
-        </div>
+        )}
       </div>
-
-      {/* Mobile panel */}
-      {open && (
-        <div className="border-b border-bone bg-parchment px-6 py-6 lg:hidden">
-          <div className="flex flex-col gap-4">
-            <a
-              href="/ueber-uns"
-              onClick={() => setOpen(false)}
-              className={
-                "text-[16px] text-ink transition-opacity hover:opacity-70 " + focusRing
-              }
-            >
-              {t.nav.about}
-            </a>
-            <LangSwitch />
-            <PillButton
-              href={"/#" + SECTION_IDS.contact}
-              variant="pill"
-              tone="ink"
-              onClick={() => setOpen(false)}
-              className="w-full"
-            >
-              {t.nav.cta}
-            </PillButton>
-          </div>
-        </div>
-      )}
     </nav>
   );
 }
