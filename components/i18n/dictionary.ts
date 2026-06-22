@@ -26,6 +26,11 @@ interface HeroD {
   sub: string;
   ctaPrimary: string;
   ctaSecondary: string;
+  emailPlaceholder: string;
+  requesting: string;
+  requestHint: string;
+  requestSuccess: string;
+  requestError: string;
   cards: HeroCard[];
 }
 
@@ -122,9 +127,14 @@ const de: Dict = {
   hero: {
     label: "Begehbare 3D-Touren",
     headline: "Räume begehbar machen. Von überall.",
-    sub: "Fotorealistische 3D-Touren, durch die sich Ihre Besucher frei bewegen. Ein Link, jedes Gerät, kein Download.",
-    ctaPrimary: "Demo ansehen",
+    sub: "Fotorealistische 3D-Touren, durch die sich Ihre Besucher frei bewegen.",
+    ctaPrimary: "Demo anfordern",
     ctaSecondary: "Kontakt aufnehmen",
+    emailPlaceholder: "Ihre E-Mail-Adresse",
+    requesting: "Wird gesendet...",
+    requestHint: "Exklusiver Zugang zu einer persönlichen Demo.",
+    requestSuccess: "Danke. Wir melden uns mit Ihrem Zugang.",
+    requestError: "Etwas ist schiefgelaufen. Bitte versuchen Sie es erneut.",
     cards: [
       {
         title: "Frei begehbar",
@@ -170,7 +180,7 @@ const de: Dict = {
       },
       {
         title: "Lieferung",
-        body: "Sie erhalten den Embed-Code, einen druckfertigen QR-Code und eine Anleitung für Ihren Webdesigner.",
+        body: "Sie erhalten den Embed-Code, einen druckfertigen QR-Code und eine Anleitung für Ihren Webdesigner. Optional erweitern wir gerne selbst ihre Website.",
       },
     ],
   },
@@ -235,7 +245,7 @@ const de: Dict = {
     bookLabel: "Termin buchen",
   },
   footer: {
-    tagline: "Begehbare 3D-Touren für Räume aller Art.",
+    tagline: "Begehbare 3D-Touren für Räume und Flächen aller Art.",
     impressum: "Impressum",
     datenschutz: "Datenschutz",
     rights: "Alle Rechte vorbehalten.",
@@ -259,9 +269,14 @@ const en: Dict = {
   hero: {
     label: "Walkable 3D tours",
     headline: "Make spaces walkable. From anywhere.",
-    sub: "Photorealistic 3D tours your visitors can walk through freely. One link, any device, no download.",
-    ctaPrimary: "View a demo",
+    sub: "Photorealistic 3D tours your visitors can walk through freely.",
+    ctaPrimary: "Request a demo",
     ctaSecondary: "Get in touch",
+    emailPlaceholder: "Your email address",
+    requesting: "Sending...",
+    requestHint: "Exclusive access to a personal demo.",
+    requestSuccess: "Thank you. We will be in touch with your access.",
+    requestError: "Something went wrong. Please try again.",
     cards: [
       {
         title: "Walk anywhere",
@@ -307,7 +322,7 @@ const en: Dict = {
       },
       {
         title: "Delivery",
-        body: "You receive the embed code, a print-ready QR code and a guide for your web designer.",
+        body: "You receive the embed code, a print-ready QR code and a guide for your web designer. Optionally, we are happy to extend your website ourselves.",
       },
     ],
   },

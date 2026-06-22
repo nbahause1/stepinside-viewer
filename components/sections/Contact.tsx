@@ -5,7 +5,6 @@ import type { FormEvent } from "react";
 import { EnvelopeSimple, Phone } from "@phosphor-icons/react";
 import { useLang } from "@/components/i18n/LanguageProvider";
 import PillButton from "@/components/ui/PillButton";
-import SectionLabel from "@/components/ui/SectionLabel";
 import Reveal from "@/components/ui/Reveal";
 import { config, SECTION_IDS } from "@/lib/config";
 
@@ -52,8 +51,7 @@ export default function Contact() {
     <section id={SECTION_IDS.contact} className="bg-paper">
       <div className="mx-auto max-w-[1200px] px-6 py-24 md:py-32">
         <Reveal>
-          <SectionLabel tone="light">{t.contact.label}</SectionLabel>
-          <h2 className="mt-4 font-light leading-[1.1] tracking-[-0.02em] text-ink text-[36px] md:text-[clamp(2.25rem,4vw,3.5rem)]">
+          <h2 className="font-light leading-[1.1] tracking-[-0.02em] text-ink text-[36px] md:text-[clamp(2.25rem,4vw,3.5rem)]">
             {t.contact.heading}
           </h2>
           <p className="mt-5 max-w-[55ch] text-[17px] text-pewter">{t.contact.intro}</p>

@@ -1,7 +1,6 @@
 "use client";
 
 import { useLang } from "@/components/i18n/LanguageProvider";
-import SectionLabel from "@/components/ui/SectionLabel";
 import Reveal from "@/components/ui/Reveal";
 import { config, SECTION_IDS } from "@/lib/config";
 
@@ -18,8 +17,7 @@ export default function Demos() {
     <section id={SECTION_IDS.demos} className="bg-paper">
       <div className="mx-auto max-w-[1200px] px-6 py-24 md:py-32">
         <Reveal>
-          <SectionLabel tone="light">{t.demos.label}</SectionLabel>
-          <h2 className="mt-4 max-w-[16ch] text-[36px] font-light leading-[1.05] tracking-[-0.025em] text-ink md:text-[clamp(2.5rem,5vw,4rem)]">
+          <h2 className="max-w-[16ch] text-[36px] font-light leading-[1.05] tracking-[-0.025em] text-ink md:text-[clamp(2.5rem,5vw,4rem)]">
             {t.demos.heading}
           </h2>
           <p className="mt-5 max-w-[60ch] text-[17px] text-pewter">
