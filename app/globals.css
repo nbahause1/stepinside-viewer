@@ -1,0 +1,68 @@
+@import "tailwindcss";
+
+/*
+  StepInside design tokens, Pravah style system.
+  Warm, near-monochromatic, light-only theme. No accent colours, no shadows,
+  no gradients. Depth comes from tonal surface shifts and 1px borders only.
+*/
+@theme {
+  --color-parchment: #f3f1ed; /* page canvas */
+  --color-pure-white: #ffffff; /* card surfaces, badge fills */
+  --color-ink: #181011; /* primary text, borders, structural strokes */
+  --color-charcoal: #222222; /* secondary text */
+  --color-aubergine: #302023; /* full-bleed dark inversion band (used once) */
+  --color-ash: #aaaaaa; /* muted text, inactive states */
+  --color-dim: #666666; /* captions, tertiary metadata */
+  --color-bone: #d8d4d4; /* hairline borders, low-emphasis dividers */
+
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system,
+    BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+
+  --radius-card: 4px;
+  --radius-pill: 100px;
+}
+
+:root {
+  color-scheme: light;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  html {
+    scroll-behavior: smooth;
+  }
+}
+
+body {
+  background-color: var(--color-parchment);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+/* A little breathing room when jumping to an anchor (the nav is not sticky). */
+[id] {
+  scroll-margin-top: 32px;
+}
+
+::selection {
+  background: var(--color-ink);
+  color: var(--color-parchment);
+}
+
+/* Safety net: collapse all motion when the user asks for reduced motion. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
