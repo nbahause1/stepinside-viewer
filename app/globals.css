@@ -14,6 +14,7 @@
   --color-iron: #262626;
   --color-slate: #38464a;
   --color-mist: #e5e4e4;
+  --color-sand: #e7e1d7;
   --color-smoke: #8d8d8d;
   --color-pewter: #666666;
   --color-ember: #b75928;
@@ -49,6 +50,10 @@
 
 html {
   -webkit-text-size-adjust: 100%;
+  background-color: var(--color-paper);
+  /* No rubber-band overscroll, so neither end flashes a mismatched colour bar
+     (dark at the top hero, light at the bottom footer). */
+  overscroll-behavior: none;
 }
 
 @media (prefers-reduced-motion: no-preference) {
@@ -84,4 +89,11 @@ body {
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
+}
+
+/* While the first-load intro plays, the hero's resting logo is hidden so only
+   the intro lockup is visible; it appears the moment the intro hands off (the
+   intro lockup has glided onto this exact spot), making the swap seamless. */
+.intro-playing [data-brandmark] {
+  opacity: 0;
 }

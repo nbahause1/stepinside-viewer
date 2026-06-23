@@ -26,6 +26,7 @@ interface HeroD {
   sub: string;
   ctaPrimary: string;
   ctaSecondary: string;
+  scrollHint: string;
   emailPlaceholder: string;
   requesting: string;
   requestHint: string;
@@ -38,12 +39,23 @@ interface DemoItem {
   title: string;
   body: string;
 }
+interface DemosGate {
+  overline: string;
+  heading: string;
+  body: string;
+  cta: string;
+  placeholder: string;
+  sending: string;
+  success: string;
+  error: string;
+}
 interface DemosD {
   label: string;
   heading: string;
   intro: string;
   placeholder: string;
   items: DemoItem[];
+  gate: DemosGate;
 }
 
 interface Step {
@@ -60,6 +72,8 @@ interface ProcessD {
 interface AudienceItem {
   title: string;
   body: string;
+  /** Short pain-point punchline, shown on its own emphasised line. */
+  benefit: string;
 }
 interface AudienceD {
   label: string;
@@ -94,6 +108,7 @@ interface ContactD {
 
 interface FooterD {
   tagline: string;
+  about: string;
   impressum: string;
   datenschutz: string;
   rights: string;
@@ -130,6 +145,7 @@ const de: Dict = {
     sub: "Fotorealistische 3D-Touren, durch die sich Ihre Besucher frei bewegen.",
     ctaPrimary: "Demo anfordern",
     ctaSecondary: "Kontakt aufnehmen",
+    scrollHint: "Nach unten scrollen",
     emailPlaceholder: "Ihre E-Mail-Adresse",
     requesting: "Wird gesendet...",
     requestHint: "Exklusiver Zugang zu einer persönlichen Demo.",
@@ -147,8 +163,18 @@ const de: Dict = {
     label: "Demos",
     heading: "Sehen Sie selbst.",
     intro:
-      "Bewegen Sie sich direkt durch unsere Scans. Klicken, ziehen, hineingehen. Genau das erleben auch Ihre Besucher.",
+      "Bewegen Sie sich direkt durch unsere Scans. Klicken, ziehen, hineingehen. Genau dieses Erlebnis bekommen Ihre Gäste direkt auf Ihrer Website.",
     placeholder: "Live-Scan wird hier eingebettet",
+    gate: {
+      overline: "Begehbarer Scan",
+      heading: "Begehbaren Scan anfordern",
+      body: "Geben Sie Ihre E-Mail ein und wir senden Ihnen einen begehbaren Scan zum Erkunden.",
+      cta: "Scan anfordern",
+      placeholder: "Ihre E-Mail-Adresse",
+      sending: "Wird gesendet...",
+      success: "Danke. Ihr begehbarer Scan ist unterwegs.",
+      error: "Etwas ist schiefgelaufen. Bitte versuchen Sie es erneut.",
+    },
     items: [
       {
         title: "Hotel-Suite",
@@ -164,19 +190,19 @@ const de: Dict = {
     label: "Ablauf",
     heading: "Wie wir arbeiten.",
     intro:
-      "Von der Aufnahme bis zur fertigen Tour auf Ihrer Website. Transparent und ohne Aufwand für Sie.",
+      "Von der Aufnahme bis zur fertigen Tour auf Ihrer Website.\nTransparent und ohne Aufwand für Sie.",
     steps: [
       {
         title: "Aufnahme vor Ort",
-        body: "Wir scannen Ihre Innenräume und Außenbereiche vollständig. Ein Termin, keine Vorbereitung Ihrerseits.",
+        body: "Wir scannen Ihre Innenräume und Außenbereiche vollständig. Ein Termin reicht, vorbereiten müssen Sie nichts.",
       },
       {
         title: "Aufbereitung",
         body: "Wir bereinigen und optimieren den Scan, bis er flüssig auf jedem Gerät läuft.",
       },
       {
-        title: "Anreicherung",
-        body: "Wir setzen Hotspots mit Informationen und legen eine geführte Kamerafahrt durch die Highlights an.",
+        title: "Abstimmung",
+        body: "Wir prüfen die Tour final und stimmen sie mit Ihnen ab, inklusive einer Korrekturschleife.",
       },
       {
         title: "Lieferung",
@@ -186,48 +212,54 @@ const de: Dict = {
   },
   audience: {
     label: "Für wen",
-    heading: "Für alle, die Räume haben.",
+    heading: "Für alle, die Räume und Flächen haben.",
     intro:
-      "Wenn Menschen Ihren Raum erleben sollen, bevor sie kommen, ist eine begehbare Tour der überzeugendste Weg.",
+      "Wenn Menschen Ihre Räume und Außenbereiche erleben sollen, bevor sie kommen, ist eine begehbare Tour der überzeugendste Weg.",
     items: [
       {
         title: "Hotels",
         body: "Zimmer und Suiten erlebbar machen, bevor gebucht wird.",
+        benefit: "Mehr Direktbuchungen.",
       },
       {
         title: "Ferienwohnungen",
-        body: "Gäste sehen genau, was sie erwartet. Weniger Rückfragen.",
+        body: "Gäste sehen genau, was sie erwartet, drinnen wie draußen.",
+        benefit: "Weniger Rückfragen.",
       },
       {
         title: "Restaurants & Cafés",
         body: "Atmosphäre zeigen, Bereiche und Tische begehbar machen.",
+        benefit: "Mehr Reservierungen.",
       },
       {
         title: "Immobilien",
         body: "Interessenten gehen durch das Objekt, bevor sie anreisen.",
+        benefit: "Qualifiziertere Anfragen.",
       },
       {
         title: "Event-Locations",
         body: "Veranstalter planen im echten Raum, aus der Ferne.",
+        benefit: "Schnellere Zusagen.",
       },
       {
         title: "Einzelhandel & Showrooms",
         body: "Flächen und Sortiment rund um die Uhr begehbar.",
+        benefit: "Mehr Reichweite.",
       },
     ],
   },
   about: {
     label: "Über uns",
-    heading: "Zwei Welten, eine Idee.",
+    heading: "Wie StepInside entstanden ist.",
     paragraphs: [
-      "Unser Gründer ist in einer Hotelfamilie aufgewachsen. Tourismus und Gastfreundschaft waren von Kindheit an Alltag, gelebte Praxis im Familienunternehmen, nicht Theorie.",
-      "Heute ist er in der Immobilienbranche tätig und verbindet zwei Welten: Hospitality und Immobilien. Aus dieser doppelten Perspektive entstand StepInside.",
-      "Die Frage war einfach: Wie lassen sich Hotels, Ferienhäuser und Immobilien authentischer und überzeugender zeigen, als Fotos es je könnten? Die Antwort sind begehbare 3D-Touren, die Räume so zeigen, wie sie wirklich sind. Inklusive der Außenbereiche, die in virtuellen Touren bisher fehlten.",
+      "Ich bin in einer Hotelfamilie groß geworden. Gastfreundschaft und der Umgang mit Gästen gehörten bei uns von klein auf zum Alltag. Schon früh habe ich gemerkt, wie viel der erste Eindruck ausmacht, wenn jemand einen Raum zum ersten Mal betritt.",
+      "Heute arbeite ich in der Immobilienbranche, und dort begegnet mir immer wieder dasselbe Problem: Fotos zeigen nie das ganze Bild. Man sieht ein paar Ausschnitte, aber nicht, wie sich ein Raum wirklich anfühlt. Aus diesen beiden Welten, Hotellerie und Immobilien, ist StepInside entstanden.",
+      "Unsere begehbaren 3D-Touren lösen genau das. Man bewegt sich frei durch das Objekt, drinnen wie draußen, und bekommt ein echtes Gefühl dafür, wie es vor Ort ist, ohne selbst dort gewesen zu sein. Gerade die Außenbereiche, die in virtuellen Touren bisher gefehlt haben, gehören für uns selbstverständlich dazu.",
     ],
   },
   contact: {
     label: "Kontakt",
-    heading: "Sprechen wir über Ihre Räume.",
+    heading: "Sprechen wir über Ihre Projekte.",
     intro:
       "Erzählen Sie uns kurz von Ihrem Objekt. Wir melden uns mit den nächsten Schritten.",
     nameLabel: "Name",
@@ -246,6 +278,7 @@ const de: Dict = {
   },
   footer: {
     tagline: "Begehbare 3D-Touren für Räume und Flächen aller Art.",
+    about: "Über uns",
     impressum: "Impressum",
     datenschutz: "Datenschutz",
     rights: "Alle Rechte vorbehalten.",
@@ -272,6 +305,7 @@ const en: Dict = {
     sub: "Photorealistic 3D tours your visitors can walk through freely.",
     ctaPrimary: "Request a demo",
     ctaSecondary: "Get in touch",
+    scrollHint: "Scroll down",
     emailPlaceholder: "Your email address",
     requesting: "Sending...",
     requestHint: "Exclusive access to a personal demo.",
@@ -289,8 +323,18 @@ const en: Dict = {
     label: "Demos",
     heading: "See for yourself.",
     intro:
-      "Move through our scans right here. Click, drag, step inside. Exactly what your visitors will experience.",
+      "Move through our scans right here. Click, drag, step inside. Your guests get this exact experience, right on your website.",
     placeholder: "Live scan embeds here",
+    gate: {
+      overline: "Walkable scan",
+      heading: "Request a walkable scan",
+      body: "Enter your email and we will send you a walkable scan to explore.",
+      cta: "Request scan",
+      placeholder: "Your email address",
+      sending: "Sending...",
+      success: "Thank you. Your walkable scan is on its way.",
+      error: "Something went wrong. Please try again.",
+    },
     items: [
       {
         title: "Hotel suite",
@@ -306,19 +350,19 @@ const en: Dict = {
     label: "Process",
     heading: "How we work.",
     intro:
-      "From the on-site capture to the finished tour on your website. Transparent, with no effort on your side.",
+      "From the on-site capture to the finished tour on your website.\nTransparent, with no effort on your side.",
     steps: [
       {
         title: "On-site capture",
-        body: "We scan your interiors and outdoor areas in full. One appointment, no preparation on your part.",
+        body: "We scan your interiors and outdoor areas in full. One appointment is enough, there's nothing for you to prepare.",
       },
       {
         title: "Refinement",
         body: "We clean up and optimise the scan until it runs smoothly on every device.",
       },
       {
-        title: "Enrichment",
-        body: "We add hotspots with information and a guided camera path through the highlights.",
+        title: "Review",
+        body: "We review the final tour and sign it off with you, including one round of revisions.",
       },
       {
         title: "Delivery",
@@ -328,48 +372,54 @@ const en: Dict = {
   },
   audience: {
     label: "Who it's for",
-    heading: "For anyone with a space.",
+    heading: "For anyone with spaces, indoors and out.",
     intro:
-      "When people should experience your space before they arrive, a walkable tour is the most convincing way.",
+      "When people should experience your indoor and outdoor spaces before they arrive, a walkable tour is the most convincing way.",
     items: [
       {
         title: "Hotels",
         body: "Make rooms and suites experienceable before the booking.",
+        benefit: "More direct bookings.",
       },
       {
         title: "Holiday rentals",
-        body: "Guests see exactly what to expect. Fewer questions.",
+        body: "Guests see exactly what to expect, indoors and out.",
+        benefit: "Fewer questions.",
       },
       {
         title: "Restaurants & cafés",
         body: "Show the atmosphere, make areas and tables walkable.",
+        benefit: "More reservations.",
       },
       {
         title: "Real estate",
         body: "Prospects walk through the property before they travel.",
+        benefit: "More qualified enquiries.",
       },
       {
         title: "Event venues",
         body: "Organisers plan in the real space, remotely.",
+        benefit: "Faster commitments.",
       },
       {
         title: "Retail & showrooms",
         body: "Floors and ranges, walkable around the clock.",
+        benefit: "More reach.",
       },
     ],
   },
   about: {
     label: "About",
-    heading: "Two worlds, one idea.",
+    heading: "How StepInside came to be.",
     paragraphs: [
-      "Our founder grew up in a hotel family. Tourism and hospitality were everyday life from childhood, lived practice in the family business, not theory.",
-      "Today he works in real estate and connects two worlds: hospitality and property. StepInside grew out of that double perspective.",
-      "The question was simple: how can hotels, holiday homes and properties be shown more authentically and convincingly than photos ever could? The answer is walkable 3D tours that show spaces as they really are. Including the outdoor areas that virtual tours have left out until now.",
+      "I grew up in a hotel family. Hospitality and looking after guests were part of everyday life for us from early on. I learned quickly how much a first impression matters the moment someone walks into a room for the first time.",
+      "Today I work in real estate, and I keep running into the same problem: photos never tell the whole story. You see a few angles, but not how a space actually feels. StepInside grew out of those two worlds, hospitality and property.",
+      "Our walkable 3D tours fix exactly that. You move freely through the space, inside and out, and get a real sense of how it is on site without ever having been there. The outdoor areas that virtual tours have always left out are a natural part of it for us.",
     ],
   },
   contact: {
     label: "Contact",
-    heading: "Let's talk about your spaces.",
+    heading: "Let's talk about your projects.",
     intro:
       "Tell us briefly about your property. We will get back to you with the next steps.",
     nameLabel: "Name",
@@ -387,6 +437,7 @@ const en: Dict = {
   },
   footer: {
     tagline: "Walkable 3D tours for spaces of every kind.",
+    about: "About",
     impressum: "Imprint",
     datenschutz: "Privacy",
     rights: "All rights reserved.",

@@ -16,6 +16,10 @@ export const config = {
   // Leave a slot empty ("") to render a labelled placeholder instead of an iframe.
   demoEmbeds: ["", ""] as string[], // TODO: paste embed URLs
 
+  // Scan teaser stills shown in the Demos section (real frames from the scan video).
+  // Swap these for per-object scan renders when available.
+  demoImages: ["/scan-1.jpg", "/scan-2.jpg"] as string[],
+
   // Legal entity data used on the Impressum page.
   legal: {
     company: "StepInside",
@@ -37,4 +41,5 @@ export const SECTION_IDS = {
   audience: "fuer-wen",
   about: "ueber-uns",
   contact: "kontakt",
+  gate: "demo-anfordern",
 } as const;

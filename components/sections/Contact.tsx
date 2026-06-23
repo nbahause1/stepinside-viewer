@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import type { FormEvent } from "react";
-import { EnvelopeSimple, Phone } from "@phosphor-icons/react";
+import Link from "next/link";
 import { useLang } from "@/components/i18n/LanguageProvider";
 import PillButton from "@/components/ui/PillButton";
 import Reveal from "@/components/ui/Reveal";
@@ -16,6 +16,7 @@ import { config, SECTION_IDS } from "@/lib/config";
 */
 export default function Contact() {
   const { t } = useLang();
+  const year = new Date().getFullYear();
   const [status, setStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
@@ -45,7 +46,7 @@ export default function Contact() {
   }
 
   const fieldClass =
-    "mt-2 w-full rounded-[8px] border border-mist bg-paper px-4 py-3 text-[15px] text-ink transition-colors placeholder:text-smoke focus:border-ink focus:outline-none focus:ring-1 focus:ring-ink";
+    "mt-2 w-full rounded-[8px] border border-char bg-paper px-4 py-3 text-[15px] text-ink transition-colors placeholder:text-smoke focus:border-ink focus:outline-none focus:ring-1 focus:ring-ink";
 
   return (
     <section id={SECTION_IDS.contact} className="bg-paper">
@@ -127,39 +128,135 @@ export default function Contact() {
             </form>
           </Reveal>
 
-          {/* RIGHT: direct contact details. */}
-          <Reveal as="div" delay={0.05}>
-            <h3 className="text-[14px] tracking-[0.12px] text-smoke">{t.contact.directLabel}</h3>
-            <div className="mt-5 space-y-4 text-[15px]">
-              <p className="flex items-center gap-2">
-                <EnvelopeSimple size={16} aria-hidden className="text-pewter" />
-                <a href={"mailto:" + config.email} className="text-ember hover:opacity-70">
-                  {config.email}
-                </a>
+          {/* RIGHT: big StepInside wordmark filling the empty space. */}
+          <Reveal
+            as="div"
+            delay={0.05}
+            className="flex h-full flex-col justify-end gap-12"
+          >
+            {/* Big brand wordmark filling the empty right-hand space. The
+                lg:mb lifts it so its bottom lines up with the message box's
+                bottom edge (clearing the send-button area below the textarea). */}
+            <div className="lg:mb-[81px] lg:text-right">
+              <div className="flex items-center gap-[clamp(1rem,2.5vw,2rem)] lg:justify-end">
+                <span className="text-[clamp(2rem,5.5vw,3.5rem)] font-light leading-[0.9] tracking-[-0.02em] text-ink">
+                  StepInside
+                </span>
+                {/* Brand mark: a diamond that bounces — it hops up (ease-out,
+                    decelerating like gravity), rotates 90° clockwise mid-air,
+                    and falls back down (ease-in, accelerating). A SEPARATE
+                    ground shadow stays on the floor: it shrinks + fades while the
+                    diamond is airborne and pops bigger + darker on impact. The
+                    diamond is 4-fold symmetric, so the loop's invisible reset
+                    from 135°→45° reads as continuous clockwise ticking.
+                    Keyframes are inlined so they survive the Tailwind v4 build;
+                    the global reduced-motion override stills them. */}
+                <style>{`
+                  @keyframes diamondBounce {
+                    0%, 33% {
+                      transform: translateY(0) rotate(45deg);
+                      animation-timing-function: cubic-bezier(0.215, 0.61, 0.355, 1);
+                    }
+                    51% {
+                      transform: translateY(-20px) rotate(90deg);
+                      animation-timing-function: cubic-bezier(0.55, 0.085, 0.68, 0.53);
+                    }
+                    65% {
+                      transform: translateY(0) rotate(135deg);
+                      animation-timing-function: cubic-bezier(0.215, 0.61, 0.355, 1);
+                    }
+                    72% {
+                      transform: translateY(-5px) rotate(135deg);
+                      animation-timing-function: cubic-bezier(0.55, 0.085, 0.68, 0.53);
+                    }
+                    78%, 100% {
+                      transform: translateY(0) rotate(135deg);
+                    }
+                  }
+                  @keyframes diamondShadow {
+                    0%, 33% {
+                      transform: translateX(-50%) scaleX(1);
+                      opacity: 0.3;
+                      animation-timing-function: cubic-bezier(0.3, 0, 0.25, 1);
+                    }
+                    51% {
+                      transform: translateX(-50%) scaleX(0.45);
+                      opacity: 0.07;
+                      animation-timing-function: cubic-bezier(0.5, 0.05, 0.7, 0.5);
+                    }
+                    65% {
+                      transform: translateX(-50%) scaleX(1.12);
+                      opacity: 0.36;
+                    }
+                    72% {
+                      transform: translateX(-50%) scaleX(0.82);
+                      opacity: 0.24;
+                    }
+                    78%, 100% {
+                      transform: translateX(-50%) scaleX(1);
+                      opacity: 0.3;
+                    }
+                  }
+                `}</style>
+                <span className="relative inline-flex w-[clamp(1.5rem,3.5vw,2.5rem)] shrink-0 items-center justify-center">
+                  {/* Ground contact shadow (stays on the floor). */}
+                  <span
+                    aria-hidden
+                    className="absolute left-1/2 top-[calc(100%+3px)] h-[6px] w-[85%] rounded-[50%] bg-ink blur-[2.5px]"
+                    style={{
+                      animation: "diamondShadow 1.5s linear infinite",
+                    }}
+                  />
+                  {/* The bouncing, spinning diamond. */}
+                  <span
+                    aria-hidden
+                    className="block aspect-square w-full bg-ink"
+                    style={{
+                      animation: "diamondBounce 1.5s linear infinite",
+                    }}
+                  />
+                </span>
+              </div>
+              <p className="mt-3 max-w-[34ch] text-[15px] text-pewter lg:ml-auto">
+                {t.footer.tagline}
               </p>
-              <p className="flex items-center gap-2">
-                <Phone size={16} aria-hidden className="text-pewter" />
-                <a href={"tel:" + config.phoneHref} className="text-ember hover:opacity-70">
-                  {config.phone}
-                </a>
-              </p>
-              {/* The booking pill only renders once config.calendlyUrl is set (TODO). */}
-              {config.calendlyUrl ? (
-                <p className="mt-2 block">
-                  <PillButton
-                    variant="ghost"
-                    tone="ink"
-                    href={config.calendlyUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    {t.contact.bookLabel}
-                  </PillButton>
-                </p>
-              ) : null}
             </div>
           </Reveal>
         </div>
+
+        {/* Thin legal strip across the full width: Impressum / Datenschutz on
+            the left, copyright on the right. */}
+        <Reveal
+          as="div"
+          className="mt-16 flex flex-wrap items-center justify-between gap-4 border-t border-sand pt-6 md:mt-20"
+        >
+          <nav
+            aria-label={t.footer.legalAria}
+            className="flex flex-wrap items-center gap-6"
+          >
+            <Link
+              href="/ueber-uns"
+              className="text-[14px] text-ink transition-colors hover:text-ember"
+            >
+              {t.footer.about}
+            </Link>
+            <Link
+              href="/impressum"
+              className="text-[14px] text-ink transition-colors hover:text-ember"
+            >
+              {t.footer.impressum}
+            </Link>
+            <Link
+              href="/datenschutz"
+              className="text-[14px] text-ink transition-colors hover:text-ember"
+            >
+              {t.footer.datenschutz}
+            </Link>
+          </nav>
+          <p className="text-[13px] text-smoke">
+            {"©"} {year} StepInside
+          </p>
+        </Reveal>
       </div>
     </section>
   );
