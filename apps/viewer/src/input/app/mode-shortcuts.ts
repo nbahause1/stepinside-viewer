@@ -18,6 +18,14 @@ class ModeShortcuts {
         if (!global) return;
         const { state, events } = global;
 
+        // While the concierge chat is open, the visitor is typing — no viewer
+        // shortcut (mode switch, reset, help, …) may fire, regardless of where
+        // focus currently sits. This bulletproofs typing against any stray key
+        // that escapes the chat input's own stopPropagation.
+        if (state.chatOpen) {
+            return;
+        }
+
         if (event.key === 'Escape') {
             if (this._pointerLock?.recentlyExitedCapture) {
                 // already handled by pointerlockchange
