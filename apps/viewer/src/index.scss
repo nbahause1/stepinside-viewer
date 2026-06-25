@@ -547,13 +547,13 @@ body.tutorial-active #walkHint {
 
 #chatPill {
     position: fixed;
-    right: max(14px, env(safe-area-inset-right));
+    left: max(14px, env(safe-area-inset-left));
     bottom: max(14px, env(safe-area-inset-bottom));
     z-index: 16;                 // above controlDome (15), below brandDome (20)
     pointer-events: none;        // wrapper is inert; only toggle/panel are live
     display: flex;
     flex-direction: column;
-    align-items: flex-end;
+    align-items: flex-start;     // bottom-left corner; panel expands up + to the right
     gap: 10px;
 
     // dark frosted glass pill, matching the brand + control domes
@@ -611,6 +611,11 @@ body.tutorial-active #walkHint {
 
     #chatPanel {
         pointer-events: auto;
+        // anchored to the toggle's bottom-left so the float button stays pinned
+        // at bar height; the panel floats above it without affecting its layout.
+        position: absolute;
+        left: 0;
+        bottom: 0;
         width: min(360px, calc(100vw - 28px));
         height: min(520px, calc(100vh - 120px));
         display: flex;
@@ -630,7 +635,7 @@ body.tutorial-active #walkHint {
         // entrance: hidden + nudged down until `.is-open` (matches #tutorial)
         opacity: 0;
         transform: translateY(10px) scale(0.98);
-        transform-origin: bottom right;
+        transform-origin: bottom left;
         visibility: hidden;
         pointer-events: none;
         transition:
