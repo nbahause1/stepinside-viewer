@@ -1,0 +1,79 @@
+{
+  "name": "@playcanvas/supersplat-viewer",
+  "version": "1.26.3",
+  "author": "PlayCanvas <support@playcanvas.com>",
+  "homepage": "https://github.com/playcanvas/supersplat-viewer#readme",
+  "description": "Viewer for https://superspl.at",
+  "keywords": [
+    "playcanvas",
+    "ply",
+    "gaussian",
+    "splat",
+    "viewer"
+  ],
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./settings": {
+      "types": "./dist/settings.d.ts",
+      "import": "./dist/settings.js"
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/playcanvas/supersplat-viewer.git"
+  },
+  "bugs": {
+    "url": "https://github.com/playcanvas/supersplat-viewer/issues"
+  },
+  "files": [
+    "dist",
+    "public",
+    "LICENSE",
+    "package.json",
+    "README.md"
+  ],
+  "devDependencies": {
+    "@playcanvas/eslint-config": "2.1.0",
+    "@rollup/plugin-json": "6.1.0",
+    "@rollup/plugin-node-resolve": "16.0.3",
+    "@rollup/plugin-typescript": "12.3.0",
+    "@typescript-eslint/eslint-plugin": "8.61.1",
+    "@typescript-eslint/parser": "8.61.1",
+    "autoprefixer": "10.5.0",
+    "concurrently": "9.2.1",
+    "eslint": "9.39.4",
+    "globals": "17.6.0",
+    "playcanvas": "2.19.7",
+    "postcss": "8.5.15",
+    "publint": "0.3.21",
+    "rollup": "4.62.0",
+    "rollup-plugin-copy": "3.5.0",
+    "rollup-plugin-scss": "4.0.1",
+    "rollup-plugin-string": "3.0.0",
+    "sass": "1.101.0",
+    "serve": "14.2.6",
+    "typescript": "5.9.3"
+  },
+  "scripts": {
+    "build": "rollup -c",
+    "develop": "concurrently --kill-others \"npm run watch\" \"npm run serve\"",
+    "lint": "eslint src rollup.config.mjs eslint.config.mjs",
+    "lint:fix": "eslint src rollup.config.mjs eslint.config.mjs --fix",
+    "publint": "publint",
+    "serve": "serve public -C -c ../serve.json",
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "type:check": "tsc --noEmit",
+    "watch": "rollup -c -w"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

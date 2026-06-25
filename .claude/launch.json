@@ -4,9 +4,15 @@
     {
       "name": "stepinside",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
+      "runtimeArgs": ["--prefix", "apps/website", "run", "dev"],
       "port": 3000,
       "autoPort": true
+    },
+    {
+      "name": "viewer",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["serve", "apps/viewer/public", "-l", "4500", "-C"],
+      "port": 4500
     }
   ]
 }

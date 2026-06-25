@@ -1,0 +1,83 @@
+{
+  "propertyId": "example-fewo",
+  "displayName": "Ferienwohnung Seeblick",
+  "rooms": [
+    { "id": "living", "label": { "de": "Wohnzimmer", "en": "Living room" } },
+    { "id": "kitchen", "label": { "de": "Küche", "en": "Kitchen" } },
+    { "id": "bedroom", "label": { "de": "Schlafzimmer", "en": "Bedroom" } },
+    { "id": "bathroom", "label": { "de": "Badezimmer", "en": "Bathroom" } },
+    { "id": "balcony", "label": { "de": "Balkon", "en": "Balcony" } }
+  ],
+  "facts": [
+    {
+      "id": "wifi",
+      "topic": "wifi",
+      "rooms": [],
+      "text": "WLAN: Netzwerkname (SSID) 'Seeblick-Gast', Passwort 'SonneUndSee2024'. Der Router steht im Wohnzimmer im TV-Schrank. Bei Problemen den Router 30 Sekunden vom Strom trennen und neu starten."
+    },
+    {
+      "id": "checkin",
+      "topic": "house-rules",
+      "rooms": [],
+      "text": "Check-in ist ab 15:00 Uhr möglich. Der Schlüssel liegt in einem Schlüsseltresor neben der Eingangstür; den Tresor-Code erhalten Sie am Anreisetag per SMS vom Gastgeber. Eine frühere Anreise bitte vorher absprechen."
+    },
+    {
+      "id": "checkout",
+      "topic": "house-rules",
+      "rooms": [],
+      "text": "Check-out ist bis 10:00 Uhr. Bitte Geschirr spülen, den Müll heraustragen, Fenster schließen und die Schlüssel wieder im Schlüsseltresor verstauen."
+    },
+    {
+      "id": "parking",
+      "topic": "parking",
+      "rooms": [],
+      "text": "Zur Wohnung gehört ein kostenloser Stellplatz Nr. 4 direkt vor dem Haus. Wohnmobile oder Anhänger sind auf dem Stellplatz nicht erlaubt. Zusätzliche Autos können kostenlos in der Seestraße geparkt werden."
+    },
+    {
+      "id": "heating",
+      "topic": "heating",
+      "rooms": ["living", "bedroom", "bathroom"],
+      "text": "Geheizt wird über Fußbodenheizung. Das Thermostat befindet sich im Flur neben der Wohnzimmertür; mit dem Drehregler stellen Sie die gewünschte Temperatur ein. Es dauert etwa eine Stunde, bis die gewünschte Wärme spürbar ist."
+    },
+    {
+      "id": "trash",
+      "topic": "trash",
+      "rooms": ["kitchen"],
+      "text": "Mülltrennung: Restmüll (grau), Papier (blau) und Gelber Sack stehen im Schuppen links neben dem Haus. Biomüll kommt in den kleinen Eimer unter der Spüle in der Küche. Abholung ist mittwochs."
+    },
+    {
+      "id": "kitchen-equipment",
+      "topic": "kitchen",
+      "rooms": ["kitchen"],
+      "text": "Die Küche ist voll ausgestattet: Geschirrspüler, Backofen mit Ceranfeld, Mikrowelle, Wasserkocher und Kaffeemaschine (Filterkaffee). Grundausstattung wie Salz, Pfeffer, Öl und Kaffeefilter ist vorhanden. Spültabs liegen unter der Spüle."
+    },
+    {
+      "id": "bathroom-equipment",
+      "topic": "bathroom",
+      "rooms": ["bathroom"],
+      "text": "Im Bad gibt es eine Dusche, einen Föhn (im Schrank unter dem Waschbecken) sowie Handtücher für jeden Gast. Frische Handtücher liegen im Schrank im Schlafzimmer."
+    },
+    {
+      "id": "balcony-view",
+      "topic": "amenities",
+      "rooms": ["balcony"],
+      "text": "Der Balkon liegt nach Westen und bietet direkten Seeblick - ideal für den Sonnenuntergang. Gartenmöbel und ein kleiner Tisch stehen bereit. Bitte beim Verlassen die Balkontür schließen."
+    },
+    {
+      "id": "smoking-pets",
+      "topic": "house-rules",
+      "rooms": [],
+      "text": "Rauchen ist in der gesamten Wohnung nicht gestattet, auf dem Balkon jedoch erlaubt. Haustiere sind nach vorheriger Absprache mit dem Gastgeber willkommen."
+    },
+    {
+      "id": "emergency",
+      "topic": "emergency",
+      "rooms": [],
+      "text": "Im Notfall: allgemeine Notrufnummer 112 (Feuerwehr/Rettung) und 110 (Polizei). Den Gastgeber erreichen Sie unter der Telefonnummer, die auf dem Infoblatt am Kühlschrank steht. Das nächste Krankenhaus ist in Seebruck, etwa 10 Minuten mit dem Auto."
+    }
+  ],
+  "fallback": {
+    "de": "Das weiß ich leider nicht. Bitte wenden Sie sich an Ihren Gastgeber - die Kontaktdaten finden Sie auf dem Infoblatt am Kühlschrank.",
+    "en": "I'm afraid I don't know that. Please contact your host - you'll find the contact details on the info sheet on the fridge."
+  }
+}

@@ -1,0 +1,125 @@
+{
+  "version": 2,
+  "tonemapping": "none",
+  "highPrecisionRendering": false,
+  "background": {
+    "color": [
+      0.05,
+      0.05,
+      0.06
+    ]
+  },
+  "postEffectSettings": {
+    "sharpness": {
+      "enabled": false,
+      "amount": 0
+    },
+    "bloom": {
+      "enabled": false,
+      "intensity": 1,
+      "blurLevel": 2
+    },
+    "grading": {
+      "enabled": false,
+      "brightness": 0,
+      "contrast": 1,
+      "saturation": 1,
+      "tint": [
+        1,
+        1,
+        1
+      ]
+    },
+    "vignette": {
+      "enabled": false,
+      "intensity": 0.5,
+      "inner": 0.3,
+      "outer": 0.75,
+      "curvature": 1
+    },
+    "fringing": {
+      "enabled": false,
+      "intensity": 0.5
+    }
+  },
+  "animTracks": [],
+  "cameras": [
+    {
+      "initial": {
+        "position": [
+          3.24,
+          1.2,
+          0.9
+        ],
+        "target": [
+          3.99,
+          1.05,
+          5.85
+        ],
+        "fov": 80
+      }
+    }
+  ],
+  "annotations": [],
+  "startMode": "default",
+  "concierge": {
+    "endpoint": "http://localhost:8787/concierge",
+    "propertyId": "example-fewo"
+  },
+  "pois": [
+    {
+      "id": "window",
+      "label": "Fenster",
+      "keywords": [
+        "fenster",
+        "window",
+        "windows",
+        "balkon",
+        "balcony",
+        "aussicht",
+        "view",
+        "tageslicht",
+        "licht"
+      ],
+      "camera": {
+        "position": [
+          3.2,
+          1.55,
+          1.0
+        ],
+        "target": [
+          5.147,
+          1.475,
+          1.449
+        ],
+        "fov": 96
+      }
+    },
+    {
+      "id": "door",
+      "label": "Tür",
+      "keywords": [
+        "tür",
+        "türen",
+        "door",
+        "doors",
+        "eingang",
+        "entrance",
+        "ausgang"
+      ],
+      "camera": {
+        "position": [
+          3.6,
+          1.55,
+          1.4
+        ],
+        "target": [
+          1.652,
+          1.347,
+          1.806
+        ],
+        "fov": 96
+      }
+    }
+  ]
+}

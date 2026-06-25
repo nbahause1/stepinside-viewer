@@ -1,0 +1,20 @@
+name = "concierge-api"
+main = "src/worker.ts"
+compatibility_date = "2026-06-01"
+compatibility_flags = ["nodejs_compat"]
+
+# ANTHROPIC_API_KEY is provided as a secret, never committed:
+#   wrangler secret put ANTHROPIC_API_KEY
+# For `wrangler dev`, place it in .dev.vars (gitignored):
+#   ANTHROPIC_API_KEY=sk-...
+#
+# Optional: comma-separated origin allowlist for CORS. If unset, a built-in
+# localhost dev allowlist is used.
+#   ALLOWED_ORIGINS=https://viewer.example.com
+
+# Production rate limiting should use a KV namespace or Durable Object so that
+# limits are shared across isolates (see KvRateLimiter in src/ratelimit.ts).
+# Example once provisioned:
+# [[kv_namespaces]]
+# binding = "RATE_LIMIT"
+# id = "<kv-namespace-id>"

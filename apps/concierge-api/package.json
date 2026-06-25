@@ -1,0 +1,23 @@
+{
+  "name": "concierge-api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Server-side AI concierge endpoint for the StepInside Gaussian-splat viewer. Injects the system prompt + per-property knowledge base and calls Claude. The Anthropic API key never reaches the browser.",
+  "scripts": {
+    "dev": "node --env-file=.dev.vars --import tsx src/dev-server.ts",
+    "dev:worker": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "type:check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.106.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260625.1",
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0",
+    "wrangler": "^4.105.0"
+  }
+}

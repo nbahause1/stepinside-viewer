@@ -1,0 +1,9 @@
+# Secrets — never commit
+.dev.vars
+.env*
+
+# Dependencies & build artifacts
+node_modules/
+dist/
+.wrangler/
+*.tsbuildinfo
