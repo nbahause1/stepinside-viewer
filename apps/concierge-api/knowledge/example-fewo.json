@@ -2,11 +2,41 @@
   "propertyId": "example-fewo",
   "displayName": "Ferienwohnung Seeblick",
   "rooms": [
-    { "id": "living", "label": { "de": "Wohnzimmer", "en": "Living room" } },
-    { "id": "kitchen", "label": { "de": "Küche", "en": "Kitchen" } },
-    { "id": "bedroom", "label": { "de": "Schlafzimmer", "en": "Bedroom" } },
-    { "id": "bathroom", "label": { "de": "Badezimmer", "en": "Bathroom" } },
-    { "id": "balcony", "label": { "de": "Balkon", "en": "Balcony" } }
+    {
+      "id": "living",
+      "label": {
+        "de": "Wohnzimmer",
+        "en": "Living room"
+      }
+    },
+    {
+      "id": "kitchen",
+      "label": {
+        "de": "Küche",
+        "en": "Kitchen"
+      }
+    },
+    {
+      "id": "bedroom",
+      "label": {
+        "de": "Schlafzimmer",
+        "en": "Bedroom"
+      }
+    },
+    {
+      "id": "bathroom",
+      "label": {
+        "de": "Badezimmer",
+        "en": "Bathroom"
+      }
+    },
+    {
+      "id": "balcony",
+      "label": {
+        "de": "Balkon",
+        "en": "Balcony"
+      }
+    }
   ],
   "facts": [
     {
@@ -36,31 +66,43 @@
     {
       "id": "heating",
       "topic": "heating",
-      "rooms": ["living", "bedroom", "bathroom"],
+      "rooms": [
+        "living",
+        "bedroom",
+        "bathroom"
+      ],
       "text": "Geheizt wird über Fußbodenheizung. Das Thermostat befindet sich im Flur neben der Wohnzimmertür; mit dem Drehregler stellen Sie die gewünschte Temperatur ein. Es dauert etwa eine Stunde, bis die gewünschte Wärme spürbar ist."
     },
     {
       "id": "trash",
       "topic": "trash",
-      "rooms": ["kitchen"],
+      "rooms": [
+        "kitchen"
+      ],
       "text": "Mülltrennung: Restmüll (grau), Papier (blau) und Gelber Sack stehen im Schuppen links neben dem Haus. Biomüll kommt in den kleinen Eimer unter der Spüle in der Küche. Abholung ist mittwochs."
     },
     {
       "id": "kitchen-equipment",
       "topic": "kitchen",
-      "rooms": ["kitchen"],
+      "rooms": [
+        "kitchen"
+      ],
       "text": "Die Küche ist voll ausgestattet: Geschirrspüler, Backofen mit Ceranfeld, Mikrowelle, Wasserkocher und Kaffeemaschine (Filterkaffee). Grundausstattung wie Salz, Pfeffer, Öl und Kaffeefilter ist vorhanden. Spültabs liegen unter der Spüle."
     },
     {
       "id": "bathroom-equipment",
       "topic": "bathroom",
-      "rooms": ["bathroom"],
+      "rooms": [
+        "bathroom"
+      ],
       "text": "Im Bad gibt es eine Dusche, einen Föhn (im Schrank unter dem Waschbecken) sowie Handtücher für jeden Gast. Frische Handtücher liegen im Schrank im Schlafzimmer."
     },
     {
       "id": "balcony-view",
       "topic": "amenities",
-      "rooms": ["balcony"],
+      "rooms": [
+        "balcony"
+      ],
       "text": "Der Balkon liegt nach Westen und bietet direkten Seeblick - ideal für den Sonnenuntergang. Gartenmöbel und ein kleiner Tisch stehen bereit. Bitte beim Verlassen die Balkontür schließen."
     },
     {
@@ -74,6 +116,18 @@
       "topic": "emergency",
       "rooms": [],
       "text": "Im Notfall: allgemeine Notrufnummer 112 (Feuerwehr/Rettung) und 110 (Polizei). Den Gastgeber erreichen Sie unter der Telefonnummer, die auf dem Infoblatt am Kühlschrank steht. Das nächste Krankenhaus ist in Seebruck, etwa 10 Minuten mit dem Auto."
+    },
+    {
+      "id": "window-size",
+      "topic": "dimensions",
+      "rooms": [],
+      "text": "Die Fenster sind 2,72 m hoch und 1,25 m breit – bodentiefe Flügelfenster mit französischem Balkon."
+    },
+    {
+      "id": "door-size",
+      "topic": "dimensions",
+      "rooms": [],
+      "text": "Die Türen sind 2,77 m hoch und 1,48 m breit."
     }
   ],
   "fallback": {
