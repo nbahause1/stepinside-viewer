@@ -160,8 +160,12 @@ const initCanvas = (global: Global) => {
     const { app, events, state } = global;
     const { canvas } = app.graphicsDevice;
 
-    // maximum pixel dimension we will allow along the shortest screen dimension based on platform
-    const maxPixelDim = platform.mobile ? 1080 : 2160;
+    // maximum pixel dimension we will allow along the shortest screen dimension.
+    // WebGL (Safari) can't GPU-sort splats and is fill-rate bound on Retina, so
+    // cap the render resolution much harder there to keep it smooth; WebGPU
+    // (Chrome/Android) keeps full resolution.
+    const webgl = global.renderer === 'webgl';
+    const maxPixelDim = platform.mobile ? (webgl ? 768 : 1080) : (webgl ? 1080 : 2160);
 
     // cap pixel ratio to limit resolution on high-DPI devices
     const calcPixelRatio = () => Math.min(maxPixelDim / Math.min(screen.width, screen.height), window.devicePixelRatio);
