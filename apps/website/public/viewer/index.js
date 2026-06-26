@@ -90991,10 +90991,13 @@ const initCanvas = (global) => {
     const { canvas } = app.graphicsDevice;
     // maximum pixel dimension we will allow along the shortest screen dimension.
     // WebGL (Safari) can't GPU-sort splats and is fill-rate bound on Retina, so
-    // cap the render resolution much harder there to keep it smooth; WebGPU
-    // (Chrome/Android) keeps full resolution.
+    // cap the render resolution much harder there to keep it smooth. WebGPU
+    // (Chrome/Android) GPU-sorts and stays sharp, but full Retina (2160) is
+    // fill-rate bound enough to drop frames — and splats are soft blobs with no
+    // crisp detail to resolve, so a modest 1536 cap restores 60fps at nearly
+    // invisible quality cost.
     const webgl = global.renderer === 'webgl';
-    const maxPixelDim = platform.mobile ? (webgl ? 768 : 1080) : (webgl ? 1080 : 2160);
+    const maxPixelDim = platform.mobile ? (webgl ? 768 : 1080) : (webgl ? 1080 : 1536);
     // cap pixel ratio to limit resolution on high-DPI devices
     const calcPixelRatio = () => Math.min(maxPixelDim / Math.min(screen.width, screen.height), window.devicePixelRatio);
     // last known device pixel size (full resolution, before any quality scaling)
