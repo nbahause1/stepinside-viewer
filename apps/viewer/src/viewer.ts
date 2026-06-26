@@ -241,6 +241,25 @@ class Viewer {
         const sceneBound = new BoundingBox();
         let settleFrames = 0; // consecutive still frames, for mobile dynamic resolution
 
+        // Track whether a finger/pointer is down so mobile dynamic resolution can
+        // hold low res for the whole gesture: during a slow drag the per-frame
+        // camera delta can fall below the change threshold, and a motion-only
+        // check would then flip to full res mid-drag (heavy frame + canvas
+        // realloc = stutter). Capture-phase + window so we still see the release
+        // if the input controller stops propagation or the finger lifts off-canvas.
+        let pointerActive = false;
+        if (platform.mobile) {
+            const down = () => { pointerActive = true; };
+            const up = () => { pointerActive = false; };
+            const canvasEl = app.graphicsDevice.canvas;
+            canvasEl.addEventListener('pointerdown', down, { capture: true });
+            window.addEventListener('pointerup', up, { capture: true });
+            window.addEventListener('pointercancel', up, { capture: true });
+            canvasEl.addEventListener('touchstart', down, { capture: true, passive: true });
+            window.addEventListener('touchend', up, { capture: true });
+            window.addEventListener('touchcancel', up, { capture: true });
+        }
+
         // track the camera state and trigger a render when it changes
         app.on('framerender', () => {
             const world = camera.getWorldTransform();
@@ -256,16 +275,20 @@ class Viewer {
                 }
             }
 
-            // Mobile dynamic resolution: drop to half scale the instant the camera
-            // moves (smooth), and ramp back to full once it has held still for a
-            // few frames (a sharp still image). The actual resize happens in
-            // initCanvas's apply(); we just flip the flag and force one full-res
-            // render on settle. Desktop is left untouched.
+            // Mobile dynamic resolution: half scale while interacting (smooth),
+            // full scale once settled (a sharp still image). While a finger is
+            // down we need many more still frames before settling, so a slow drag
+            // that dips below the change threshold never flips to full res
+            // mid-gesture; once the finger lifts we settle in ~2 frames for a
+            // snappy sharpen. The large pointer-down threshold also rescues a
+            // missed release (sharpens after a held still moment). The resize
+            // happens in initCanvas's apply(); we just flip the flag and force one
+            // full-res render on settle. Desktop is left untouched.
             if (platform.mobile) {
                 if (cameraChanged) {
                     settleFrames = 0;
                     global.cameraMoving = true;
-                } else if (global.cameraMoving && ++settleFrames >= 6) {
+                } else if (global.cameraMoving && ++settleFrames >= (pointerActive ? 14 : 2)) {
                     global.cameraMoving = false;
                     app.renderNextFrame = true;
                 }
