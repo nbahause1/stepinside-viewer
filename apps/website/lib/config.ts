@@ -20,7 +20,7 @@ export const config = {
   // bundled into this site at public/viewer/ (run `npm run sync:viewer` after
   // changing the viewer), so it ships on the same domain — no second host, no
   // CORS. Override with NEXT_PUBLIC_VIEWER_URL only if hosting it elsewhere.
-  viewerEmbedUrl: process.env.NEXT_PUBLIC_VIEWER_URL ?? "/viewer/index.html",
+  viewerEmbedUrl: process.env.NEXT_PUBLIC_VIEWER_URL ?? "/viewer/index.html?webgl",
 
   // Scan teaser stills shown in the Demos section (real frames from the scan video).
   // Swap these for per-object scan renders when available.
