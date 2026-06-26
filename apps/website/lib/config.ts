@@ -4,7 +4,7 @@
 export const config = {
   // Formspree form ID (the part after /f/ in your endpoint, e.g. "xyzabcd").
   // Set it here or via the NEXT_PUBLIC_FORMSPREE_ID environment variable.
-  formspreeId: process.env.NEXT_PUBLIC_FORMSPREE_ID ?? "", // TODO
+  formspreeId: process.env.NEXT_PUBLIC_FORMSPREE_ID ?? "xjgqwoqp",
 
   // Contact details shown on the site.
   email: "kurieronline6@gmail.com",
