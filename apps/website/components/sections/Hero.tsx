@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import { CaretDown } from "@phosphor-icons/react";
 import { useLang } from "@/components/i18n/LanguageProvider";
 import PillButton from "@/components/ui/PillButton";
@@ -15,6 +16,30 @@ import { SECTION_IDS } from "@/lib/config";
 */
 export default function Hero() {
   const { t } = useLang();
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  // Safari often ignores the JSX `muted` attribute and then blocks autoplay
+  // (and Low-Power Mode pauses it). Force the muted *property* in JS, kick off
+  // play(), and retry on the first user interaction as a fallback.
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    video.muted = true;
+    video.playsInline = true;
+    const tryPlay = () => video.play().catch(() => {});
+    tryPlay();
+    const onInteract = () => {
+      tryPlay();
+      window.removeEventListener("pointerdown", onInteract);
+      window.removeEventListener("touchstart", onInteract);
+    };
+    window.addEventListener("pointerdown", onInteract, { once: true });
+    window.addEventListener("touchstart", onInteract, { once: true });
+    return () => {
+      window.removeEventListener("pointerdown", onInteract);
+      window.removeEventListener("touchstart", onInteract);
+    };
+  }, []);
 
   return (
     <section
@@ -22,11 +47,12 @@ export default function Hero() {
       className="relative isolate flex min-h-[100svh] overflow-hidden bg-midnight"
     >
       <video
+        ref={videoRef}
         autoPlay
         muted
         loop
         playsInline
-        preload="metadata"
+        preload="auto"
         poster="/hero-poster.jpg"
         aria-hidden="true"
         tabIndex={-1}
