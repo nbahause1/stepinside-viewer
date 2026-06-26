@@ -265,7 +265,7 @@ class Viewer {
                 if (cameraChanged) {
                     settleFrames = 0;
                     global.cameraMoving = true;
-                } else if (global.cameraMoving && ++settleFrames >= 6) {
+                } else if (global.cameraMoving && ++settleFrames >= 3) {
                     global.cameraMoving = false;
                     app.renderNextFrame = true;
                 }
