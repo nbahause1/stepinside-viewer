@@ -11,8 +11,8 @@
   },
   "postEffectSettings": {
     "sharpness": {
-      "enabled": false,
-      "amount": 0
+      "enabled": true,
+      "amount": 0.5
     },
     "bloom": {
       "enabled": false,
