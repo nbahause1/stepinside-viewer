@@ -22,9 +22,20 @@
             const skyboxUrl = url.searchParams.get('skybox');
             const collisionUrl = url.searchParams.get('collision') ?? url.searchParams.get('voxel') ?? './scene.voxel.json';
             const settingsUrl = url.searchParams.has('settings') ? url.searchParams.get('settings') : './settings.json';
-            const contentUrl = url.searchParams.has('content') ? url.searchParams.get('content') : './scene.sog';
+            // Renderer: WebGPU by default (fast, full quality). Safari/iOS start
+            // WebGPU but render splats black, and the engine only auto-falls-back
+            // when WebGPU is *absent* — so force WebGL on Apple WebKit. `?webgl`
+            // forces it everywhere; `?webgpu` forces WebGPU (escape hatch).
+            const ua = navigator.userAgent;
+            const isAppleWebkit = /iPad|iPhone|iPod/.test(ua) ||
+                (/Safari/.test(ua) && !/Chrome|Chromium|Android|Edg|OPR|CriOS|FxiOS/.test(ua));
+            const renderer = url.searchParams.has('webgpu') ? 'webgpu' :
+                (url.searchParams.has('webgl') || isAppleWebkit) ? 'webgl' : 'webgpu';
 
-            const renderer = url.searchParams.has('webgl') ? 'webgl' : 'webgpu';
+            // Serve a lighter scan to the WebGL path (Safari) so it loads fast and
+            // stays smooth; WebGPU gets the full-detail scan. `?content=` overrides.
+            const defaultContent = renderer === 'webgl' ? './scene-light.sog' : './scene.sog';
+            const contentUrl = url.searchParams.has('content') ? url.searchParams.get('content') : defaultContent;
 
             const budgetParam = url.searchParams.get('budget');
             const budget = budgetParam !== null ? Number(budgetParam) : undefined;

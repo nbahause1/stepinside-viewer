@@ -90885,7 +90885,10 @@ const loadGsplat = async (app, config, progressCallback) => {
     const { contents, contentUrl } = config;
     const c = contents;
     const filename = new URL(contentUrl, location.href).pathname.split('/').pop();
-    const data = filename.toLowerCase() === 'meta.json' ? await (await contents).json() : undefined;
+    // Parse the JSON manifest for both single-file SOG (`meta.json`) and the
+    // streamed multi-LOD format (`lod-meta.json`); the gsplat loader streams the
+    // referenced chunks progressively for the LOD case.
+    const data = filename.toLowerCase().endsWith('meta.json') ? await (await contents).json() : undefined;
     const asset = new Asset(filename, 'gsplat', { url: contentUrl, filename, contents: c }, data);
     return new Promise((resolve, reject) => {
         asset.on('load', () => {
