@@ -7,16 +7,23 @@ import Reveal from "@/components/ui/Reveal";
 import { config, SECTION_IDS } from "@/lib/config";
 
 /*
-  Demos: the walkable scan is embedded live via iframe (bundled at /viewer/).
-  Because the viewer sizes its own UI to the iframe, a small embed box looks
-  cramped on phones — so a "Vollbild" control expands the iframe to a fixed,
-  full-viewport overlay. This is a plain CSS overlay (not the Fullscreen API),
-  which is the only approach that works on iOS Safari, and toggling it never
-  remounts the iframe, so the tour keeps its state.
+  Demos: the walkable scan. The viewer is heavy (a continuously-rendering WebGL/
+  WebGPU splat scene), so it is NOT embedded in the page flow — a live iframe
+  there would render in the background and jank the whole page's scrolling. We
+  show a static cover instead and only MOUNT the viewer when the visitor opens
+  it ("Vollbild"). It then lives in a fixed full-viewport overlay; collapsing it
+  hides the iframe (display:none → the browser throttles its rendering) but keeps
+  it mounted, so re-opening is instant and the tour keeps its state.
 */
 export default function Demos() {
   const { t } = useLang();
+  const [launched, setLaunched] = useState(false);
   const [expanded, setExpanded] = useState(false);
+
+  const open = () => {
+    setLaunched(true);
+    setExpanded(true);
+  };
 
   // While fullscreen: lock the page behind it and let Esc close it.
   useEffect(() => {
@@ -48,64 +55,60 @@ export default function Demos() {
           </p>
         </Reveal>
 
-        {/* Live walkable scan. The container switches between a framed box and a
-            fixed full-viewport overlay; the <iframe> stays mounted across both.
-            NOT wrapped in <Reveal>: its animated filter/transform would establish
-            a containing block and trap position:fixed inside the small box. */}
+        {/* Static cover in the page flow — no iframe here, so the heavy scan is
+            never loaded or rendered while scrolling the page. */}
         <div
           id={SECTION_IDS.gate}
-          className={
-            expanded
-              ? "fixed inset-0 z-[100] bg-ink"
-              : "relative mx-auto mt-12 aspect-[3/4] w-full max-w-[1100px] scroll-mt-20 overflow-hidden rounded-[12px] border border-ink/10 bg-ink/95 shadow-[0_24px_70px_-30px_rgba(0,0,0,0.5)] sm:aspect-[4/3] md:aspect-video"
-          }
+          className="relative mx-auto mt-12 aspect-[3/4] w-full max-w-[1100px] scroll-mt-20 overflow-hidden rounded-[12px] border border-ink/10 bg-ink shadow-[0_24px_70px_-30px_rgba(0,0,0,0.5)] sm:aspect-[4/3] md:aspect-video"
         >
-          {/* Collapsed: the first frame is blurred and the iframe is inert, so
-              the scan can't be used in the small box — you have to open
-              fullscreen to actually see and walk it. Expanded: sharp + live. */}
+          {/* Soft radial highlight so the cover reads as a surface, not a void. */}
+          <div
+            aria-hidden
+            className="absolute inset-0"
+            style={{
+              background:
+                "radial-gradient(120% 90% at 50% 35%, rgba(255,255,255,0.10), rgba(255,255,255,0) 60%)",
+            }}
+          />
+          <button
+            type="button"
+            onClick={open}
+            aria-label={t.demos.fullscreen}
+            className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-4 px-6 text-center"
+          >
+            <span className="inline-flex items-center gap-2.5 rounded-full bg-paper/10 py-3.5 pl-5 pr-6 text-[15px] font-medium text-paper ring-1 ring-paper/25 backdrop-blur-md transition-colors hover:bg-paper/20">
+              <ArrowsOut size={20} weight="bold" aria-hidden />
+              {t.demos.fullscreen}
+            </span>
+            <span className="max-w-[30ch] text-[14px] font-medium leading-[1.4] text-paper/80">
+              {t.demos.fullscreenHint}
+            </span>
+          </button>
+        </div>
+      </div>
+
+      {/* The viewer mounts only after the first launch. Fixed full-viewport when
+          open; display:none when closed (rendering throttled, no page jank) but
+          kept mounted for an instant, state-preserving re-open. Rendered outside
+          any transformed/filtered ancestor so position:fixed covers the viewport. */}
+      {launched && (
+        <div className={expanded ? "fixed inset-0 z-[100] bg-ink" : "hidden"}>
           <iframe
             src={config.viewerEmbedUrl}
             title={t.demos.heading}
-            loading="lazy"
             allow="fullscreen; xr-spatial-tracking; accelerometer; gyroscope"
-            className={
-              "absolute inset-0 h-full w-full border-0 " +
-              (expanded ? "" : "scale-[1.08] blur-[14px] pointer-events-none")
-            }
+            className="absolute inset-0 h-full w-full border-0"
           />
-
-          {expanded ? (
-            // Compact icon-only close, top-right, clear of the viewer's centred
-            // brand badge on narrow phones.
-            <button
-              type="button"
-              onClick={() => setExpanded(false)}
-              aria-label={t.demos.exitFullscreen}
-              className="absolute right-3 top-[max(0.75rem,env(safe-area-inset-top))] z-10 inline-flex h-10 w-10 items-center justify-center rounded-full bg-ink/55 text-paper backdrop-blur-md transition-colors hover:bg-ink/75 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-paper/60"
-            >
-              <X size={20} weight="bold" aria-hidden />
-            </button>
-          ) : (
-            // Over the blurred frame: a soft veil, one clear call to open
-            // fullscreen, and a line telling the visitor why. This is the only
-            // interactive control while collapsed.
-            <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-4 bg-ink/30 px-6 text-center">
-              <button
-                type="button"
-                onClick={() => setExpanded(true)}
-                aria-label={t.demos.fullscreen}
-                className="inline-flex items-center gap-2.5 rounded-full bg-ink/65 py-3.5 pl-5 pr-6 text-[15px] font-medium text-paper backdrop-blur-md transition-colors hover:bg-ink/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-paper/60"
-              >
-                <ArrowsOut size={20} weight="bold" aria-hidden />
-                {t.demos.fullscreen}
-              </button>
-              <p className="max-w-[28ch] text-[14px] font-medium leading-[1.4] text-paper/85">
-                {t.demos.fullscreenHint}
-              </p>
-            </div>
-          )}
+          <button
+            type="button"
+            onClick={() => setExpanded(false)}
+            aria-label={t.demos.exitFullscreen}
+            className="absolute right-3 top-[max(0.75rem,env(safe-area-inset-top))] z-10 inline-flex h-10 w-10 items-center justify-center rounded-full bg-ink/55 text-paper backdrop-blur-md transition-colors hover:bg-ink/75 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-paper/60"
+          >
+            <X size={20} weight="bold" aria-hidden />
+          </button>
         </div>
-      </div>
+      )}
     </section>
   );
 }
