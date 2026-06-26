@@ -320,6 +320,18 @@
                         <div class="tutorialCard__text">Setze zwei Punkte, um zu messen</div>
                     </div>
                 </div>
+                <div id="tutorialChat" class="tutorialCard hidden">
+                    <div class="tutorialCard__icon">
+                        <svg width="24" height="24" viewBox="0 0 24 24" class="hintChat" aria-hidden="true">
+                            <path d="M4 5.5 H20 a1.5 1.5 0 0 1 1.5 1.5 V15 a1.5 1.5 0 0 1 -1.5 1.5 H9 L5 20 V16.5 H4 a1.5 1.5 0 0 1 -1.5 -1.5 V7 a1.5 1.5 0 0 1 1.5 -1.5 Z" />
+                            <path d="M8 9.5 H16 M8 12.5 H13" />
+                        </svg>
+                    </div>
+                    <div class="tutorialCard__copy">
+                        <div class="tutorialCard__title">Noch Fragen?</div>
+                        <div class="tutorialCard__text">Frag unten links unseren Assistenten zur Wohnung</div>
+                    </div>
+                </div>
             </div>
 
             <!-- StepInside control dome: a frosted half-circle at the bottom with
@@ -400,6 +412,9 @@
                         </button>
                     </div>
                     <div id="chatMessages"></div>
+                    <!-- Scripted mode: tappable suggestion buttons (one per POI
+                         with a question/answer). Populated by concierge.ts. -->
+                    <div id="chatSuggest" class="hidden"></div>
                     <div id="chatInputRow">
                         <input id="chatInput" type="text" autocomplete="off" autocapitalize="sentences" placeholder="Frag den Concierge…" />
                         <button id="chatSend" type="button" aria-label="Senden" title="Senden">

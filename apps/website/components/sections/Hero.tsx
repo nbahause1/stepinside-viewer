@@ -101,7 +101,17 @@ export default function Hero() {
             <PillButton
               variant="ghost"
               tone="paper"
-              href={"#" + SECTION_IDS.demos}
+              href={"#" + SECTION_IDS.gate}
+              onClick={(e) => {
+                // Center the live scan in the viewport instead of landing on the
+                // section's top edge (which leaves the iframe half cut off).
+                const el = document.getElementById(SECTION_IDS.gate);
+                if (el) {
+                  e.preventDefault();
+                  el.scrollIntoView({ behavior: "smooth", block: "center" });
+                  history.replaceState(null, "", "#" + SECTION_IDS.gate);
+                }
+              }}
             >
               {t.hero.ctaPrimary}
             </PillButton>

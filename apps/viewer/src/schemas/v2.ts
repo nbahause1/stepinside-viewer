@@ -91,22 +91,31 @@ type ExperienceSettings = {
 
     startMode: 'default' | 'animTrack' | 'annotation',
 
-    // AI concierge endpoint config (optional; ignored by validateV2 which only
-    // casts, so extra JSON keys pass through untouched). Non-secret: the API key
-    // lives server-side, the browser only learns where to POST and which property.
+    // Concierge config (optional; ignored by validateV2 which only casts, so
+    // extra JSON keys pass through untouched). Two modes:
+    //   'ai' (default): POSTs to a server-side Claude endpoint (needs endpoint +
+    //         propertyId). Non-secret: the API key lives server-side.
+    //   'scripted': no backend at all. The panel shows the `greeting`, then one
+    //         tappable suggestion button per POI that has a question/answer; the
+    //         answer is fixed and the camera jumps to that POI.
     concierge?: {
-        endpoint: string,
-        propertyId: string
+        mode?: 'ai' | 'scripted',
+        greeting?: string,
+        endpoint?: string,
+        propertyId?: string
     },
 
     // Curated points of interest the concierge can jump the camera to (e.g. the
     // window, a door). Authored once per scan; `camera` is captured via the
-    // console helper captureView(). The browser sends only {id,label,keywords}
-    // to the model (so it can choose a focus); the camera pose stays client-side.
+    // console helper captureView(). In AI mode the browser sends only
+    // {id,label,keywords} to the model; in scripted mode `question`/`answer`
+    // drive a fixed suggestion button. The camera pose stays client-side.
     pois?: {
         id: string,
         label: string,
         keywords?: string[],
+        question?: string,
+        answer?: string,
         camera: {
             position: [number, number, number],
             target: [number, number, number],

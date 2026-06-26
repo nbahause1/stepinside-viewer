@@ -16,6 +16,12 @@ export const config = {
   // Leave a slot empty ("") to render a labelled placeholder instead of an iframe.
   demoEmbeds: ["", ""] as string[], // TODO: paste embed URLs
 
+  // The walkable viewer embedded in the Demos section. The built viewer is
+  // bundled into this site at public/viewer/ (run `npm run sync:viewer` after
+  // changing the viewer), so it ships on the same domain — no second host, no
+  // CORS. Override with NEXT_PUBLIC_VIEWER_URL only if hosting it elsewhere.
+  viewerEmbedUrl: process.env.NEXT_PUBLIC_VIEWER_URL ?? "/viewer/index.html",
+
   // Scan teaser stills shown in the Demos section (real frames from the scan video).
   // Swap these for per-object scan renders when available.
   demoImages: ["/scan-1.jpg", "/scan-2.jpg"] as string[],

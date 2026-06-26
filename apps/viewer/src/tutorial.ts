@@ -53,17 +53,23 @@ const initTutorial = (global: Global) => {
         walkBack: document.getElementById('tutorialWalkBack'),
         measure: document.getElementById('tutorialMeasure'),
         measuring: document.getElementById('tutorialMeasuring'),
-        home: document.getElementById('tutorialHome')
+        home: document.getElementById('tutorialHome'),
+        chat: document.getElementById('tutorialChat')
     };
     if (!root || Object.values(cardEls).some(el => !el)) return;
     const cards = Object.values(cardEls) as HTMLElement[];
+
+    // The concierge chat pill is the final onboarding target (only if present).
+    const chatToggle = document.getElementById('chatToggle');
+    const chatPill = document.getElementById('chatPill');
+    const chatAvailable = () => !!chatPill && !chatPill.classList.contains('hidden');
 
     // Control-dome buttons the onboarding can point at.
     const domeIds = ['domeReset', 'domeMeasure', 'domeAerial', 'domePrev', 'domeNext', 'domeAerialExit'];
 
     type Phase =
         'idle' | 'look' | 'walk' | 'explore' | 'drone' |
-        'arrows' | 'arrowsBack' | 'measure' | 'measuring' | 'home' | 'done';
+        'arrows' | 'arrowsBack' | 'measure' | 'measuring' | 'home' | 'chat' | 'done';
     let phase: Phase = 'idle';
 
     const yaw = () => camera.getEulerAngles().y;
@@ -169,12 +175,27 @@ const initTutorial = (global: Global) => {
         showCard(cardEls.home!);
     };
 
+    // After returning home: the concierge chat is the last thing to point at.
+    // The pill pulses and a card invites a question; opening the chat finishes
+    // the onboarding. If no chat is configured, end right away.
+    const beginChatHint = () => {
+        if (!chatAvailable() || !cardEls.chat) {
+            finishAll();
+            return;
+        }
+        phase = 'chat';
+        hintButtons();
+        chatToggle?.classList.add('tutorial-hint');
+        showCard(cardEls.chat);
+    };
+
     // Onboarding complete: clear the hint and dismiss the cards.
     const finishAll = () => {
         phase = 'done';
         state.moveLocked = false;
         window.clearTimeout(droneTimer);
         hintButtons();
+        chatToggle?.classList.remove('tutorial-hint');
         root.classList.remove('visible');
         window.setTimeout(() => {
             root.classList.add('hidden');
@@ -223,8 +244,14 @@ const initTutorial = (global: Global) => {
             arrowPresses += 1;
             if (arrowPresses >= ARROW_PRESSES) beginArrowsBack();
         } else if (name === 'reset' && phase === 'home') {
-            finishAll();
+            // Home pressed → back at the start; now point at the concierge chat.
+            beginChatHint();
         }
+    });
+
+    // Final leg: opening the concierge chat completes the onboarding.
+    events.on('chatOpen:changed', (open: boolean) => {
+        if (open && phase === 'chat') finishAll();
     });
 
     // Measure leg: entering measure mode asks for two points; a finished

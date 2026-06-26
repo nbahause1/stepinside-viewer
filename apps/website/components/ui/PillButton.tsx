@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { MouseEvent, ReactNode } from "react";
 import { ArrowRight } from "@phosphor-icons/react";
 
 type Variant = "ghost" | "outline" | "filled";
@@ -7,7 +7,7 @@ type Tone = "ink" | "paper";
 interface PillButtonProps {
   children: ReactNode;
   href?: string;
-  onClick?: () => void;
+  onClick?: (e: MouseEvent<HTMLElement>) => void;
   type?: "button" | "submit";
   /** ghost = bare text + arrow; outline = 80px pill outline; filled = dark char fill. */
   variant?: Variant;
@@ -87,6 +87,7 @@ export default function PillButton({
     return (
       <a
         href={href}
+        onClick={onClick}
         className={classes}
         target={target}
         rel={rel}

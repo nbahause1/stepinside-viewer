@@ -1,0 +1,131 @@
+{
+  "version": 2,
+  "tonemapping": "none",
+  "highPrecisionRendering": false,
+  "background": {
+    "color": [
+      0.05,
+      0.05,
+      0.06
+    ]
+  },
+  "postEffectSettings": {
+    "sharpness": {
+      "enabled": false,
+      "amount": 0
+    },
+    "bloom": {
+      "enabled": false,
+      "intensity": 1,
+      "blurLevel": 2
+    },
+    "grading": {
+      "enabled": false,
+      "brightness": 0,
+      "contrast": 1,
+      "saturation": 1,
+      "tint": [
+        1,
+        1,
+        1
+      ]
+    },
+    "vignette": {
+      "enabled": false,
+      "intensity": 0.5,
+      "inner": 0.3,
+      "outer": 0.75,
+      "curvature": 1
+    },
+    "fringing": {
+      "enabled": false,
+      "intensity": 0.5
+    }
+  },
+  "animTracks": [],
+  "cameras": [
+    {
+      "initial": {
+        "position": [
+          3.24,
+          1.2,
+          0.9
+        ],
+        "target": [
+          3.99,
+          1.05,
+          5.85
+        ],
+        "fov": 80
+      }
+    }
+  ],
+  "annotations": [],
+  "startMode": "default",
+  "concierge": {
+    "mode": "scripted",
+    "greeting": "Frag mich etwas zur Wohnung.",
+    "endpoint": "http://localhost:8787/concierge",
+    "propertyId": "example-fewo"
+  },
+  "pois": [
+    {
+      "id": "window",
+      "label": "Fenster",
+      "question": "Wie groß sind die Fenster?",
+      "answer": "Die Fenster sind 2,72 m hoch und 1,25 m breit – bodentiefe Flügelfenster mit französischem Balkon.",
+      "keywords": [
+        "fenster",
+        "window",
+        "windows",
+        "balkon",
+        "balcony",
+        "aussicht",
+        "view",
+        "tageslicht",
+        "licht"
+      ],
+      "camera": {
+        "position": [
+          3.208,
+          1.55,
+          2.633
+        ],
+        "target": [
+          5.205,
+          1.454,
+          2.615
+        ],
+        "fov": 96
+      }
+    },
+    {
+      "id": "door",
+      "label": "Tür",
+      "question": "Wie hoch sind die Türen?",
+      "answer": "Die Türen sind 2,77 m hoch und 1,48 m breit.",
+      "keywords": [
+        "tür",
+        "türen",
+        "door",
+        "doors",
+        "eingang",
+        "entrance",
+        "ausgang"
+      ],
+      "camera": {
+        "position": [
+          6.01,
+          1.55,
+          6.18
+        ],
+        "target": [
+          6.02,
+          1.457,
+          8.178
+        ],
+        "fov": 96
+      }
+    }
+  ]
+}

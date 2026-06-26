@@ -63,6 +63,8 @@
   "annotations": [],
   "startMode": "default",
   "concierge": {
+    "mode": "scripted",
+    "greeting": "Frag mich etwas zur Wohnung.",
     "endpoint": "http://localhost:8787/concierge",
     "propertyId": "example-fewo"
   },
@@ -70,6 +72,8 @@
     {
       "id": "window",
       "label": "Fenster",
+      "question": "Wie groß sind die Fenster?",
+      "answer": "Die Fenster sind 2,72 m hoch und 1,25 m breit – bodentiefe Flügelfenster mit französischem Balkon.",
       "keywords": [
         "fenster",
         "window",
@@ -98,6 +102,8 @@
     {
       "id": "door",
       "label": "Tür",
+      "question": "Wie hoch sind die Türen?",
+      "answer": "Die Türen sind 2,77 m hoch und 1,48 m breit.",
       "keywords": [
         "tür",
         "türen",

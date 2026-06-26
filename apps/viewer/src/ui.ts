@@ -759,16 +759,9 @@ const initUI = (global: Global) => {
         }
     };
 
-    if (window.parent !== window && isThirdPartyEmbedded()) {
-        const viewUrl = new URL(window.location.href);
-        if (viewUrl.pathname === '/s') {
-            viewUrl.pathname = '/view';
-        }
-
-        (dom.viewerBranding as HTMLAnchorElement).href = viewUrl.toString();
-        dom.viewerBranding.classList.remove('hidden');
-        (dom.viewerTitle as HTMLAnchorElement).href = viewUrl.toString();
-    }
+    // White-label: this is our own fork, so we never reveal the upstream
+    // SuperSplat attribution badge — not even when embedded cross-origin.
+    // (Stock SuperSplat un-hides #viewerBranding for third-party embeds here.)
 };
 
 export { initPoster, initUI };

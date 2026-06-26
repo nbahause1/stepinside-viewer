@@ -368,7 +368,8 @@ button {
     svg.hintDrone,
     svg.hintMeasure,
     svg.hintMeasuring,
-    svg.hintHome {
+    svg.hintHome,
+    svg.hintChat {
         animation: hintDronePulse 2s var(--ease-soft) infinite;
     }
 }
@@ -429,6 +430,26 @@ button {
     }
 }
 
+// The concierge pill is the final onboarding target: it pulses with a white
+// glow (the .tutorial-hint class is toggled in tutorial.ts), same idea as the
+// dome buttons but tuned for the dark glass pill.
+#chatToggle.tutorial-hint {
+    animation: chatHintPulse 1.5s var(--ease-soft) infinite;
+}
+
+@keyframes chatHintPulse {
+    0%, 100% {
+        box-shadow:
+            0 8px 24px -10px rgba(0, 0, 0, 0.4),
+            0 0 0 0 rgba(255, 255, 255, 0);
+    }
+    50% {
+        box-shadow:
+            0 8px 24px -10px rgba(0, 0, 0, 0.4),
+            0 0 18px 5px rgba(255, 255, 255, 0.6);
+    }
+}
+
 // While the guided onboarding runs, suppress the stock one-time walk hint.
 body.tutorial-active #walkHint {
     display: none !important;
@@ -445,6 +466,11 @@ body.tutorial-active #walkHint {
         animation: none;
         background-color: rgba(255, 255, 255, 0.2);
         box-shadow: 0 0 12px 2px rgba(255, 255, 255, 0.4);
+    }
+
+    #chatToggle.tutorial-hint {
+        animation: none;
+        box-shadow: 0 8px 24px -10px rgba(0, 0, 0, 0.4), 0 0 12px 2px rgba(255, 255, 255, 0.4);
     }
 }
 
@@ -791,6 +817,46 @@ body.tutorial-active #walkHint {
         }
     }
 
+    /* Scripted mode: suggestion buttons sit where the input row would be. */
+    #chatSuggest {
+        flex-shrink: 0;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        padding: 12px;
+        border-top: 1px solid rgba(255, 255, 255, 0.08);
+
+        &.hidden {
+            display: none;
+        }
+    }
+
+    .chatChip {
+        pointer-events: auto;
+        max-width: 100%;
+        padding: 9px 15px;
+        border-radius: 999px;
+        border: 1px solid rgba(255, 255, 255, 0.16);
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.05));
+        color: var(--label-1);
+        font-family: 'Montserrat', 'Arial', sans-serif;
+        font-size: 13px;
+        font-weight: 500;
+        line-height: 1.2;
+        text-align: left;
+        cursor: pointer;
+        transition: border-color 160ms var(--ease-out), background-color 160ms var(--ease-out), transform 160ms var(--ease-out);
+
+        &:hover {
+            border-color: rgba(255, 255, 255, 0.32);
+            background: linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.08));
+        }
+
+        &:active {
+            transform: translateY(1px);
+        }
+    }
+
     #chatInputRow {
         flex-shrink: 0;
         display: flex;
@@ -798,6 +864,10 @@ body.tutorial-active #walkHint {
         gap: 8px;
         padding: 10px 12px 12px;
         border-top: 1px solid rgba(255, 255, 255, 0.08);
+
+        &.hidden {
+            display: none;
+        }
     }
 
     #chatInput {
@@ -894,6 +964,27 @@ body.tutorial-active #walkHint {
     #chatPill .chatDot {
         animation: none;
         opacity: 0.6;
+    }
+}
+
+/* Mobile-only (narrow viewport, e.g. the embedded viewer fullscreen on a phone).
+   Keyed on the viewer's OWN width, so the desktop layout is never affected. */
+@media (max-width: 600px) {
+    // 1) Tutorial card: drop the single-line `nowrap` so a long hint (e.g. the
+    //    bird's-eye step) wraps and stays on screen instead of running off both
+    //    edges. The card stays centred; max-width keeps a margin each side.
+    #tutorial .tutorialCard {
+        max-width: calc(100vw - 24px);
+        white-space: normal;
+    }
+
+    // 2) Chat panel: a slim, tall card (narrower than before, a touch taller) so
+    //    the scan stays visible to the right and above it, rather than the chat
+    //    spanning nearly the full width. 100dvh accounts for the mobile browser's
+    //    dynamic toolbar.
+    #chatPill #chatPanel {
+        width: min(300px, calc(100vw - 40px));
+        height: min(270px, calc(100dvh - 140px));
     }
 }
 

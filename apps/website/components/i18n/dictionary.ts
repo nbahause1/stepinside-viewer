@@ -54,6 +54,9 @@ interface DemosD {
   heading: string;
   intro: string;
   placeholder: string;
+  fullscreen: string;
+  exitFullscreen: string;
+  fullscreenHint: string;
   items: DemoItem[];
   gate: DemosGate;
 }
@@ -143,7 +146,7 @@ const de: Dict = {
     label: "Begehbare 3D-Touren",
     headline: "Räume begehbar machen. Von überall.",
     sub: "Fotorealistische 3D-Touren, durch die sich Ihre Besucher frei bewegen.",
-    ctaPrimary: "Demo anfordern",
+    ctaPrimary: "Zum Scan",
     ctaSecondary: "Kontakt aufnehmen",
     scrollHint: "Nach unten scrollen",
     emailPlaceholder: "Ihre E-Mail-Adresse",
@@ -165,6 +168,9 @@ const de: Dict = {
     intro:
       "Bewegen Sie sich direkt durch unsere Scans. Klicken, ziehen, hineingehen. Genau dieses Erlebnis bekommen Ihre Gäste direkt auf Ihrer Website.",
     placeholder: "Live-Scan wird hier eingebettet",
+    fullscreen: "Vollbild",
+    exitFullscreen: "Vollbild schließen",
+    fullscreenHint: "In den Vollbildmodus schalten, um den Scan zu begehen",
     gate: {
       overline: "Begehbarer Scan",
       heading: "Begehbaren Scan anfordern",
@@ -303,7 +309,7 @@ const en: Dict = {
     label: "Walkable 3D tours",
     headline: "Make spaces walkable. From anywhere.",
     sub: "Photorealistic 3D tours your visitors can walk through freely.",
-    ctaPrimary: "Request a demo",
+    ctaPrimary: "To the scan",
     ctaSecondary: "Get in touch",
     scrollHint: "Scroll down",
     emailPlaceholder: "Your email address",
@@ -325,6 +331,9 @@ const en: Dict = {
     intro:
       "Move through our scans right here. Click, drag, step inside. Your guests get this exact experience, right on your website.",
     placeholder: "Live scan embeds here",
+    fullscreen: "Fullscreen",
+    exitFullscreen: "Exit fullscreen",
+    fullscreenHint: "Switch to fullscreen to walk through the scan",
     gate: {
       overline: "Walkable scan",
       heading: "Request a walkable scan",

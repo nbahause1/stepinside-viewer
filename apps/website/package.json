@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "sync:viewer": "cd ../viewer && npm run build && cd ../website && rm -rf public/viewer && mkdir -p public/viewer && cp -R ../viewer/public/. public/viewer/ && rm -f public/viewer/index.js.map"
   },
   "dependencies": {
     "@phosphor-icons/react": "^2.1.10",
