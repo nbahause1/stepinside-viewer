@@ -84149,6 +84149,12 @@ class IdleLook {
     // Global suppression: while true (e.g. measuring) the gaze never wanders —
     // the camera holds perfectly still so placing points isn't disturbed.
     static suppressed = false;
+    // True on frames where the gaze is actively wandering (i.e. the camera is
+    // moving *only* because of this idle animation, not the user). Mobile dynamic
+    // resolution reads this so the idle look-around still renders at full, sharp
+    // resolution instead of being treated as user movement. Reset each frame by
+    // CameraManager before the active controller runs.
+    static wandering = false;
     _idleTime = 0;
     _phase = 0;
     _rest = new Vec3();
@@ -84183,6 +84189,7 @@ class IdleLook {
         const pitch = (Math.sin(t * 0.31 + 0.5) * 0.7 + Math.sin(t * 0.14) * 0.3) * PITCH_AMP * ramp;
         targetAngles.y = this._rest.y + yaw;
         targetAngles.x = this._rest.x + pitch;
+        IdleLook.wandering = true;
     }
     /** Cancel any wander and re-arm the timer (e.g. on controller enter). */
     reset() {
@@ -85631,6 +85638,9 @@ class CameraManager {
             // from a clean slate each frame.
             target.gazeYaw = 0;
             target.gazePitch = 0;
+            // Reset the idle-wander flag each frame; the active controller's
+            // idle-look (fly mode only) re-sets it if it's actually wandering.
+            IdleLook.wandering = false;
             controller.update(dt, frame, target);
             if (transitionTimer < 1) {
                 // lerp away from previous camera during transition
@@ -89674,7 +89684,10 @@ class Viewer {
             // happens in initCanvas's apply(); we just flip the flag and force one
             // full-res render on settle. Desktop is left untouched.
             if (platform.mobile) {
-                if (cameraChanged) {
+                // The idle look-around moves the camera but should stay sharp, so
+                // it must NOT count as user movement — only a real camera change
+                // (not the idle wander) keeps the resolution low.
+                if (cameraChanged && !IdleLook.wandering) {
                     settleFrames = 0;
                     global.cameraMoving = true;
                 }

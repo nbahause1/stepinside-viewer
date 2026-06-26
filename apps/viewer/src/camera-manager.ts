@@ -8,6 +8,7 @@ import { AnimController } from './cameras/anim-controller';
 import { Camera, type CameraFrame, type CameraController } from './cameras/camera';
 import { FlyController } from './cameras/fly-controller';
 import { FlySource } from './cameras/fly-source';
+import { IdleLook } from './cameras/idle-look';
 import { OrbitController } from './cameras/orbit-controller';
 import type { TargetSource } from './cameras/target-navigation';
 import { WalkController } from './cameras/walk-controller';
@@ -204,6 +205,10 @@ class CameraManager {
             // from a clean slate each frame.
             target.gazeYaw = 0;
             target.gazePitch = 0;
+
+            // Reset the idle-wander flag each frame; the active controller's
+            // idle-look (fly mode only) re-sets it if it's actually wandering.
+            IdleLook.wandering = false;
 
             controller.update(dt, frame, target);
 

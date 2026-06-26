@@ -28,6 +28,13 @@ class IdleLook {
     // the camera holds perfectly still so placing points isn't disturbed.
     static suppressed = false;
 
+    // True on frames where the gaze is actively wandering (i.e. the camera is
+    // moving *only* because of this idle animation, not the user). Mobile dynamic
+    // resolution reads this so the idle look-around still renders at full, sharp
+    // resolution instead of being treated as user movement. Reset each frame by
+    // CameraManager before the active controller runs.
+    static wandering = false;
+
     private _idleTime = 0;
 
     private _phase = 0;
@@ -70,6 +77,8 @@ class IdleLook {
 
         targetAngles.y = this._rest.y + yaw;
         targetAngles.x = this._rest.x + pitch;
+
+        IdleLook.wandering = true;
     }
 
     /** Cancel any wander and re-arm the timer (e.g. on controller enter). */

@@ -30,6 +30,7 @@ import {
 import { Annotations } from './annotations';
 import { CameraManager, isWalkAllowed } from './camera-manager';
 import { Camera } from './cameras/camera';
+import { IdleLook } from './cameras/idle-look';
 import type { Collision } from './collision';
 import { MeshCollision, VoxelCollision } from './collision';
 import { nearlyEquals } from './core/math';
@@ -285,7 +286,10 @@ class Viewer {
             // happens in initCanvas's apply(); we just flip the flag and force one
             // full-res render on settle. Desktop is left untouched.
             if (platform.mobile) {
-                if (cameraChanged) {
+                // The idle look-around moves the camera but should stay sharp, so
+                // it must NOT count as user movement — only a real camera change
+                // (not the idle wander) keeps the resolution low.
+                if (cameraChanged && !IdleLook.wandering) {
                     settleFrames = 0;
                     global.cameraMoving = true;
                 } else if (global.cameraMoving && ++settleFrames >= (pointerActive ? 14 : 2)) {
