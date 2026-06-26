@@ -18,16 +18,30 @@ export default function Hero() {
   const { t } = useLang();
   const videoRef = useRef<HTMLVideoElement>(null);
 
-  // Safari often ignores the JSX `muted` attribute and then blocks autoplay
-  // (and Low-Power Mode pauses it). Force the muted *property* in JS, kick off
-  // play(), and retry on the first user interaction as a fallback.
+  // Safari's autoplay gate checks the `muted` *attribute*, but React only sets
+  // it as a property — so it blocks autoplay despite the JSX `muted`. Reflect it
+  // to the attribute, kick off play(), and retry once the media is buffered
+  // enough (Safari rejects play() before then), on tab focus (Low-Power /
+  // backgrounded), and on the first user interaction as a last fallback.
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
     video.muted = true;
+    video.defaultMuted = true;
+    video.setAttribute("muted", "");
     video.playsInline = true;
+
     const tryPlay = () => video.play().catch(() => {});
     tryPlay();
+
+    const onReady = () => tryPlay();
+    video.addEventListener("loadeddata", onReady);
+    video.addEventListener("canplay", onReady);
+    const onVisible = () => {
+      if (!document.hidden) tryPlay();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+
     const onInteract = () => {
       tryPlay();
       window.removeEventListener("pointerdown", onInteract);
@@ -35,7 +49,11 @@ export default function Hero() {
     };
     window.addEventListener("pointerdown", onInteract, { once: true });
     window.addEventListener("touchstart", onInteract, { once: true });
+
     return () => {
+      video.removeEventListener("loadeddata", onReady);
+      video.removeEventListener("canplay", onReady);
+      document.removeEventListener("visibilitychange", onVisible);
       window.removeEventListener("pointerdown", onInteract);
       window.removeEventListener("touchstart", onInteract);
     };
@@ -79,18 +97,20 @@ export default function Hero() {
         />
         <div className="absolute inset-x-0 top-0 flex justify-center pt-5">
           {/* Very subtle living glow: a soft white halo breathes in and out with
-              a barely-there scale pulse. Raw <style> so the Tailwind v4 build
-              keeps the keyframes; reduced-motion stills it via the global rule. */}
+              a barely-there scale pulse. We animate ONLY opacity + transform
+              (both GPU-composited, so Safari stays smooth) — never `filter`,
+              which Safari re-rasterises every frame and stutters. The halo is a
+              separate layer carrying a *static* drop-shadow; only its opacity
+              breathes. Raw <style> so the Tailwind v4 build keeps the keyframes;
+              reduced-motion stills it via the global rule. */}
           <style>{`
+            @keyframes logoBreath {
+              0%, 100% { transform: scale(1); }
+              50%      { transform: scale(1.025); }
+            }
             @keyframes logoGlow {
-              0%, 100% {
-                filter: drop-shadow(0 0 1px rgba(255,255,255,0.15));
-                transform: scale(1);
-              }
-              50% {
-                filter: drop-shadow(0 0 6px rgba(255,255,255,0.85)) drop-shadow(0 0 2px rgba(255,255,255,0.6));
-                transform: scale(1.025);
-              }
+              0%, 100% { opacity: 0.12; }
+              50%      { opacity: 1; }
             }
           `}</style>
           <a
@@ -101,12 +121,34 @@ export default function Hero() {
               // Delayed so the first glow peak (at 50% of the cycle = 1.8s)
               // lands at ~2.55s — exactly when the intro hands the logo off at
               // its final position, so it flashes on arrival.
-              animation: "logoGlow 3.6s ease-in-out 0.75s infinite",
+              animation: "logoBreath 3.6s ease-in-out 0.75s infinite",
+              willChange: "transform",
             }}
-            className="pointer-events-auto inline-flex items-center gap-2.5 text-paper transition-opacity hover:opacity-70"
+            className="relative pointer-events-auto inline-flex items-center gap-2.5 text-paper transition-opacity hover:opacity-70"
           >
-            <span aria-hidden className="block size-2 rotate-45 bg-paper" />
-            <span className="text-[16px] font-bold tracking-[0.01em]">
+            {/* Glow halo: an exact duplicate sitting behind the crisp lockup,
+                with a fixed (rasterised-once) drop-shadow. Only its opacity
+                breathes, so the blur never re-renders mid-animation. */}
+            <span
+              aria-hidden
+              style={{
+                animation: "logoGlow 3.6s ease-in-out 0.75s infinite",
+                filter:
+                  "drop-shadow(0 0 6px rgba(255,255,255,0.85)) drop-shadow(0 0 2px rgba(255,255,255,0.6))",
+                willChange: "opacity",
+              }}
+              className="absolute inset-0 z-0 inline-flex items-center gap-2.5"
+            >
+              <span className="block size-2 rotate-45 bg-paper" />
+              <span className="text-[16px] font-bold tracking-[0.01em]">
+                StepInside
+              </span>
+            </span>
+            <span
+              aria-hidden
+              className="relative z-10 block size-2 rotate-45 bg-paper"
+            />
+            <span className="relative z-10 text-[16px] font-bold tracking-[0.01em]">
               StepInside
             </span>
           </a>
