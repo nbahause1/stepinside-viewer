@@ -33,8 +33,11 @@
                 (url.searchParams.has('webgl') || isAppleWebkit) ? 'webgl' : 'webgpu';
 
             // Serve a lighter scan to the WebGL path (Safari) so it loads fast and
-            // stays smooth; WebGPU gets the full-detail scan. `?content=` overrides.
-            const defaultContent = renderer === 'webgl' ? './scene-light.sog' : './scene.sog';
+            // stays smooth. WebGPU gets the streamed multi-LOD SOG (`lod-meta.json`):
+            // the viewer shows the lowest LOD almost instantly, then streams in
+            // higher detail on demand — far faster first paint than the 42MB
+            // single-file scan. `?content=` overrides; `?webgl` keeps the light scan.
+            const defaultContent = renderer === 'webgl' ? './scene-light.sog' : './scene/lod-meta.json';
             const contentUrl = url.searchParams.has('content') ? url.searchParams.get('content') : defaultContent;
 
             const budgetParam = url.searchParams.get('budget');
