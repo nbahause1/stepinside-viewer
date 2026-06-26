@@ -191,7 +191,15 @@ const initCanvas = (global: Global) => {
         // and resetting canvas dimensions can invalidate the XRWebGLLayer
         if (app.xr?.active) return;
 
-        const s = state.performanceMode ? 0.5 : 1.0;
+        // Resolution scale. On mobile we use *dynamic resolution*: render at half
+        // scale while the camera is moving (keeps motion smooth on the fill-rate-
+        // bound WebGL path) and at full scale once it settles (a sharp still
+        // image). This is independent of performanceMode, which controls the splat
+        // budget — so smoothness while moving is preserved. Desktop keeps the
+        // static performanceMode scale.
+        const s = platform.mobile
+            ? (global.cameraMoving ? 0.5 : 1.0)
+            : (state.performanceMode ? 0.5 : 1.0);
         const w = Math.ceil(deviceSize.width * s);
         const h = Math.ceil(deviceSize.height * s);
         if (w !== canvas.width || h !== canvas.height) {
@@ -268,7 +276,8 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
         state,
         events,
         camera,
-        renderer
+        renderer,
+        cameraMoving: false
     };
 
     initCanvas(global);

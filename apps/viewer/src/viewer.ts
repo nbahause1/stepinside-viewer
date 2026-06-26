@@ -239,16 +239,34 @@ class Viewer {
         const prevProj = new Mat4();
         const prevWorld = new Mat4();
         const sceneBound = new BoundingBox();
+        let settleFrames = 0; // consecutive still frames, for mobile dynamic resolution
 
         // track the camera state and trigger a render when it changes
         app.on('framerender', () => {
             const world = camera.getWorldTransform();
             const proj = camera.camera.projectionMatrix;
 
+            const cameraChanged =
+                !nearlyEquals(world.data, prevWorld.data) ||
+                !nearlyEquals(proj.data, prevProj.data);
+
             if (!app.renderNextFrame) {
-                if (config.ministats ||
-                    !nearlyEquals(world.data, prevWorld.data) ||
-                    !nearlyEquals(proj.data, prevProj.data)) {
+                if (config.ministats || cameraChanged) {
+                    app.renderNextFrame = true;
+                }
+            }
+
+            // Mobile dynamic resolution: drop to half scale the instant the camera
+            // moves (smooth), and ramp back to full once it has held still for a
+            // few frames (a sharp still image). The actual resize happens in
+            // initCanvas's apply(); we just flip the flag and force one full-res
+            // render on settle. Desktop is left untouched.
+            if (platform.mobile) {
+                if (cameraChanged) {
+                    settleFrames = 0;
+                    global.cameraMoving = true;
+                } else if (global.cameraMoving && ++settleFrames >= 6) {
+                    global.cameraMoving = false;
                     app.renderNextFrame = true;
                 }
             }

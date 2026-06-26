@@ -61,6 +61,7 @@ type Global = {
     events: EventHandler;
     camera: Entity;
     renderer: 'webgl' | 'webgpu';               // actual renderer in use (reflects engine fallback from WebGPU to WebGL2)
+    cameraMoving: boolean;                       // true while the camera is in motion (drives mobile dynamic resolution)
 };
 
 export { CameraMode, InputMode, Config, State, Global };

@@ -89634,14 +89634,30 @@ class Viewer {
         const prevProj = new Mat4();
         const prevWorld = new Mat4();
         const sceneBound = new BoundingBox();
+        let settleFrames = 0; // consecutive still frames, for mobile dynamic resolution
         // track the camera state and trigger a render when it changes
         app.on('framerender', () => {
             const world = camera.getWorldTransform();
             const proj = camera.camera.projectionMatrix;
+            const cameraChanged = !nearlyEquals(world.data, prevWorld.data) ||
+                !nearlyEquals(proj.data, prevProj.data);
             if (!app.renderNextFrame) {
-                if (config.ministats ||
-                    !nearlyEquals(world.data, prevWorld.data) ||
-                    !nearlyEquals(proj.data, prevProj.data)) {
+                if (config.ministats || cameraChanged) {
+                    app.renderNextFrame = true;
+                }
+            }
+            // Mobile dynamic resolution: drop to half scale the instant the camera
+            // moves (smooth), and ramp back to full once it has held still for a
+            // few frames (a sharp still image). The actual resize happens in
+            // initCanvas's apply(); we just flip the flag and force one full-res
+            // render on settle. Desktop is left untouched.
+            if (platform.mobile) {
+                if (cameraChanged) {
+                    settleFrames = 0;
+                    global.cameraMoving = true;
+                }
+                else if (global.cameraMoving && ++settleFrames >= 6) {
+                    global.cameraMoving = false;
                     app.renderNextFrame = true;
                 }
             }
@@ -91016,7 +91032,15 @@ const initCanvas = (global) => {
         // and resetting canvas dimensions can invalidate the XRWebGLLayer
         if (app.xr?.active)
             return;
-        const s = state.performanceMode ? 0.5 : 1.0;
+        // Resolution scale. On mobile we use *dynamic resolution*: render at half
+        // scale while the camera is moving (keeps motion smooth on the fill-rate-
+        // bound WebGL path) and at full scale once it settles (a sharp still
+        // image). This is independent of performanceMode, which controls the splat
+        // budget — so smoothness while moving is preserved. Desktop keeps the
+        // static performanceMode scale.
+        const s = platform.mobile
+            ? (global.cameraMoving ? 0.5 : 1.0)
+            : (state.performanceMode ? 0.5 : 1.0);
         const w = Math.ceil(deviceSize.width * s);
         const h = Math.ceil(deviceSize.height * s);
         if (w !== canvas.width || h !== canvas.height) {
@@ -91084,7 +91108,8 @@ const main = async (canvas, settingsJson, config) => {
         state,
         events,
         camera,
-        renderer
+        renderer,
+        cameraMoving: false
     };
     initCanvas(global);
     // DEV: expose globals for camera tuning (remove before production)
