@@ -19,11 +19,30 @@ export default function Demos() {
   const { t } = useLang();
   const [launched, setLaunched] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  // The viewer boots lazily on first open, so there is a short gap before it
+  // paints. We cover that gap with a still of the scene and cross-fade it away
+  // once the viewer reports its first frame (postMessage from the iframe).
+  const [painted, setPainted] = useState(false);
 
   const open = () => {
     setLaunched(true);
     setExpanded(true);
   };
+
+  // Drop the loading poster when the viewer signals its first painted frame.
+  // Fallback timeout in case the message is missed, so it never stays stuck.
+  useEffect(() => {
+    if (!launched || painted) return;
+    const onMessage = (e: MessageEvent) => {
+      if (e.data === "viewer:firstFrame") setPainted(true);
+    };
+    window.addEventListener("message", onMessage);
+    const fallback = setTimeout(() => setPainted(true), 12000);
+    return () => {
+      window.removeEventListener("message", onMessage);
+      clearTimeout(fallback);
+    };
+  }, [launched, painted]);
 
   // While fullscreen: lock the page behind it and let Esc close it.
   useEffect(() => {
@@ -98,6 +117,18 @@ export default function Demos() {
             title={t.demos.heading}
             allow="fullscreen; xr-spatial-tracking; accelerometer; gyroscope"
             className="absolute inset-0 h-full w-full border-0"
+          />
+          {/* Loading poster: a still of the scene shown over the iframe until the
+              viewer paints, then cross-faded out. Its UI sits where the viewer's
+              own chrome lands, so the swap reads as seamless. Kept mounted so the
+              opacity transition can run; pointer-events-none once faded. */}
+          <img
+            src="/viewer-poster.jpg"
+            alt=""
+            aria-hidden
+            className={`pointer-events-none absolute inset-0 h-full w-full object-cover transition-opacity duration-700 ${
+              painted ? "opacity-0" : "opacity-100"
+            }`}
           />
           <button
             type="button"
