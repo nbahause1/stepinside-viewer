@@ -29,13 +29,13 @@ export const config = {
   // Legal entity data used on the Impressum page.
   legal: {
     company: "StepInside",
-    owner: "[Vor- und Nachname]", // TODO
-    street: "[Straße Nr.]", // TODO
-    city: "[PLZ Ort]", // TODO
+    owner: "Hauke Braband",
+    street: "Saurbornstraße 19",
+    city: "56073 Koblenz",
     country: "Deutschland",
-    email: "hallo@stepinside.eu", // TODO
-    phone: "+49 151 0000000", // TODO
-    vatId: "[USt-IdNr., falls vorhanden]", // TODO
+    email: "kurieronline6@gmail.com",
+    phone: "+49 151 27060110",
+    vatId: "", // Kleinunternehmer / keine USt-IdNr → Abschnitt wird ausgeblendet
   },
 } as const;
 

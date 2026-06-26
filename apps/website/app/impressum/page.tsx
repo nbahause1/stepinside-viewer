@@ -8,8 +8,8 @@ export const metadata: Metadata = {
 };
 
 // Legal pages are German-only (legally required form) and intentionally plain.
-// TODO: replace every bracketed placeholder in lib/config.ts with real data and
-// have the final text checked against current German legal requirements.
+// Data lives in lib/config.ts (config.legal). The owner should still have the
+// final wording checked against current German requirements (§5 DDG, §18 MStV).
 export default function ImpressumPage() {
   const l = config.legal;
   return (
@@ -75,10 +75,12 @@ export default function ImpressumPage() {
             </p>
           </section>
 
-          <section>
-            <h2 className="text-[20px] font-bold text-ink">Umsatzsteuer-ID</h2>
-            <p className="mt-3">{l.vatId}</p>
-          </section>
+          {l.vatId && (
+            <section>
+              <h2 className="text-[20px] font-bold text-ink">Umsatzsteuer-ID</h2>
+              <p className="mt-3">{l.vatId}</p>
+            </section>
+          )}
 
           <section>
             <h2 className="text-[20px] font-bold text-ink">
@@ -90,11 +92,6 @@ export default function ImpressumPage() {
               {l.street}, {l.city}
             </p>
           </section>
-
-          <p className="border-t border-mist pt-6 text-[13px] text-smoke">
-            Hinweis: Dieser Text ist eine Vorlage mit Platzhaltern. Bitte vor dem
-            Livegang mit echten Daten ausfüllen und rechtlich prüfen lassen.
-          </p>
         </div>
       </main>
     </div>
