@@ -499,12 +499,6 @@ class Viewer {
 
                         // emit first frame event on window
                         window.firstFrame?.();
-
-                        // tell the embedding page the scene is now painted, so it
-                        // can cross-fade away its loading poster (see Demos.tsx).
-                        if (window.parent !== window) {
-                            window.parent.postMessage('viewer:firstFrame', '*');
-                        }
                     });
                 }
 
