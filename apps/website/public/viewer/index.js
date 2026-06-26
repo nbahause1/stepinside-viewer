@@ -90996,8 +90996,11 @@ const initCanvas = (global) => {
     // fill-rate bound enough to drop frames — and splats are soft blobs with no
     // crisp detail to resolve, so a modest 1536 cap restores 60fps at nearly
     // invisible quality cost.
+    // Mobile WebGL (iOS Safari) was capped at 768 to protect older phones, but
+    // that left modern iPhones rendering noticeably soft on their Retina screens.
+    // Bumped to 1080 for a sharper scan; revisit if weaker devices drop frames.
     const webgl = global.renderer === 'webgl';
-    const maxPixelDim = platform.mobile ? (webgl ? 768 : 1080) : (webgl ? 1080 : 1536);
+    const maxPixelDim = platform.mobile ? (webgl ? 1080 : 1080) : (webgl ? 1080 : 1536);
     // cap pixel ratio to limit resolution on high-DPI devices
     const calcPixelRatio = () => Math.min(maxPixelDim / Math.min(screen.width, screen.height), window.devicePixelRatio);
     // last known device pixel size (full resolution, before any quality scaling)
