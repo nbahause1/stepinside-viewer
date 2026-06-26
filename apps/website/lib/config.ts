@@ -7,9 +7,9 @@ export const config = {
   formspreeId: process.env.NEXT_PUBLIC_FORMSPREE_ID ?? "", // TODO
 
   // Contact details shown on the site.
-  email: "hallo@stepinside.eu", // TODO: real address
-  phone: "+49 151 0000000", // TODO: real, human-readable number
-  phoneHref: "+4915100000000", // TODO: same number, digits only, for tel: links
+  email: "kurieronline6@gmail.com",
+  phone: "+49 151 27060110", // human-readable
+  phoneHref: "+4915127060110", // same number, digits only, for tel: links
   calendlyUrl: "", // TODO: e.g. "https://calendly.com/stepinside/intro"
 
   // Live scan embeds (SuperSplat / iframe src), aligned by index with demos.items.
