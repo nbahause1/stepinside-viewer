@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 /*
   First-load intro: a dark screen showing only the square mark, centred. The
@@ -24,8 +24,12 @@ export default function Intro() {
   const [spun, setSpun] = useState(false); // square spins into the diamond
   const [revealed, setRevealed] = useState(false); // wordmark unfurls to the right
   const [leaving, setLeaving] = useState(false); // lockup glides into hero spot
-  // Offset (px) from viewport centre to the hero logo's centre — the glide target.
+  // Offset (px) from the overlay's centre to the hero logo's centre — the glide
+  // target. Measured against the overlay element (not window.innerHeight) so it
+  // stays correct on iOS Safari, where the visual viewport disagrees with the
+  // fixed overlay's height because of the dynamic URL bar.
   const [offset, setOffset] = useState<{ dx: number; dy: number } | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const reduce = window.matchMedia(
@@ -49,13 +53,18 @@ export default function Intro() {
     document.body.style.overflow = "hidden";
 
     // Measure the hero logo's resting centre so the glide lands exactly on it.
+    // Both centres come from getBoundingClientRect (same coordinate frame), so
+    // the delta is correct regardless of the iOS visual-viewport quirks that
+    // broke the old window.innerHeight-based maths.
     const measure = () => {
       const el = document.querySelector<HTMLElement>("[data-brandmark]");
-      if (!el) return;
+      const container = containerRef.current;
+      if (!el || !container) return;
       const r = el.getBoundingClientRect();
+      const c = container.getBoundingClientRect();
       setOffset({
-        dx: r.left + r.width / 2 - window.innerWidth / 2,
-        dy: r.top + r.height / 2 - window.innerHeight / 2,
+        dx: r.left + r.width / 2 - (c.left + c.width / 2),
+        dy: r.top + r.height / 2 - (c.top + c.height / 2),
       });
     };
     measure();
@@ -67,7 +76,12 @@ export default function Intro() {
     // Begin the wordmark reveal while the square is still visibly spinning so
     // the two motions overlap and blend, with no perceptible pause between them.
     const tReveal = setTimeout(() => setRevealed(true), 450);
-    const tLeave = setTimeout(() => setLeaving(true), 1350);
+    const tLeave = setTimeout(() => {
+      // Re-measure right before the glide: on iOS the URL bar may still have been
+      // settling at mount, so this picks up the final layout for a precise land.
+      measure();
+      setLeaving(true);
+    }, 1350);
     // Once the glide has landed (~2190ms), reveal the static hero logo while it
     // is still fully covered by the identical, opaque lockup — its 150ms
     // opacity transition fades in invisibly behind the overlay...
@@ -102,6 +116,7 @@ export default function Intro() {
 
   return (
     <div
+      ref={containerRef}
       aria-hidden="true"
       className="pointer-events-none fixed inset-0 z-[100] flex items-center justify-center"
     >
