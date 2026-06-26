@@ -36,6 +36,15 @@ export default function Intro() {
       return;
     }
 
+    // The intro is a from-the-top experience: the lockup glides onto the hero
+    // logo's resting spot and the video sits behind it. Opt out of the browser's
+    // automatic scroll restoration — on reload it would otherwise drop the
+    // visitor back at their previous position (e.g. the viewer section) while
+    // the intro plays from the top, so they'd "land" in the wrong place. Pin to
+    // the top so the handoff always lands correctly.
+    history.scrollRestoration = "manual";
+    window.scrollTo(0, 0);
+
     document.documentElement.classList.add("intro-playing");
     document.body.style.overflow = "hidden";
 
