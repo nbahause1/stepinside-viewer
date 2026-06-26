@@ -96,11 +96,12 @@ const loadSkybox = (app: AppBase, url: string) => {
 const createApp = async (canvas: HTMLCanvasElement, config: Config) => {
     const useWebGPU = config.renderer === 'webgpu';
 
-    // Create the graphics device. The engine auto-appends WebGL2/null fallbacks
-    // when WebGPU isn't supported, so request xrCompatible so the WebGL fallback
-    // is also usable for AR/VR.
+    // Create the graphics device. List the fallbacks explicitly: try WebGPU
+    // first (best splat performance) but fall through to WebGL2/WebGL when it is
+    // unavailable (e.g. Safari without WebGPU) instead of failing to a black
+    // scene. xrCompatible keeps the WebGL fallback usable for AR/VR.
     const device = await createGraphicsDevice(canvas, {
-        deviceTypes: useWebGPU ? ['webgpu'] : [],
+        deviceTypes: useWebGPU ? ['webgpu', 'webgl2', 'webgl'] : ['webgl2', 'webgl'],
         antialias: false,
         depth: true,
         stencil: false,
