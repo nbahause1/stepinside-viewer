@@ -74,10 +74,9 @@
     "endpoint": "http://localhost:8787/stage",
     "propertyId": "example-fewo",
     "styles": [
-      { "id": "warm", "label": "Warm", "image": "staged/warm.jpg" },
-      { "id": "scandi", "label": "Skandinavisch", "image": "staged/scandi.jpg" },
-      { "id": "classic", "label": "Klassisch", "image": "staged/classic.jpg" },
-      { "id": "modern", "label": "Modern", "image": "staged/modern.jpg" }
+      { "id": "warm", "label": "Warm", "image": "staged/warm.jpg", "imagePortrait": "staged/warm-portrait.jpg" },
+      { "id": "scandi", "label": "Skandinavisch", "image": "staged/scandi.jpg", "imagePortrait": "staged/scandi-portrait.jpg" },
+      { "id": "classic", "label": "Klassisch", "image": "staged/classic.jpg", "imagePortrait": "staged/classic-portrait.jpg" }
     ]
   },
   "pois": [

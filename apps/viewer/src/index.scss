@@ -2336,3 +2336,25 @@ body.staging-open {
         .stageArrow > svg { animation: none; }
     }
 }
+
+// ---- Mobile (narrow phones): the staging controls need room and the landscape
+// demo images must be readable on a portrait screen. Placed after the staging
+// rules so these win at equal specificity. ----
+@media (max-width: 600px) {
+    // smaller, less crowded bottom-left pills (concierge + sofa)
+    #chatPill #chatToggle { width: 40px; height: 40px; }
+    #stagePill { left: calc(max(14px, env(safe-area-inset-left)) + 52px); }
+    #stagePill #stageTrigger { height: 40px; padding: 0 9px; }
+
+    // never expand to the label on mobile — it would overlap the control dome;
+    // the onboarding glow alone invites the tap there
+    #stagePill #stageTrigger.attention,
+    #stagePill #stageTrigger.has-message {
+        padding: 0 9px;
+
+        #stageLabel { max-width: 0; margin-left: 0; opacity: 0; }
+    }
+
+    // (the furnished image uses cover/full-bleed everywhere — on phones it shows
+    // the native 9:16 portrait variant, so no cropping hack is needed)
+}

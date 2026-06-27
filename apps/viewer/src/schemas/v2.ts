@@ -139,9 +139,11 @@ type ExperienceSettings = {
         propertyId?: string,
         // Optional style picker shown in the overlay. Each id must match a style
         // the server knows (warm | scandi | classic | modern). In 'demo' mode each
-        // style also carries `image`: a pre-generated picture (URL relative to the
-        // viewer) shown instead of a live result. Omit for a single default style.
-        styles?: { id: string, label: string, image?: string }[]
+        // style carries `image` (landscape, used on desktop) and optionally
+        // `imagePortrait` (9:16, used on narrow/portrait screens) — pre-generated
+        // pictures (URLs relative to the viewer) shown instead of a live result.
+        // Omit styles for a single default style.
+        styles?: { id: string, label: string, image?: string, imagePortrait?: string }[]
     }
 };
 

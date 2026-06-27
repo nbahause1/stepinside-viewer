@@ -82106,7 +82106,15 @@ const initStaging = (global) => {
     if (!demoMode && (!endpoint || !propertyId))
         return;
     const styles = cfg.styles ?? [];
-    const styleImage = (id) => styles.find(s => s.id === id)?.image;
+    // Narrow/portrait screens (phones) get the 9:16 image; everything else the
+    // landscape one. Falls back to the landscape image if no portrait is set.
+    const isPortrait = () => window.matchMedia('(max-width: 600px)').matches;
+    const styleImage = (id) => {
+        const s = styles.find(s => s.id === id);
+        if (!s)
+            return undefined;
+        return (isPortrait() && s.imagePortrait) ? s.imagePortrait : s.image;
+    };
     const wait = (ms) => new Promise(resolve => window.setTimeout(resolve, ms));
     const pill = document.getElementById('stagePill');
     const trigger = document.getElementById('stageTrigger');
@@ -82282,8 +82290,11 @@ const initStaging = (global) => {
     const generate = async (styleId = selectedStyle) => {
         if (loading)
             return;
+        // Cache per style AND orientation (portrait/landscape use different
+        // images), so rotating the device still shows the right one.
+        const key = styleId ? `${styleId}:${isPortrait() ? 'p' : 'l'}` : undefined;
         // Already generated this style? Reuse it — no network, no tokens.
-        const cached = styleId ? cache.get(styleId) : undefined;
+        const cached = key ? cache.get(key) : undefined;
         if (cached) {
             showResult(cached);
             setLabel('Möbliert sehen');
@@ -82311,8 +82322,8 @@ const initStaging = (global) => {
             }
             await wait(DEMO_DELAY_MS);
             if (image) {
-                if (styleId)
-                    cache.set(styleId, image);
+                if (key)
+                    cache.set(key, image);
                 showResult(image);
                 setLabel('Möbliert sehen');
             }
@@ -82354,8 +82365,8 @@ const initStaging = (global) => {
             }
             const data = await res.json();
             if (typeof data.image === 'string' && data.image.length > 0) {
-                if (styleId)
-                    cache.set(styleId, data.image);
+                if (key)
+                    cache.set(key, data.image);
                 showResult(data.image);
                 setLabel('Möbliert sehen');
             }

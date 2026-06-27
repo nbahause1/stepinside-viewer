@@ -1968,5 +1968,28 @@ body.staging-open #stagePill {
     animation: none;
   }
 }
+@media (max-width: 600px) {
+  #chatPill #chatToggle {
+    width: 40px;
+    height: 40px;
+  }
+  #stagePill {
+    left: calc(max(14px, env(safe-area-inset-left)) + 52px);
+  }
+  #stagePill #stageTrigger {
+    height: 40px;
+    padding: 0 9px;
+  }
+  #stagePill #stageTrigger.attention,
+  #stagePill #stageTrigger.has-message {
+    padding: 0 9px;
+  }
+  #stagePill #stageTrigger.attention #stageLabel,
+  #stagePill #stageTrigger.has-message #stageLabel {
+    max-width: 0;
+    margin-left: 0;
+    opacity: 0;
+  }
+}
 
 /*# sourceMappingURL=index.css.map */
