@@ -17,6 +17,7 @@ import { validateKnowledge } from './knowledge.js';
 import type { KnowledgeBase } from './knowledge.js';
 import { MemoryRateLimiter } from './ratelimit.js';
 import { handleConcierge } from './core.js';
+import { handleStaging } from './staging.js';
 import { parseAllowedOrigins, resolveAllowOrigin, corsHeaders } from './cors.js';
 
 const PORT = 8787;
@@ -43,6 +44,8 @@ async function loadKnowledge(propertyId: string): Promise<KnowledgeBase | null> 
 }
 
 const rateLimiter = new MemoryRateLimiter();
+// Image generation is far pricier than a chat turn -> its own tighter bucket.
+const stagingRateLimiter = new MemoryRateLimiter(6, 5 * 60 * 1000);
 const allowedOrigins = parseAllowedOrigins(process.env.ALLOWED_ORIGINS);
 
 function clientIpOf(req: IncomingMessage): string {
@@ -100,18 +103,37 @@ const server = createServer((req: IncomingMessage, res: ServerResponse) => {
       return;
     }
 
-    const apiKey = process.env.ANTHROPIC_API_KEY;
-    if (!apiKey) {
-      send(res, 500, { error: 'Server is not configured (missing ANTHROPIC_API_KEY).' }, cors);
-      return;
-    }
-
     let rawBody: unknown;
     try {
       const text = await readBody(req);
       rawBody = text.length > 0 ? JSON.parse(text) : {};
     } catch {
       send(res, 400, { error: 'Request body must be valid JSON.' }, cors);
+      return;
+    }
+
+    const path = (req.url ?? '/').split('?')[0];
+
+    // Route by path. /stage = virtual staging (Gemini); everything else falls
+    // through to the concierge for backward compatibility.
+    if (path === '/stage') {
+      const geminiApiKey = process.env.GEMINI_API_KEY;
+      if (!geminiApiKey) {
+        send(res, 500, { error: 'Server is not configured (missing GEMINI_API_KEY).' }, cors);
+        return;
+      }
+      const result = await handleStaging(rawBody, {
+        geminiApiKey,
+        rateLimiter: stagingRateLimiter,
+        clientIp: clientIpOf(req),
+      });
+      send(res, result.status, result.body, cors, result.retryAfterSeconds);
+      return;
+    }
+
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) {
+      send(res, 500, { error: 'Server is not configured (missing ANTHROPIC_API_KEY).' }, cors);
       return;
     }
 

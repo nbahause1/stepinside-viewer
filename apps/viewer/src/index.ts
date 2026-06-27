@@ -24,6 +24,7 @@ import { importSettings } from './settings';
 import type { Config, Global } from './types';
 import { initControls } from './controls';
 import { initConcierge } from './concierge';
+import { initStaging } from './staging';
 import { initTutorial } from './tutorial';
 import { initPoster, initUI } from './ui';
 import { Viewer } from './viewer';
@@ -305,6 +306,7 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
     initTutorial(global);
     initControls(global);
     initConcierge(global);
+    initStaging(global);
 
     // Load model
     const gsplatLoad = loadGsplat(

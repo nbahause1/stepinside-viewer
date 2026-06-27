@@ -582,11 +582,12 @@ body.tutorial-active #walkHint {
     align-items: flex-start;     // bottom-left corner; panel expands up + to the right
     gap: 10px;
 
-    // dark frosted glass pill, matching the brand + control domes
+    // dark frosted glass pill, matching the brand + control domes. Secondary to
+    // the "Möbliert sehen" pill above it, so it is smaller and a touch quieter.
     #chatToggle {
         pointer-events: auto;
-        width: 52px;
-        height: 52px;
+        width: 44px;
+        height: 44px;
         flex-shrink: 0;
         display: flex;
         align-items: center;
@@ -595,7 +596,7 @@ body.tutorial-active #walkHint {
         border: 1px solid rgba(255, 255, 255, 0.1);
         border-radius: 50%;
         cursor: pointer;
-        color: #fff;
+        color: rgba(255, 255, 255, 0.82);
         background: linear-gradient(180deg, rgba(30, 30, 32, 0.5), rgba(18, 18, 20, 0.42));
         backdrop-filter: blur(20px) saturate(150%);
         -webkit-backdrop-filter: blur(20px) saturate(150%);
@@ -611,8 +612,10 @@ body.tutorial-active #walkHint {
 
         > svg {
             display: block;
+            width: 22px;
+            height: 22px;
             fill: none;
-            stroke: #fff;
+            stroke: currentColor;
             stroke-width: 1.75;
             stroke-linecap: round;
             stroke-linejoin: round;
@@ -1879,5 +1882,457 @@ body.measure-active #controlDome {
             right: max(0px, env(safe-area-inset-right));
             border-radius: 6px 0 0 6px;
         }
+    }
+}
+
+// ----------------------------------------------------------------- AI staging
+// "Möbliert sehen": a glass pill (stacked above the concierge, bottom-left) and
+// a full-viewport overlay that lays the furnished still over the live scan. While
+// a room is being furnished, the overlay shows the captured empty frame with a
+// light-sweep + progress bar (the "wird eingerichtet" experience).
+#stagePill {
+    position: fixed;
+    // bottom-left row, just right of the concierge toggle, same height as it and
+    // the control dome (all at bottom:14px)
+    left: calc(max(14px, env(safe-area-inset-left)) + 54px);
+    bottom: max(14px, env(safe-area-inset-bottom));
+    z-index: 16;
+    pointer-events: none;
+
+    // idle = just the sofa icon (a 44px circle). It MORPHS smoothly to the
+    // labelled "Möbliert sehen" pill when hinted (.attention) or showing a
+    // transient message (.has-message): the padding grows and the clipped label
+    // slides/fades in, so the shape eases from circle to pill.
+    #stageTrigger {
+        pointer-events: auto;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        height: 44px;
+        padding: 0 11px;            // + the 22px icon = a 44px-wide circle
+        overflow: hidden;           // clip the collapsed label
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 22px;        // = half of 44px -> a circle while narrow
+        cursor: pointer;
+        color: #fff;
+        font-family: 'Montserrat', sans-serif;
+        font-weight: 600;
+        font-size: 13.5px;
+        line-height: 1;
+        white-space: nowrap;
+        background: linear-gradient(180deg, rgba(30, 30, 32, 0.5), rgba(18, 18, 20, 0.42));
+        backdrop-filter: blur(20px) saturate(150%);
+        -webkit-backdrop-filter: blur(20px) saturate(150%);
+        box-shadow:
+            0 8px 24px -10px rgba(0, 0, 0, 0.4),
+            inset 0 1px 0 0 rgba(255, 255, 255, 0.14);
+        transition:
+            padding 300ms var(--ease-glass),
+            background 160ms var(--ease-out),
+            transform 160ms var(--ease-out),
+            opacity 160ms;
+
+        * { pointer-events: none; }
+
+        > svg {
+            display: block;
+            flex-shrink: 0;
+            fill: none;
+            stroke: #fff;
+            stroke-width: 1.75;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+
+        // label is always present but clipped to zero width until expanded
+        #stageLabel {
+            display: inline-block;
+            max-width: 0;
+            margin-left: 0;
+            opacity: 0;
+            overflow: hidden;
+            white-space: nowrap;
+            transition:
+                max-width 300ms var(--ease-glass),
+                margin-left 300ms var(--ease-glass),
+                opacity 220ms var(--ease-out);
+        }
+
+        @media (hover: hover) and (pointer: fine) {
+            &:hover {
+                background: linear-gradient(180deg, rgba(42, 42, 45, 0.56), rgba(26, 26, 28, 0.48));
+            }
+        }
+
+        &:active { transform: scale(0.96); }
+
+        // while a generation is in flight: dim
+        &.is-loading {
+            opacity: 0.75;
+            cursor: default;
+        }
+        &:disabled { cursor: default; }
+
+        // expanded: the labelled "Möbliert sehen" pill (onboarding hint or a
+        // transient status/error message)
+        &.has-message,
+        &.attention {
+            padding: 0 18px 0 14px;
+
+            #stageLabel {
+                max-width: 180px;
+                margin-left: 9px;
+                opacity: 1;
+            }
+        }
+    }
+}
+
+// Onboarding glow: the sofa button breathes (soft white glow) while .attention
+// is set. The circle->pill expand + "Möbliert sehen" label are handled in the
+// #stageTrigger block above (shared with .has-message).
+#stagePill #stageTrigger.attention {
+    animation: stageArrowGlow 2s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+    #stagePill #stageTrigger.attention { animation: none; }
+}
+
+// While the staging overlay is open, hide the normal viewer chrome so it never
+// shows through when the visitor peeks at the original scan ("Original zeigen").
+body.staging-open {
+    #controlDome,
+    #brandDome,
+    #chatPill,
+    #stagePill {
+        opacity: 0 !important;
+        pointer-events: none !important;
+        transition: opacity 200ms var(--ease-out);
+    }
+}
+
+#stageOverlay {
+    position: fixed;
+    inset: 0;
+    z-index: 38;                 // above the canvas + controls, below modals
+    // transparent: when the image fades out (.is-scan) the live canvas shows through
+    background: transparent;
+    // gentle entrance
+    animation: stageFadeIn 260ms var(--ease-out);
+
+    #stageImage {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;       // full-bleed over the scan it overlays
+        opacity: 1;
+        transition: opacity 220ms var(--ease-out), filter 320ms var(--ease-out);
+        user-select: none;
+        -webkit-user-drag: none;
+    }
+
+    // peek/toggle: fade the furnished image out to reveal the live scan beneath
+    &.is-scan #stageImage { opacity: 0; }
+
+    // before any result is set, render nothing (no broken-image icon / alt text)
+    #stageImage:not([src]) { display: none; }
+
+    // soft reveal when the furnished result lands
+    #stageImage.is-revealed { animation: stageReveal 480ms var(--ease-out); }
+
+    // ---- generating state: the StepInside logo glides in from the top, grows
+    // to the centre and fills up (dim base + bright fill revealed left to right)
+    // while the room is furnished. Shown only under .is-generating. ----
+    #stageStatus {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 22px;
+        opacity: 0;
+        transition: opacity 260ms var(--ease-out);
+        pointer-events: none;
+        color: #fff;
+    }
+
+    &:not(.is-generating) #stageStatus { display: none; }
+
+    .stageLoader {
+        position: relative;
+        // glides down from the top brand position and scales up into place
+        animation: stageLoaderIn 560ms var(--ease-out) both;
+    }
+
+    .stageLoader__mark {
+        display: inline-flex;
+        align-items: center;
+        gap: 13px;
+        white-space: nowrap;
+        // breathing room so the rotated diamond's left corner is never clipped by
+        // the fill's clip-path (which cuts at the left border edge)
+        padding: 6px 16px;
+        font-family: 'Montserrat', sans-serif;
+        font-weight: 700;
+        font-size: 30px;
+        letter-spacing: 0.01em;
+        line-height: 1;
+        text-shadow: 0 2px 22px rgba(0, 0, 0, 0.45);
+    }
+
+    .stageLoader__diamond {
+        width: 16px;
+        height: 16px;
+        flex-shrink: 0;
+        transform: rotate(45deg);
+        background: currentColor;
+    }
+
+    // base = dim outline of the logo; fill = bright copy revealed left to right
+    .stageLoader__mark--base { color: rgba(255, 255, 255, 0.24); }
+    .stageLoader__mark--fill {
+        position: absolute;
+        inset: 0;
+        color: #fff;
+        clip-path: inset(0 100% 0 0);   // hidden until the fill animates
+    }
+
+    // Loader is logo-only: the filling logo already signals progress, so the
+    // status line is hidden (set this back to `block` to bring the text back).
+    #stageStatusText {
+        display: none;
+        font-size: 13px;
+        font-weight: 500;
+        letter-spacing: 0.02em;
+        color: rgba(255, 255, 255, 0.6);
+        text-shadow: 0 1px 12px rgba(0, 0, 0, 0.5);
+    }
+
+    &.is-generating {
+        // dark loading screen EVERY time: fade any previous result out so the
+        // dark scrim shows, whether it's a fresh generation or a style switch
+        background: rgba(20, 19, 18, 0.92);
+        #stageImage { opacity: 0; }
+        #stageStatus { opacity: 1; }
+        // fill the logo over the generation; eases toward full, the result then
+        // replaces it (no need to ever reach exactly 100%)
+        .stageLoader__mark--fill { animation: stageLoaderFill 13s var(--ease-out) forwards; }
+        #stageBar { opacity: 0; pointer-events: none; }
+        .stageArrow { opacity: 0; pointer-events: none; }
+    }
+
+    #stageBar {
+        position: absolute;
+        left: 50%;
+        bottom: max(20px, env(safe-area-inset-bottom));
+        transform: translateX(-50%);
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        max-width: calc(100vw - 28px);
+        padding: 8px;
+        opacity: 1;
+        transition: opacity 220ms var(--ease-out);
+        border-radius: 18px;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        background: linear-gradient(180deg, rgba(30, 30, 32, 0.5), rgba(18, 18, 20, 0.42));
+        backdrop-filter: blur(20px) saturate(150%);
+        -webkit-backdrop-filter: blur(20px) saturate(150%);
+        box-shadow:
+            0 18px 44px -14px rgba(0, 0, 0, 0.5),
+            inset 0 1px 0 0 rgba(255, 255, 255, 0.14);
+    }
+
+    // current style name (label) inside the bottom bar
+    #stageStyleName {
+        min-width: 96px;
+        text-align: center;
+        font-family: 'Montserrat', sans-serif;
+        font-weight: 600;
+        font-size: 13.5px;
+        color: #fff;
+        white-space: nowrap;
+
+        &.hidden { display: none; }
+    }
+
+    // thin divider between the name and the actions
+    #stageStyleName:not(.hidden) + .stageBar__actions {
+        border-left: 1px solid rgba(255, 255, 255, 0.12);
+        padding-left: 8px;
+        margin-left: 2px;
+    }
+
+    .stageBar__actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-shrink: 0;
+    }
+
+    // style arrows: glass circles pinned to the left/right edges, centred
+    .stageArrow {
+        position: absolute;
+        top: 50%;
+        transform: translateY(-50%);
+        width: 52px;
+        height: 52px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 50%;
+        cursor: pointer;
+        color: #fff;
+        background: linear-gradient(180deg, rgba(30, 30, 32, 0.5), rgba(18, 18, 20, 0.42));
+        backdrop-filter: blur(20px) saturate(150%);
+        -webkit-backdrop-filter: blur(20px) saturate(150%);
+        box-shadow:
+            0 8px 24px -10px rgba(0, 0, 0, 0.4),
+            inset 0 1px 0 0 rgba(255, 255, 255, 0.14);
+        transition: background 160ms var(--ease-out), opacity 220ms var(--ease-out);
+        // gentle attention pulse so it reads as tappable (glow breathes on the
+        // button, the chevron nudges in its direction)
+        animation: stageArrowGlow 2.6s ease-in-out infinite;
+
+        &.hidden { display: none; }
+
+        > svg {
+            fill: none;
+            stroke: currentColor;
+            stroke-width: 1.9;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+
+        @media (hover: hover) and (pointer: fine) {
+            &:hover { background: linear-gradient(180deg, rgba(42, 42, 45, 0.56), rgba(26, 26, 28, 0.48)); }
+        }
+        &:active { transform: translateY(-50%) scale(0.94); }
+    }
+
+    .stageArrow--prev { left: max(14px, env(safe-area-inset-left)); }
+    .stageArrow--next { right: max(14px, env(safe-area-inset-right)); }
+    .stageArrow--prev > svg { animation: stageNudgeL 2.6s ease-in-out infinite; }
+    .stageArrow--next > svg { animation: stageNudgeR 2.6s ease-in-out infinite; }
+
+    #stageToggle {
+        height: 38px;
+        padding: 0 16px;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 12px;
+        cursor: pointer;
+        color: #fff;
+        font-family: 'Montserrat', sans-serif;
+        font-weight: 600;
+        font-size: 13px;
+        white-space: nowrap;
+        background: rgba(255, 255, 255, 0.08);
+        transition: background 140ms var(--ease-out);
+
+        @media (hover: hover) and (pointer: fine) {
+            &:hover { background: rgba(255, 255, 255, 0.16); }
+        }
+        &:active { transform: scale(0.97); }
+    }
+
+    #stageClose {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 38px;
+        height: 38px;
+        flex-shrink: 0;
+        padding: 0;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 12px;
+        cursor: pointer;
+        color: #fff;
+        background: rgba(255, 255, 255, 0.08);
+        transition: background 140ms var(--ease-out);
+
+        > svg {
+            fill: none;
+            stroke: #fff;
+            stroke-width: 1.9;
+            stroke-linecap: round;
+        }
+
+        @media (hover: hover) and (pointer: fine) {
+            &:hover { background: rgba(255, 255, 255, 0.16); }
+        }
+        &:active { transform: scale(0.94); }
+    }
+}
+
+@keyframes stageFadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+// the logo glides down from the top brand position and grows into the centre
+@keyframes stageLoaderIn {
+    from { transform: translateY(-34vh) scale(0.4); opacity: 0; }
+    55%  { opacity: 1; }
+    to   { transform: translateY(0) scale(1); opacity: 1; }
+}
+
+// the bright logo fills in left to right; eases toward (not to) full, the
+// finished room then replaces it
+@keyframes stageLoaderFill {
+    0%   { clip-path: inset(0 100% 0 0); }
+    65%  { clip-path: inset(0 26% 0 0); }
+    100% { clip-path: inset(0 8% 0 0); }
+}
+
+// soft reveal of the finished furnished image
+@keyframes stageReveal {
+    from { opacity: 0.35; transform: scale(1.012); }
+    to   { opacity: 1; transform: none; }
+}
+
+// gentle "tap me" pulse on the style arrows: a soft glow that breathes…
+@keyframes stageArrowGlow {
+    0%, 100% {
+        box-shadow:
+            0 8px 24px -10px rgba(0, 0, 0, 0.4),
+            inset 0 1px 0 0 rgba(255, 255, 255, 0.14),
+            0 0 6px 0 rgba(255, 255, 255, 0.12);
+    }
+    50% {
+        box-shadow:
+            0 8px 24px -10px rgba(0, 0, 0, 0.4),
+            inset 0 1px 0 0 rgba(255, 255, 255, 0.22),
+            0 0 26px 6px rgba(255, 255, 255, 0.55);
+    }
+}
+
+// …and the chevron nudges a touch in its direction
+@keyframes stageNudgeR {
+    0%, 100% { transform: translateX(0); }
+    50%      { transform: translateX(3px); }
+}
+@keyframes stageNudgeL {
+    0%, 100% { transform: translateX(0); }
+    50%      { transform: translateX(-3px); }
+}
+
+// Respect reduced motion: keep the room legible and show progress statically,
+// without the travelling sweep, the easing bar, or the reveal scale.
+@media (prefers-reduced-motion: reduce) {
+    #stageOverlay {
+        #stageImage.is-revealed { animation: none; }
+
+        &.is-generating {
+            .stageLoader { animation: none; }
+            // show the logo roughly half-filled, statically
+            .stageLoader__mark--fill { animation: none; clip-path: inset(0 45% 0 0); }
+        }
+
+        .stageArrow,
+        .stageArrow > svg { animation: none; }
     }
 }

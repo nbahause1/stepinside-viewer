@@ -10,10 +10,12 @@ import { validateKnowledge } from './knowledge.js';
 import type { KnowledgeBase } from './knowledge.js';
 import { MemoryRateLimiter } from './ratelimit.js';
 import { handleConcierge } from './core.js';
+import { handleStaging } from './staging.js';
 import { parseAllowedOrigins, resolveAllowOrigin, corsHeaders } from './cors.js';
 
 interface Env {
   ANTHROPIC_API_KEY: string;
+  GEMINI_API_KEY?: string;
   ALLOWED_ORIGINS?: string;
 }
 
@@ -29,6 +31,9 @@ function loadKnowledge(propertyId: string): KnowledgeBase | null {
 // One limiter per isolate. NOTE: isolates don't share memory; for real
 // production abuse-protection back this with KvRateLimiter (see ratelimit.ts).
 const rateLimiter = new MemoryRateLimiter();
+// Image generation is far pricier than a chat turn, so it gets its own,
+// tighter bucket: 6 requests per 5 minutes per IP.
+const stagingRateLimiter = new MemoryRateLimiter(6, 5 * 60 * 1000);
 
 function jsonResponse(
   status: number,
@@ -61,10 +66,6 @@ export default {
       return jsonResponse(405, { error: 'Method not allowed.' }, cors);
     }
 
-    if (!env.ANTHROPIC_API_KEY) {
-      return jsonResponse(500, { error: 'Server is not configured.' }, cors);
-    }
-
     let rawBody: unknown;
     try {
       rawBody = await request.json();
@@ -73,6 +74,25 @@ export default {
     }
 
     const clientIp = request.headers.get('cf-connecting-ip') ?? '';
+    const path = new URL(request.url).pathname;
+
+    // Route by path. /stage = virtual staging (Gemini); everything else falls
+    // through to the concierge for backward compatibility.
+    if (path === '/stage') {
+      if (!env.GEMINI_API_KEY) {
+        return jsonResponse(500, { error: 'Server is not configured.' }, cors);
+      }
+      const result = await handleStaging(rawBody, {
+        geminiApiKey: env.GEMINI_API_KEY,
+        rateLimiter: stagingRateLimiter,
+        clientIp,
+      });
+      return jsonResponse(result.status, result.body, cors, result.retryAfterSeconds);
+    }
+
+    if (!env.ANTHROPIC_API_KEY) {
+      return jsonResponse(500, { error: 'Server is not configured.' }, cors);
+    }
 
     const result = await handleConcierge(rawBody, {
       apiKey: env.ANTHROPIC_API_KEY,

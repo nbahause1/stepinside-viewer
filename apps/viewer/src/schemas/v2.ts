@@ -121,7 +121,28 @@ type ExperienceSettings = {
             target: [number, number, number],
             fov: number
         }
-    }[]
+    }[],
+
+    // AI virtual-staging config (optional; cast-through like `concierge`). When
+    // `enabled` and an `endpoint` are set, the viewer shows a "Möbliert sehen"
+    // pill that renders the current frame, POSTs it to the staging endpoint and
+    // lays the furnished image over the live scan. The GEMINI key lives
+    // server-side; the browser only sends { propertyId, image, style }.
+    staging?: {
+        enabled?: boolean,
+        // 'live' (default): each click renders the frame + POSTs it to `endpoint`
+        //   (real model call, costs per image). 'demo': no API call — the loader
+        //   plays, then a pre-generated image bundled per style is shown. Used on
+        //   the public showcase so visitors can't run up model costs.
+        mode?: 'live' | 'demo',
+        endpoint?: string,
+        propertyId?: string,
+        // Optional style picker shown in the overlay. Each id must match a style
+        // the server knows (warm | scandi | classic | modern). In 'demo' mode each
+        // style also carries `image`: a pre-generated picture (URL relative to the
+        // viewer) shown instead of a live result. Omit for a single default style.
+        styles?: { id: string, label: string, image?: string }[]
+    }
 };
 
 const TONEMAPPING = ['none', 'linear', 'filmic', 'hejl', 'aces', 'aces2', 'neutral'] as const;

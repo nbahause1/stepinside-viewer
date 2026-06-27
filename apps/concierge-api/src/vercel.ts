@@ -16,10 +16,12 @@ import { validateKnowledge } from './knowledge.js';
 import type { KnowledgeBase } from './knowledge.js';
 import { MemoryRateLimiter } from './ratelimit.js';
 import { handleConcierge } from './core.js';
+import { handleStaging } from './staging.js';
 import { parseAllowedOrigins, resolveAllowOrigin, corsHeaders } from './cors.js';
 
 interface VercelRequestLike {
   method?: string;
+  url?: string;
   headers: Record<string, string | string[] | undefined>;
   body?: unknown;
   socket?: { remoteAddress?: string };
@@ -56,6 +58,8 @@ async function loadKnowledge(propertyId: string): Promise<KnowledgeBase | null> 
 }
 
 const rateLimiter = new MemoryRateLimiter();
+// Image generation is far pricier than a chat turn -> its own tighter bucket.
+const stagingRateLimiter = new MemoryRateLimiter(6, 5 * 60 * 1000);
 
 function firstHeader(value: string | string[] | undefined): string | null {
   if (Array.isArray(value)) {
@@ -115,17 +119,39 @@ export default async function handler(
     return;
   }
 
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    res.status(500).json({ error: 'Server is not configured.' });
-    return;
-  }
-
   let rawBody: unknown;
   try {
     rawBody = await readJsonBody(req);
   } catch {
     res.status(400).json({ error: 'Request body must be valid JSON.' });
+    return;
+  }
+
+  const path = (req.url ?? '/').split('?')[0];
+
+  // Route by path. /stage = virtual staging (Gemini); everything else falls
+  // through to the concierge for backward compatibility.
+  if (path === '/stage' || path.endsWith('/stage')) {
+    const geminiApiKey = process.env.GEMINI_API_KEY;
+    if (!geminiApiKey) {
+      res.status(500).json({ error: 'Server is not configured.' });
+      return;
+    }
+    const staged = await handleStaging(rawBody, {
+      geminiApiKey,
+      rateLimiter: stagingRateLimiter,
+      clientIp: clientIpOf(req),
+    });
+    if (staged.retryAfterSeconds !== undefined) {
+      res.setHeader('Retry-After', String(staged.retryAfterSeconds));
+    }
+    res.status(staged.status).json(staged.body);
+    return;
+  }
+
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    res.status(500).json({ error: 'Server is not configured.' });
     return;
   }
 

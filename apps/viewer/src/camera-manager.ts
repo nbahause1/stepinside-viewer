@@ -228,10 +228,17 @@ class CameraManager {
                 clearOrbitTargetOnTransitionEnd = false;
                 events.fire('orbitTarget:clear');
             }
+
+            // Signal when an aerial (drone) glide settles, so callers can grab a
+            // clean settled frame (used by virtual staging). Carries the index of
+            // the bird's-eye viewpoint we arrived at.
+            if (state.cameraMode === 'aerial' && prevTransitionTimer < 1 && transitionTimer === 1) {
+                events.fire('aerialArrived', aerialIndex);
+            }
         };
 
         // handle input events
-        events.on('inputEvent', (eventName) => {
+        events.on('inputEvent', (eventName, arg) => {
             switch (eventName) {
                 case 'frame':
                     events.fire('orbitTarget:clear');
@@ -267,6 +274,24 @@ class CameraManager {
                         startTransition();
                     }
                     break;
+                case 'aerialGoto': {
+                    // Fly to a SPECIFIC bird's-eye viewpoint from any mode and glide
+                    // there. Used by virtual staging, which always frames the room
+                    // from one fixed drone angle. Fires 'aerialArrived' when settled.
+                    const n = aerialViews.length;
+                    const idx = Math.max(0, Math.min(n - 1, Number(arg) | 0));
+                    if (state.cameraMode !== 'aerial') {
+                        preAerialMode = state.cameraMode;
+                        preAerialCamera.copy(this.camera);
+                        events.fire('orbitTarget:clear');
+                        sourcesByMode[state.cameraMode]?.cancel();
+                        state.cameraMode = 'aerial';
+                    }
+                    aerialIndex = idx;
+                    controllers.aerial.goto(aerialViews[aerialIndex]);
+                    startTransition();
+                    break;
+                }
                 case 'reset':
                     if (state.cameraMode === 'walk') {
                         walkSource.cancel();

@@ -78,6 +78,11 @@ const initTutorial = (global: Global) => {
     let startYaw = 0;
     let minRel = 0;
     let maxRel = 0;
+    // each gesture is a DRAG in one direction, measured from the furthest point
+    // reached the other way — so turning left and then back toward the start
+    // already counts as a rightward drag (no need to cross the start both ways).
+    let sweptOneWay = false;
+    let sweptOtherWay = false;
 
     // walk tracking
     let walkStart: Vec3 | null = null;
@@ -106,6 +111,8 @@ const initTutorial = (global: Global) => {
         startYaw = yaw();
         minRel = 0;
         maxRel = 0;
+        sweptOneWay = false;
+        sweptOtherWay = false;
         state.moveLocked = true;        // block click-to-walk until the visitor has looked around
         document.body.classList.add('tutorial-active');
         hintButtons();
@@ -175,18 +182,27 @@ const initTutorial = (global: Global) => {
         showCard(cardEls.home!);
     };
 
-    // After returning home: the concierge chat is the last thing to point at.
-    // The pill pulses and a card invites a question; opening the chat finishes
-    // the onboarding. If no chat is configured, end right away.
-    const beginChatHint = () => {
-        if (!chatAvailable() || !cardEls.chat) {
-            finishAll();
-            return;
-        }
-        phase = 'chat';
-        hintButtons();
+    // ---- Post-onboarding feature hints (NOT part of the linear tutorial) ----
+    // The tutorial teaches navigation only. The feature buttons reveal themselves
+    // afterwards: the "Möbliert sehen" sofa gently breathes until it is tapped;
+    // the concierge gets its own glow later, with a gap, so the two never compete.
+    const stageTrigger = document.getElementById('stageTrigger');
+    const SOFA_HINT_AFTER_TUTORIAL_MS = 10000;
+    const CONCIERGE_HINT_AFTER_SOFA_MS = 54000;
+    let sofaEngaged = false;
+    let conciergeHinted = false;
+
+    const startSofaHint = () => {
+        if (!sofaEngaged) stageTrigger?.classList.add('attention');
+    };
+    const startConciergeHint = () => {
+        if (conciergeHinted || !chatAvailable()) return;
+        conciergeHinted = true;
         chatToggle?.classList.add('tutorial-hint');
-        showCard(cardEls.chat);
+    };
+    // Kicked off when the tutorial finishes: glow the sofa shortly after.
+    const startFeatureHints = () => {
+        window.setTimeout(startSofaHint, SOFA_HINT_AFTER_TUTORIAL_MS);
     };
 
     // Onboarding complete: clear the hint and dismiss the cards.
@@ -201,6 +217,8 @@ const initTutorial = (global: Global) => {
             root.classList.add('hidden');
             document.body.classList.remove('tutorial-active');
         }, 450);
+        // hand off to the post-onboarding feature hints (sofa, then concierge)
+        startFeatureHints();
     };
 
     app.on('update', () => {
@@ -208,8 +226,12 @@ const initTutorial = (global: Global) => {
             const rel = shortestAngle(yaw(), startYaw);
             if (rel < minRel) minRel = rel;
             if (rel > maxRel) maxRel = rel;
-            // swept far enough in both directions
-            if (maxRel >= LOOK_EACH_SIDE_DEG && -minRel >= LOOK_EACH_SIDE_DEG) {
+            // a drag away from the furthest point reached the other way counts:
+            // turning back toward the start after looking one way satisfies the
+            // opposite direction (no need to overshoot the start on both sides).
+            if (maxRel - rel >= LOOK_EACH_SIDE_DEG) sweptOneWay = true;
+            if (rel - minRel >= LOOK_EACH_SIDE_DEG) sweptOtherWay = true;
+            if (sweptOneWay && sweptOtherWay) {
                 beginWalk();
             }
         } else if (phase === 'walk' && walkStart) {
@@ -244,14 +266,23 @@ const initTutorial = (global: Global) => {
             arrowPresses += 1;
             if (arrowPresses >= ARROW_PRESSES) beginArrowsBack();
         } else if (name === 'reset' && phase === 'home') {
-            // Home pressed → back at the start; now point at the concierge chat.
-            beginChatHint();
+            // Home pressed → back at the start: the linear tutorial is done. The
+            // feature hints (sofa, then concierge) take over from here.
+            finishAll();
         }
     });
 
-    // Final leg: opening the concierge chat completes the onboarding.
+    // Engaging the sofa stops its glow and, after a gap, invites the concierge
+    // (so the two hints never glow at the same time).
+    stageTrigger?.addEventListener('click', () => {
+        sofaEngaged = true;
+        stageTrigger.classList.remove('attention');
+        window.setTimeout(startConciergeHint, CONCIERGE_HINT_AFTER_SOFA_MS);
+    });
+
+    // Opening the concierge clears its glow.
     events.on('chatOpen:changed', (open: boolean) => {
-        if (open && phase === 'chat') finishAll();
+        if (open) chatToggle?.classList.remove('tutorial-hint');
     });
 
     // Measure leg: entering measure mode asks for two points; a finished

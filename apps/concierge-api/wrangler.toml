@@ -3,10 +3,13 @@ main = "src/worker.ts"
 compatibility_date = "2026-06-01"
 compatibility_flags = ["nodejs_compat"]
 
-# ANTHROPIC_API_KEY is provided as a secret, never committed:
+# ANTHROPIC_API_KEY (concierge) and GEMINI_API_KEY (/stage virtual staging,
+# "Nano Banana" = Gemini 2.5 Flash Image) are provided as secrets, never committed:
 #   wrangler secret put ANTHROPIC_API_KEY
-# For `wrangler dev`, place it in .dev.vars (gitignored):
+#   wrangler secret put GEMINI_API_KEY
+# For `wrangler dev` / the Node dev server, place them in .dev.vars (gitignored):
 #   ANTHROPIC_API_KEY=sk-...
+#   GEMINI_API_KEY=...
 #
 # Optional: comma-separated origin allowlist for CORS. If unset, a built-in
 # localhost dev allowlist is used.
