@@ -440,6 +440,70 @@
                 </div>
             </div>
 
+            <!-- AI virtual staging ("Möbliert sehen"): a glass pill bottom-left
+                 that renders the current view, sends it to the staging endpoint
+                 (server-side Gemini) and lays the furnished still over the live
+                 scan. Hidden until staging.ts confirms its config. -->
+            <div id="stagePill" class="hidden">
+                <button id="stageTrigger" type="button" aria-label="Möbliert sehen" title="Möbliert sehen">
+                    <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true">
+                        <!-- sofa -->
+                        <path d="M4 12.5 V10.5 a2 2 0 0 1 2 -2 h12 a2 2 0 0 1 2 2 v2" />
+                        <path d="M3 12.5 a1.5 1.5 0 0 1 1.5 1.5 v2.5 h15 v-2.5 a1.5 1.5 0 0 1 1.5 -1.5" />
+                        <path d="M6 16.5 v1.5 M18 16.5 v1.5 M7 8.6 V13 M17 8.6 V13" />
+                    </svg>
+                    <span id="stageLabel">Möbliert sehen</span>
+                </button>
+            </div>
+
+            <!-- Staging overlay: the furnished image laid over the scan, with a
+                 scan/furnished toggle, a press-and-hold peek, and a close that
+                 returns to walking. `.is-scan` fades the image out to reveal the
+                 live canvas underneath. Driven by staging.ts. -->
+            <div id="stageOverlay" class="hidden">
+                <img id="stageImage" alt="Möblierte Ansicht des Raums" />
+                <!-- Branded loader, shown only while generating (.is-generating):
+                     the StepInside logo glides in from the top, grows to the
+                     centre and fills up (base = dim, fill = bright, revealed
+                     left to right) as the room is furnished. -->
+                <div id="stageStatus">
+                    <div class="stageLoader" aria-hidden="true">
+                        <div class="stageLoader__mark stageLoader__mark--base">
+                            <span class="stageLoader__diamond"></span>
+                            <span class="stageLoader__word">StepInside</span>
+                        </div>
+                        <div class="stageLoader__mark stageLoader__mark--fill">
+                            <span class="stageLoader__diamond"></span>
+                            <span class="stageLoader__word">StepInside</span>
+                        </div>
+                    </div>
+                    <span id="stageStatusText">Der Raum wird eingerichtet</span>
+                </div>
+                <!-- style arrows: left/right edges, vertically centred over the image -->
+                <button id="stagePrev" class="stageArrow stageArrow--prev hidden" type="button" aria-label="Vorheriger Stil">
+                    <svg width="24" height="24" viewBox="0 0 22 22" aria-hidden="true">
+                        <path d="M13 5 L8 11 L13 17" />
+                    </svg>
+                </button>
+                <button id="stageNext" class="stageArrow stageArrow--next hidden" type="button" aria-label="Nächster Stil">
+                    <svg width="24" height="24" viewBox="0 0 22 22" aria-hidden="true">
+                        <path d="M9 5 L14 11 L9 17" />
+                    </svg>
+                </button>
+                <div id="stageBar">
+                    <!-- current style name (label) + actions -->
+                    <span id="stageStyleName" class="hidden">Warm</span>
+                    <div class="stageBar__actions">
+                        <button id="stageToggle" type="button">Original zeigen</button>
+                        <button id="stageClose" type="button" aria-label="Schließen" title="Zurück zum Rundgang">
+                            <svg width="20" height="20" viewBox="0 0 22 22" aria-hidden="true">
+                                <path d="M6 6 L16 16 M16 6 L6 16" />
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
             <!-- Distance measurement overlay: dashed line + endpoint dots + metric
                  label, all projected from 3D each frame. Driven by measure.ts. -->
             <div id="measureOverlay" class="hidden">

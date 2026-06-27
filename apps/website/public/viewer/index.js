@@ -82075,6 +82075,363 @@ const initConcierge = (global) => {
     });
 };
 
+// Longest edge (px) we downscale the captured frame to before sending. Keeps
+// the upload small and the per-image cost predictable; the model re-renders at
+// its own resolution anyway.
+const MAX_CAPTURE_EDGE = 1536;
+// Which curated bird's-eye (drone) viewpoint to stage from. Staging always
+// frames the room from this single fixed angle, so every style is generated
+// from the same vantage and the result is reproducible. MUST match the index
+// into `aerialViews` in camera-manager.ts. We want the LENGTHWISE view (camera
+// at one end wall, looking down the room toward the opposite wall) so the room
+// reads long/deep — index 0 ("wide, from the front") or 1 ("from the back");
+// NOT index 2 (the across/broad view). Set to 0; flip to 1 if it films from
+// the wrong end.
+const STAGING_AERIAL_INDEX = 0;
+// In 'demo' mode the loader plays for roughly this long (on top of the camera
+// fly) before the pre-generated image is revealed, so the wait still feels like
+// a real generation without making (paid) API calls.
+const DEMO_DELAY_MS = 6000;
+const initStaging = (global) => {
+    const { app, settings, state, events, renderer } = global;
+    // Cast-through config (not part of the validated schema core; see v2.ts).
+    const cfg = settings.staging;
+    if (!cfg?.enabled)
+        return;
+    // 'demo' shows pre-generated images (no API cost); 'live' calls the endpoint.
+    const demoMode = cfg.mode === 'demo';
+    const endpoint = cfg.endpoint ?? '';
+    const propertyId = cfg.propertyId ?? '';
+    // Live mode needs a real endpoint + property; demo mode needs neither.
+    if (!demoMode && (!endpoint || !propertyId))
+        return;
+    const styles = cfg.styles ?? [];
+    const styleImage = (id) => styles.find(s => s.id === id)?.image;
+    const wait = (ms) => new Promise(resolve => window.setTimeout(resolve, ms));
+    const pill = document.getElementById('stagePill');
+    const trigger = document.getElementById('stageTrigger');
+    const label = document.getElementById('stageLabel');
+    const overlay = document.getElementById('stageOverlay');
+    const img = document.getElementById('stageImage');
+    const closeBtn = document.getElementById('stageClose');
+    const toggleBtn = document.getElementById('stageToggle');
+    const statusEl = document.getElementById('stageStatus');
+    const statusText = document.getElementById('stageStatusText');
+    const prevBtn = document.getElementById('stagePrev');
+    const nextBtn = document.getElementById('stageNext');
+    const nameEl = document.getElementById('stageStyleName');
+    if (!pill || !trigger || !label || !overlay || !img || !closeBtn || !toggleBtn || !statusEl || !statusText || !prevBtn || !nextBtn || !nameEl)
+        return;
+    // Reveal the pill (hidden until wiring succeeds so a misconfigured build
+    // never shows a dead button).
+    pill.classList.remove('hidden');
+    let loading = false;
+    let styleIndex = 0;
+    let selectedStyle = styles[0]?.id;
+    // true = furnished image shown; false = scan (live canvas) shown through.
+    let showingFurnished = true;
+    // One generated image per style, kept for the page session. This is what
+    // stops tokens being burned on repeat clicks: each style is generated at
+    // most once; reopening the overlay or reselecting a style shows the cached
+    // image instead of calling the model again.
+    const cache = new Map();
+    const setLabel = (text) => {
+        label.textContent = text;
+        // idle = just the sofa icon; any status/error briefly expands to a label
+        trigger.classList.toggle('has-message', text !== 'Möbliert sehen');
+    };
+    // Show/hide the furnished image over the scan. Hiding it just drops the
+    // overlay image's opacity so the live canvas shows through underneath.
+    const setShowing = (furnished) => {
+        showingFurnished = furnished;
+        overlay.classList.toggle('is-scan', !furnished);
+        toggleBtn.textContent = furnished ? 'Original zeigen' : 'Möbliert zeigen';
+    };
+    // The furnished image currently on screen (for reverting after a failed
+    // style switch without losing the good result behind it).
+    let shownUrl;
+    // Show the finished furnished image (no loading state); soft-reveal it.
+    const showResult = (dataUrl) => {
+        overlay.classList.remove('hidden', 'is-scan', 'is-generating');
+        state.controlsHidden = true; // get the chrome out of the way
+        document.body.classList.add('staging-open'); // fully hide normal chrome
+        img.src = dataUrl;
+        shownUrl = dataUrl;
+        // restart the reveal animation each time
+        img.classList.remove('is-revealed');
+        void img.offsetWidth;
+        img.classList.add('is-revealed');
+        setShowing(true);
+    };
+    // Open the overlay in its generating state IMMEDIATELY (so the logo loader
+    // drops in the instant the user clicks). No backdrop is set: for a fresh
+    // generation a dark scrim shows behind the loader; for a style switch the
+    // previous furnished image stays as a dimmed backdrop. The camera fly +
+    // capture then happen hidden behind the loader.
+    const openGenerating = (message) => {
+        statusText.textContent = message;
+        overlay.classList.remove('hidden', 'is-scan');
+        overlay.classList.add('is-generating'); // restarts the logo fill
+        state.controlsHidden = true;
+        document.body.classList.add('staging-open'); // fully hide normal chrome
+    };
+    const closeOverlay = () => {
+        overlay.classList.add('hidden');
+        overlay.classList.remove('is-scan', 'is-generating');
+        img.classList.remove('is-revealed');
+        img.removeAttribute('src');
+        shownUrl = undefined;
+        setLabel('Möbliert sehen');
+        state.controlsHidden = false; // bring the viewer chrome back
+        document.body.classList.remove('staging-open');
+    };
+    // A generation failed: keep the previous result if there was one, otherwise
+    // close the overlay. Then surface a short message on the pill.
+    const failBack = (message) => {
+        if (shownUrl) {
+            overlay.classList.remove('is-generating');
+            setShowing(true);
+        }
+        else {
+            closeOverlay();
+        }
+        setLabel(message);
+        window.setTimeout(() => setLabel('Möbliert sehen'), 3000);
+    };
+    // Read the on-screen canvas into a downscaled JPEG data URL. The canvas
+    // holds the rendered scene only; the viewer UI is separate HTML overlay, so
+    // this is already a clean room image with no chrome to crop out.
+    const grabCanvas = () => {
+        const canvas = app.graphicsDevice.canvas;
+        const srcW = canvas.width;
+        const srcH = canvas.height;
+        if (!srcW || !srcH)
+            throw new Error('empty canvas');
+        const scale = Math.min(1, MAX_CAPTURE_EDGE / Math.max(srcW, srcH));
+        const w = Math.max(1, Math.round(srcW * scale));
+        const h = Math.max(1, Math.round(srcH * scale));
+        const off = document.createElement('canvas');
+        off.width = w;
+        off.height = h;
+        const ctx = off.getContext('2d');
+        if (!ctx)
+            throw new Error('no 2d context');
+        // opaque white backdrop just in case the canvas has alpha (JPEG has none)
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, w, h);
+        ctx.drawImage(canvas, 0, 0, w, h);
+        return off.toDataURL('image/jpeg', 0.9);
+    };
+    const nextFrame = () => new Promise(resolve => requestAnimationFrame(() => resolve()));
+    // Capture the current view. The trick differs by backend:
+    //   WebGPU — the swapchain texture is only readable once the frame has been
+    //     submitted and presented, which happens after `postrender`. So we force
+    //     a render and read on a later rAF, when the presented frame is on the
+    //     canvas. (Reading at postrender or via copyRenderTarget comes back blank
+    //     on WebGPU here.)
+    //   WebGL — without preserveDrawingBuffer the buffer is cleared after the
+    //     frame composites, so we must read inside the same frame, at postrender.
+    const captureFrame = async () => {
+        if (renderer === 'webgpu') {
+            app.renderNextFrame = true;
+            await nextFrame(); // this rAF renders the frame
+            app.renderNextFrame = true;
+            await nextFrame(); // submitted + presented
+            await nextFrame();
+            return grabCanvas();
+        }
+        // WebGL: read synchronously in the same frame, before the buffer clears.
+        return new Promise((resolve, reject) => {
+            app.once('postrender', () => {
+                try {
+                    resolve(grabCanvas());
+                }
+                catch (err) {
+                    reject(err);
+                }
+            });
+            app.renderNextFrame = true;
+        });
+    };
+    const setLoading = (value) => {
+        loading = value;
+        trigger.classList.toggle('is-loading', value);
+        trigger.disabled = value;
+    };
+    // Fly the camera to the fixed staging drone view and resolve once it has
+    // settled, so the captured frame is the steady overview, not a mid-glide
+    // blur. Resolves on the 'aerialArrived' signal (or a safety timeout).
+    const goToStagingAerial = () => new Promise((resolve) => {
+        let done = false;
+        const finish = () => {
+            if (done)
+                return;
+            done = true;
+            events.off('aerialArrived', onArrived);
+            window.clearTimeout(timer);
+            resolve();
+        };
+        const onArrived = () => finish();
+        events.on('aerialArrived', onArrived);
+        const timer = window.setTimeout(finish, 2500);
+        events.fire('inputEvent', 'aerialGoto', STAGING_AERIAL_INDEX);
+    });
+    // Show a style. Cached styles open instantly (no model call); a new style is
+    // generated once from the fixed drone overview, then cached. Defaults to the
+    // currently selected style (the pill).
+    const generate = async (styleId = selectedStyle) => {
+        if (loading)
+            return;
+        // Already generated this style? Reuse it — no network, no tokens.
+        const cached = styleId ? cache.get(styleId) : undefined;
+        if (cached) {
+            showResult(cached);
+            setLabel('Möbliert sehen');
+            return;
+        }
+        if (!demoMode && !navigator.onLine) {
+            setLabel('Keine Verbindung');
+            window.setTimeout(() => setLabel('Möbliert sehen'), 2500);
+            return;
+        }
+        setLoading(true);
+        // Drop the loader in immediately so there is no dead time before the
+        // logo appears. The fly-to-drone-view + frame capture happen hidden
+        // behind it.
+        openGenerating('Der Raum wird eingerichtet');
+        // Always stage from the one fixed drone overview (works from any mode).
+        await goToStagingAerial();
+        // Demo mode: no capture, no API call. Warm the image, let the loader run
+        // for a realistic beat, then reveal the pre-generated picture.
+        if (demoMode) {
+            const image = styleImage(styleId);
+            if (image) {
+                const pre = new Image();
+                pre.src = image;
+            }
+            await wait(DEMO_DELAY_MS);
+            if (image) {
+                if (styleId)
+                    cache.set(styleId, image);
+                showResult(image);
+                setLabel('Möbliert sehen');
+            }
+            else {
+                failBack('Kein Bild hinterlegt');
+            }
+            setLoading(false);
+            return;
+        }
+        let dataUrl;
+        try {
+            dataUrl = await captureFrame();
+        }
+        catch (err) {
+            console.warn('Frame capture failed:', err);
+            setLoading(false);
+            failBack('Aufnahme fehlgeschlagen');
+            return;
+        }
+        // Source frame dimensions let the server pick a matching output aspect.
+        const canvas = app.graphicsDevice.canvas;
+        try {
+            const res = await fetch(endpoint, {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({
+                    propertyId,
+                    image: dataUrl,
+                    style: styleId,
+                    width: canvas.width,
+                    height: canvas.height
+                })
+            });
+            if (!res.ok) {
+                failBack(res.status === 429 ?
+                    'Zu viele Anfragen. Bitte warte einen Moment.' :
+                    'Hat nicht geklappt. Bitte gleich nochmal.');
+                return;
+            }
+            const data = await res.json();
+            if (typeof data.image === 'string' && data.image.length > 0) {
+                if (styleId)
+                    cache.set(styleId, data.image);
+                showResult(data.image);
+                setLabel('Möbliert sehen');
+            }
+            else {
+                failBack('Kein Bild erhalten');
+            }
+        }
+        catch (err) {
+            console.warn('Staging request failed:', err);
+            failBack('Hat nicht geklappt. Bitte gleich nochmal.');
+        }
+        finally {
+            setLoading(false);
+        }
+    };
+    // Style arrows (left/right screen edges) cycle through the styles (only when
+    // >1 offered); the bottom bar shows the current style name + "Original zeigen".
+    const showStyleName = () => {
+        nameEl.textContent = styles[styleIndex]?.label ?? '';
+    };
+    const step = (dir) => {
+        if (loading || styles.length < 2)
+            return;
+        const n = styles.length;
+        styleIndex = (styleIndex + dir + n) % n;
+        selectedStyle = styles[styleIndex]?.id;
+        showStyleName();
+        // generate() handles the rest: cached styles swap in instantly, new ones
+        // show the generating loader.
+        generate(selectedStyle);
+    };
+    if (styles.length > 1) {
+        prevBtn.addEventListener('click', (event) => { event.stopPropagation(); step(-1); });
+        nextBtn.addEventListener('click', (event) => { event.stopPropagation(); step(1); });
+        prevBtn.classList.remove('hidden');
+        nextBtn.classList.remove('hidden');
+        // the style name stays hidden: the bottom bar shows only "Original zeigen"
+    }
+    // Pill: kick off a generation.
+    trigger.addEventListener('click', () => generate());
+    // Overlay controls. Stop pointer/wheel from reaching the canvas/camera.
+    overlay.addEventListener('wheel', event => event.stopPropagation());
+    toggleBtn.addEventListener('click', (event) => {
+        event.stopPropagation();
+        setShowing(!showingFurnished);
+    });
+    closeBtn.addEventListener('click', (event) => {
+        event.stopPropagation();
+        closeOverlay();
+    });
+    // Press-and-hold anywhere on the image to peek at the live scan, release to
+    // return to the furnished view. Pointer events cover mouse + touch.
+    const peekStart = (event) => {
+        // ignore presses that start on a control (toggle/close/style chips)
+        if (event.target.closest('button'))
+            return;
+        if (!showingFurnished)
+            return;
+        overlay.classList.add('is-scan');
+    };
+    const peekEnd = () => {
+        if (showingFurnished)
+            overlay.classList.remove('is-scan');
+    };
+    overlay.addEventListener('pointerdown', peekStart);
+    overlay.addEventListener('pointerup', peekEnd);
+    overlay.addEventListener('pointercancel', peekEnd);
+    overlay.addEventListener('pointerleave', peekEnd);
+    // Esc closes the overlay (mirrors the viewer's cancel convention).
+    events.on('inputEvent', (type) => {
+        if (type === 'cancel' && !overlay.classList.contains('hidden')) {
+            closeOverlay();
+        }
+    });
+};
+
 // Guided onboarding shown on first entry into walk mode. A chain of gated,
 // glowing glass cards, each pointing at the control it teaches:
 //   1. look       — drag to sweep the view ~LOOK_EACH_SIDE_DEG° to BOTH sides
@@ -82142,6 +82499,11 @@ const initTutorial = (global) => {
     let startYaw = 0;
     let minRel = 0;
     let maxRel = 0;
+    // each gesture is a DRAG in one direction, measured from the furthest point
+    // reached the other way — so turning left and then back toward the start
+    // already counts as a rightward drag (no need to cross the start both ways).
+    let sweptOneWay = false;
+    let sweptOtherWay = false;
     // walk tracking
     let walkStart = null;
     // explore / arrow tracking
@@ -82165,6 +82527,8 @@ const initTutorial = (global) => {
         startYaw = yaw();
         minRel = 0;
         maxRel = 0;
+        sweptOneWay = false;
+        sweptOtherWay = false;
         state.moveLocked = true; // block click-to-walk until the visitor has looked around
         document.body.classList.add('tutorial-active');
         hintButtons();
@@ -82226,18 +82590,28 @@ const initTutorial = (global) => {
         hintButtons('domeReset');
         showCard(cardEls.home);
     };
-    // After returning home: the concierge chat is the last thing to point at.
-    // The pill pulses and a card invites a question; opening the chat finishes
-    // the onboarding. If no chat is configured, end right away.
-    const beginChatHint = () => {
-        if (!chatAvailable() || !cardEls.chat) {
-            finishAll();
+    // ---- Post-onboarding feature hints (NOT part of the linear tutorial) ----
+    // The tutorial teaches navigation only. The feature buttons reveal themselves
+    // afterwards: the "Möbliert sehen" sofa gently breathes until it is tapped;
+    // the concierge gets its own glow later, with a gap, so the two never compete.
+    const stageTrigger = document.getElementById('stageTrigger');
+    const SOFA_HINT_AFTER_TUTORIAL_MS = 10000;
+    const CONCIERGE_HINT_AFTER_SOFA_MS = 54000;
+    let sofaEngaged = false;
+    let conciergeHinted = false;
+    const startSofaHint = () => {
+        if (!sofaEngaged)
+            stageTrigger?.classList.add('attention');
+    };
+    const startConciergeHint = () => {
+        if (conciergeHinted || !chatAvailable())
             return;
-        }
-        phase = 'chat';
-        hintButtons();
+        conciergeHinted = true;
         chatToggle?.classList.add('tutorial-hint');
-        showCard(cardEls.chat);
+    };
+    // Kicked off when the tutorial finishes: glow the sofa shortly after.
+    const startFeatureHints = () => {
+        window.setTimeout(startSofaHint, SOFA_HINT_AFTER_TUTORIAL_MS);
     };
     // Onboarding complete: clear the hint and dismiss the cards.
     const finishAll = () => {
@@ -82251,6 +82625,8 @@ const initTutorial = (global) => {
             root.classList.add('hidden');
             document.body.classList.remove('tutorial-active');
         }, 450);
+        // hand off to the post-onboarding feature hints (sofa, then concierge)
+        startFeatureHints();
     };
     app.on('update', () => {
         if (phase === 'look') {
@@ -82259,8 +82635,14 @@ const initTutorial = (global) => {
                 minRel = rel;
             if (rel > maxRel)
                 maxRel = rel;
-            // swept far enough in both directions
-            if (maxRel >= LOOK_EACH_SIDE_DEG && -minRel >= LOOK_EACH_SIDE_DEG) {
+            // a drag away from the furthest point reached the other way counts:
+            // turning back toward the start after looking one way satisfies the
+            // opposite direction (no need to overshoot the start on both sides).
+            if (maxRel - rel >= LOOK_EACH_SIDE_DEG)
+                sweptOneWay = true;
+            if (rel - minRel >= LOOK_EACH_SIDE_DEG)
+                sweptOtherWay = true;
+            if (sweptOneWay && sweptOtherWay) {
                 beginWalk();
             }
         }
@@ -82298,14 +82680,22 @@ const initTutorial = (global) => {
                 beginArrowsBack();
         }
         else if (name === 'reset' && phase === 'home') {
-            // Home pressed → back at the start; now point at the concierge chat.
-            beginChatHint();
+            // Home pressed → back at the start: the linear tutorial is done. The
+            // feature hints (sofa, then concierge) take over from here.
+            finishAll();
         }
     });
-    // Final leg: opening the concierge chat completes the onboarding.
+    // Engaging the sofa stops its glow and, after a gap, invites the concierge
+    // (so the two hints never glow at the same time).
+    stageTrigger?.addEventListener('click', () => {
+        sofaEngaged = true;
+        stageTrigger.classList.remove('attention');
+        window.setTimeout(startConciergeHint, CONCIERGE_HINT_AFTER_SOFA_MS);
+    });
+    // Opening the concierge clears its glow.
     events.on('chatOpen:changed', (open) => {
-        if (open && phase === 'chat')
-            finishAll();
+        if (open)
+            chatToggle?.classList.remove('tutorial-hint');
     });
     // Measure leg: entering measure mode asks for two points; a finished
     // measurement advances to the home hint. Leaving measure mode before
@@ -85657,9 +86047,15 @@ class CameraManager {
                 clearOrbitTargetOnTransitionEnd = false;
                 events.fire('orbitTarget:clear');
             }
+            // Signal when an aerial (drone) glide settles, so callers can grab a
+            // clean settled frame (used by virtual staging). Carries the index of
+            // the bird's-eye viewpoint we arrived at.
+            if (state.cameraMode === 'aerial' && prevTransitionTimer < 1 && transitionTimer === 1) {
+                events.fire('aerialArrived', aerialIndex);
+            }
         };
         // handle input events
-        events.on('inputEvent', (eventName) => {
+        events.on('inputEvent', (eventName, arg) => {
             switch (eventName) {
                 case 'frame':
                     events.fire('orbitTarget:clear');
@@ -85696,6 +86092,24 @@ class CameraManager {
                         startTransition();
                     }
                     break;
+                case 'aerialGoto': {
+                    // Fly to a SPECIFIC bird's-eye viewpoint from any mode and glide
+                    // there. Used by virtual staging, which always frames the room
+                    // from one fixed drone angle. Fires 'aerialArrived' when settled.
+                    const n = aerialViews.length;
+                    const idx = Math.max(0, Math.min(n - 1, Number(arg) | 0));
+                    if (state.cameraMode !== 'aerial') {
+                        preAerialMode = state.cameraMode;
+                        preAerialCamera.copy(this.camera);
+                        events.fire('orbitTarget:clear');
+                        sourcesByMode[state.cameraMode]?.cancel();
+                        state.cameraMode = 'aerial';
+                    }
+                    aerialIndex = idx;
+                    controllers.aerial.goto(aerialViews[aerialIndex]);
+                    startTransition();
+                    break;
+                }
                 case 'reset':
                     if (state.cameraMode === 'walk') {
                         walkSource.cancel();
@@ -91165,6 +91579,7 @@ const main = async (canvas, settingsJson, config) => {
     initTutorial(global);
     initControls(global);
     initConcierge(global);
+    initStaging(global);
     // Load model
     const gsplatLoad = loadGsplat(app, config, (progress) => {
         state.progress = progress;

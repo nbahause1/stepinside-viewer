@@ -465,8 +465,8 @@ body.tutorial-active #walkHint {
 }
 #chatPill #chatToggle {
   pointer-events: auto;
-  width: 52px;
-  height: 52px;
+  width: 44px;
+  height: 44px;
   flex-shrink: 0;
   display: flex;
   align-items: center;
@@ -475,7 +475,7 @@ body.tutorial-active #walkHint {
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 50%;
   cursor: pointer;
-  color: #fff;
+  color: rgba(255, 255, 255, 0.82);
   background: linear-gradient(180deg, rgba(30, 30, 32, 0.5), rgba(18, 18, 20, 0.42));
   backdrop-filter: blur(20px) saturate(150%);
   -webkit-backdrop-filter: blur(20px) saturate(150%);
@@ -487,8 +487,10 @@ body.tutorial-active #walkHint {
 }
 #chatPill #chatToggle > svg {
   display: block;
+  width: 22px;
+  height: 22px;
   fill: none;
-  stroke: #fff;
+  stroke: currentColor;
   stroke-width: 1.75;
   stroke-linecap: round;
   stroke-linejoin: round;
@@ -1537,6 +1539,434 @@ body.measure-active #controlDome #domeMeasure .domeIcon--walk {
 #annotationNav.touch > #annotationNext {
   right: max(0px, env(safe-area-inset-right));
   border-radius: 6px 0 0 6px;
+}
+
+#stagePill {
+  position: fixed;
+  left: calc(max(14px, env(safe-area-inset-left)) + 54px);
+  bottom: max(14px, env(safe-area-inset-bottom));
+  z-index: 16;
+  pointer-events: none;
+}
+#stagePill #stageTrigger {
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 44px;
+  padding: 0 11px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 22px;
+  cursor: pointer;
+  color: #fff;
+  font-family: "Montserrat", sans-serif;
+  font-weight: 600;
+  font-size: 13.5px;
+  line-height: 1;
+  white-space: nowrap;
+  background: linear-gradient(180deg, rgba(30, 30, 32, 0.5), rgba(18, 18, 20, 0.42));
+  backdrop-filter: blur(20px) saturate(150%);
+  -webkit-backdrop-filter: blur(20px) saturate(150%);
+  box-shadow: 0 8px 24px -10px rgba(0, 0, 0, 0.4), inset 0 1px 0 0 rgba(255, 255, 255, 0.14);
+  transition: padding 300ms var(--ease-glass), background 160ms var(--ease-out), transform 160ms var(--ease-out), opacity 160ms;
+}
+#stagePill #stageTrigger * {
+  pointer-events: none;
+}
+#stagePill #stageTrigger > svg {
+  display: block;
+  flex-shrink: 0;
+  fill: none;
+  stroke: #fff;
+  stroke-width: 1.75;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+#stagePill #stageTrigger #stageLabel {
+  display: inline-block;
+  max-width: 0;
+  margin-left: 0;
+  opacity: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  transition: max-width 300ms var(--ease-glass), margin-left 300ms var(--ease-glass), opacity 220ms var(--ease-out);
+}
+@media (hover: hover) and (pointer: fine) {
+  #stagePill #stageTrigger:hover {
+    background: linear-gradient(180deg, rgba(42, 42, 45, 0.56), rgba(26, 26, 28, 0.48));
+  }
+}
+#stagePill #stageTrigger:active {
+  transform: scale(0.96);
+}
+#stagePill #stageTrigger.is-loading {
+  opacity: 0.75;
+  cursor: default;
+}
+#stagePill #stageTrigger:disabled {
+  cursor: default;
+}
+#stagePill #stageTrigger.has-message, #stagePill #stageTrigger.attention {
+  padding: 0 18px 0 14px;
+}
+#stagePill #stageTrigger.has-message #stageLabel, #stagePill #stageTrigger.attention #stageLabel {
+  max-width: 180px;
+  margin-left: 9px;
+  opacity: 1;
+}
+
+#stagePill #stageTrigger.attention {
+  animation: stageArrowGlow 2s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #stagePill #stageTrigger.attention {
+    animation: none;
+  }
+}
+body.staging-open #controlDome,
+body.staging-open #brandDome,
+body.staging-open #chatPill,
+body.staging-open #stagePill {
+  opacity: 0 !important;
+  pointer-events: none !important;
+  transition: opacity 200ms var(--ease-out);
+}
+
+#stageOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 38;
+  background: transparent;
+  animation: stageFadeIn 260ms var(--ease-out);
+}
+#stageOverlay #stageImage {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  -o-object-fit: cover;
+     object-fit: cover;
+  opacity: 1;
+  transition: opacity 220ms var(--ease-out), filter 320ms var(--ease-out);
+  -webkit-user-select: none;
+     -moz-user-select: none;
+          user-select: none;
+  -webkit-user-drag: none;
+}
+#stageOverlay.is-scan #stageImage {
+  opacity: 0;
+}
+#stageOverlay #stageImage:not([src]) {
+  display: none;
+}
+#stageOverlay #stageImage.is-revealed {
+  animation: stageReveal 480ms var(--ease-out);
+}
+#stageOverlay #stageStatus {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 22px;
+  opacity: 0;
+  transition: opacity 260ms var(--ease-out);
+  pointer-events: none;
+  color: #fff;
+}
+#stageOverlay:not(.is-generating) #stageStatus {
+  display: none;
+}
+#stageOverlay .stageLoader {
+  position: relative;
+  animation: stageLoaderIn 560ms var(--ease-out) both;
+}
+#stageOverlay .stageLoader__mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 13px;
+  white-space: nowrap;
+  padding: 6px 16px;
+  font-family: "Montserrat", sans-serif;
+  font-weight: 700;
+  font-size: 30px;
+  letter-spacing: 0.01em;
+  line-height: 1;
+  text-shadow: 0 2px 22px rgba(0, 0, 0, 0.45);
+}
+#stageOverlay .stageLoader__diamond {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  transform: rotate(45deg);
+  background: currentColor;
+}
+#stageOverlay .stageLoader__mark--base {
+  color: rgba(255, 255, 255, 0.24);
+}
+#stageOverlay .stageLoader__mark--fill {
+  position: absolute;
+  inset: 0;
+  color: #fff;
+  clip-path: inset(0 100% 0 0);
+}
+#stageOverlay #stageStatusText {
+  display: none;
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: rgba(255, 255, 255, 0.6);
+  text-shadow: 0 1px 12px rgba(0, 0, 0, 0.5);
+}
+#stageOverlay.is-generating {
+  background: rgba(20, 19, 18, 0.92);
+}
+#stageOverlay.is-generating #stageImage {
+  opacity: 0;
+}
+#stageOverlay.is-generating #stageStatus {
+  opacity: 1;
+}
+#stageOverlay.is-generating .stageLoader__mark--fill {
+  animation: stageLoaderFill 13s var(--ease-out) forwards;
+}
+#stageOverlay.is-generating #stageBar {
+  opacity: 0;
+  pointer-events: none;
+}
+#stageOverlay.is-generating .stageArrow {
+  opacity: 0;
+  pointer-events: none;
+}
+#stageOverlay #stageBar {
+  position: absolute;
+  left: 50%;
+  bottom: max(20px, env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: calc(100vw - 28px);
+  padding: 8px;
+  opacity: 1;
+  transition: opacity 220ms var(--ease-out);
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: linear-gradient(180deg, rgba(30, 30, 32, 0.5), rgba(18, 18, 20, 0.42));
+  backdrop-filter: blur(20px) saturate(150%);
+  -webkit-backdrop-filter: blur(20px) saturate(150%);
+  box-shadow: 0 18px 44px -14px rgba(0, 0, 0, 0.5), inset 0 1px 0 0 rgba(255, 255, 255, 0.14);
+}
+#stageOverlay #stageStyleName {
+  min-width: 96px;
+  text-align: center;
+  font-family: "Montserrat", sans-serif;
+  font-weight: 600;
+  font-size: 13.5px;
+  color: #fff;
+  white-space: nowrap;
+}
+#stageOverlay #stageStyleName.hidden {
+  display: none;
+}
+#stageOverlay #stageStyleName:not(.hidden) + .stageBar__actions {
+  border-left: 1px solid rgba(255, 255, 255, 0.12);
+  padding-left: 8px;
+  margin-left: 2px;
+}
+#stageOverlay .stageBar__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+#stageOverlay .stageArrow {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 52px;
+  height: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 50%;
+  cursor: pointer;
+  color: #fff;
+  background: linear-gradient(180deg, rgba(30, 30, 32, 0.5), rgba(18, 18, 20, 0.42));
+  backdrop-filter: blur(20px) saturate(150%);
+  -webkit-backdrop-filter: blur(20px) saturate(150%);
+  box-shadow: 0 8px 24px -10px rgba(0, 0, 0, 0.4), inset 0 1px 0 0 rgba(255, 255, 255, 0.14);
+  transition: background 160ms var(--ease-out), opacity 220ms var(--ease-out);
+  animation: stageArrowGlow 2.6s ease-in-out infinite;
+}
+#stageOverlay .stageArrow.hidden {
+  display: none;
+}
+#stageOverlay .stageArrow > svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+@media (hover: hover) and (pointer: fine) {
+  #stageOverlay .stageArrow:hover {
+    background: linear-gradient(180deg, rgba(42, 42, 45, 0.56), rgba(26, 26, 28, 0.48));
+  }
+}
+#stageOverlay .stageArrow:active {
+  transform: translateY(-50%) scale(0.94);
+}
+#stageOverlay .stageArrow--prev {
+  left: max(14px, env(safe-area-inset-left));
+}
+#stageOverlay .stageArrow--next {
+  right: max(14px, env(safe-area-inset-right));
+}
+#stageOverlay .stageArrow--prev > svg {
+  animation: stageNudgeL 2.6s ease-in-out infinite;
+}
+#stageOverlay .stageArrow--next > svg {
+  animation: stageNudgeR 2.6s ease-in-out infinite;
+}
+#stageOverlay #stageToggle {
+  height: 38px;
+  padding: 0 16px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  cursor: pointer;
+  color: #fff;
+  font-family: "Montserrat", sans-serif;
+  font-weight: 600;
+  font-size: 13px;
+  white-space: nowrap;
+  background: rgba(255, 255, 255, 0.08);
+  transition: background 140ms var(--ease-out);
+}
+@media (hover: hover) and (pointer: fine) {
+  #stageOverlay #stageToggle:hover {
+    background: rgba(255, 255, 255, 0.16);
+  }
+}
+#stageOverlay #stageToggle:active {
+  transform: scale(0.97);
+}
+#stageOverlay #stageClose {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  flex-shrink: 0;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  cursor: pointer;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.08);
+  transition: background 140ms var(--ease-out);
+}
+#stageOverlay #stageClose > svg {
+  fill: none;
+  stroke: #fff;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+}
+@media (hover: hover) and (pointer: fine) {
+  #stageOverlay #stageClose:hover {
+    background: rgba(255, 255, 255, 0.16);
+  }
+}
+#stageOverlay #stageClose:active {
+  transform: scale(0.94);
+}
+
+@keyframes stageFadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes stageLoaderIn {
+  from {
+    transform: translateY(-34vh) scale(0.4);
+    opacity: 0;
+  }
+  55% {
+    opacity: 1;
+  }
+  to {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+  }
+}
+@keyframes stageLoaderFill {
+  0% {
+    clip-path: inset(0 100% 0 0);
+  }
+  65% {
+    clip-path: inset(0 26% 0 0);
+  }
+  100% {
+    clip-path: inset(0 8% 0 0);
+  }
+}
+@keyframes stageReveal {
+  from {
+    opacity: 0.35;
+    transform: scale(1.012);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes stageArrowGlow {
+  0%, 100% {
+    box-shadow: 0 8px 24px -10px rgba(0, 0, 0, 0.4), inset 0 1px 0 0 rgba(255, 255, 255, 0.14), 0 0 6px 0 rgba(255, 255, 255, 0.12);
+  }
+  50% {
+    box-shadow: 0 8px 24px -10px rgba(0, 0, 0, 0.4), inset 0 1px 0 0 rgba(255, 255, 255, 0.22), 0 0 26px 6px rgba(255, 255, 255, 0.55);
+  }
+}
+@keyframes stageNudgeR {
+  0%, 100% {
+    transform: translateX(0);
+  }
+  50% {
+    transform: translateX(3px);
+  }
+}
+@keyframes stageNudgeL {
+  0%, 100% {
+    transform: translateX(0);
+  }
+  50% {
+    transform: translateX(-3px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  #stageOverlay #stageImage.is-revealed {
+    animation: none;
+  }
+  #stageOverlay.is-generating .stageLoader {
+    animation: none;
+  }
+  #stageOverlay.is-generating .stageLoader__mark--fill {
+    animation: none;
+    clip-path: inset(0 45% 0 0);
+  }
+  #stageOverlay .stageArrow,
+  #stageOverlay .stageArrow > svg {
+    animation: none;
+  }
 }
 
 /*# sourceMappingURL=index.css.map */

@@ -68,6 +68,18 @@
     "endpoint": "http://localhost:8787/concierge",
     "propertyId": "example-fewo"
   },
+  "staging": {
+    "enabled": true,
+    "mode": "demo",
+    "endpoint": "http://localhost:8787/stage",
+    "propertyId": "example-fewo",
+    "styles": [
+      { "id": "warm", "label": "Warm", "image": "staged/warm.jpg" },
+      { "id": "scandi", "label": "Skandinavisch", "image": "staged/scandi.jpg" },
+      { "id": "classic", "label": "Klassisch", "image": "staged/classic.jpg" },
+      { "id": "modern", "label": "Modern", "image": "staged/modern.jpg" }
+    ]
+  },
   "pois": [
     {
       "id": "window",
