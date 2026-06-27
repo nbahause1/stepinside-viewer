@@ -1543,7 +1543,7 @@ body.measure-active #controlDome #domeMeasure .domeIcon--walk {
 
 #stagePill {
   position: fixed;
-  left: calc(max(14px, env(safe-area-inset-left)) + 54px);
+  right: max(14px, env(safe-area-inset-right));
   bottom: max(14px, env(safe-area-inset-bottom));
   z-index: 16;
   pointer-events: none;
@@ -1972,9 +1972,6 @@ body.staging-open #stagePill {
   #chatPill #chatToggle {
     width: 40px;
     height: 40px;
-  }
-  #stagePill {
-    left: calc(max(14px, env(safe-area-inset-left)) + 52px);
   }
   #stagePill #stageTrigger {
     height: 40px;

@@ -1892,9 +1892,9 @@ body.measure-active #controlDome {
 // light-sweep + progress bar (the "wird eingerichtet" experience).
 #stagePill {
     position: fixed;
-    // bottom-left row, just right of the concierge toggle, same height as it and
-    // the control dome (all at bottom:14px)
-    left: calc(max(14px, env(safe-area-inset-left)) + 54px);
+    // bottom-RIGHT corner. The concierge sits in the bottom-left, the control
+    // dome in the centre — so the two AI actions bookend the bottom bar.
+    right: max(14px, env(safe-area-inset-right));
     bottom: max(14px, env(safe-area-inset-bottom));
     z-index: 16;
     pointer-events: none;
@@ -2341,9 +2341,8 @@ body.staging-open {
 // demo images must be readable on a portrait screen. Placed after the staging
 // rules so these win at equal specificity. ----
 @media (max-width: 600px) {
-    // smaller, less crowded bottom-left pills (concierge + sofa)
+    // smaller pills on a narrow phone (concierge bottom-left, sofa bottom-right)
     #chatPill #chatToggle { width: 40px; height: 40px; }
-    #stagePill { left: calc(max(14px, env(safe-area-inset-left)) + 52px); }
     #stagePill #stageTrigger { height: 40px; padding: 0 9px; }
 
     // never expand to the label on mobile — it would overlap the control dome;
