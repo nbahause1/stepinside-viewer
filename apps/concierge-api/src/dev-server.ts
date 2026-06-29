@@ -18,10 +18,30 @@ import type { KnowledgeBase } from './knowledge.js';
 import { MemoryRateLimiter } from './ratelimit.js';
 import { handleConcierge } from './core.js';
 import { handleStaging } from './staging.js';
+import type { StagingStyle } from './staging-prompt.js';
 import { parseAllowedOrigins, resolveAllowOrigin, corsHeaders } from './cors.js';
 
 const PORT = 8787;
 const KNOWLEDGE_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'knowledge');
+const STAGING_REFS_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'staging-refs');
+const REF_MIME: Record<string, string> = {
+  '.png': 'image/png', '.webp': 'image/webp', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+};
+
+/** Load a style's reference furniture photos from disk (dev: read staging-refs/). */
+async function loadStyleReferences(style: StagingStyle) {
+  const out: { mimeType: string; base64: string }[] = [];
+  for (const file of style.refs) {
+    try {
+      const buf = await readFile(join(STAGING_REFS_DIR, style.dir, file));
+      const ext = file.slice(file.lastIndexOf('.')).toLowerCase();
+      out.push({ mimeType: REF_MIME[ext] ?? 'image/jpeg', base64: buf.toString('base64') });
+    } catch {
+      // Skip a missing reference; the prompt still names the piece.
+    }
+  }
+  return out;
+}
 const PROPERTY_ID_RE = /^[a-z0-9-]{1,64}$/;
 const cache = new Map<string, KnowledgeBase>();
 
@@ -126,6 +146,7 @@ const server = createServer((req: IncomingMessage, res: ServerResponse) => {
         geminiApiKey,
         rateLimiter: stagingRateLimiter,
         clientIp: clientIpOf(req),
+        loadStyleReferences,
       });
       send(res, result.status, result.body, cors, result.retryAfterSeconds);
       return;

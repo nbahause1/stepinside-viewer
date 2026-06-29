@@ -21,7 +21,14 @@
  */
 import { validateStagingRequest, StagingValidationError } from './staging-validation.js';
 import { buildStagingPrompt, resolveStyle } from './staging-prompt.js';
+import type { StagingStyle } from './staging-prompt.js';
 import type { RateLimiter } from './ratelimit.js';
+
+/** A reference furniture photo used to condition the generation. */
+export interface ReferenceImage {
+  mimeType: string;
+  base64: string;
+}
 
 /** Dependencies injected by each entry point. */
 export interface StagingDeps {
@@ -30,6 +37,13 @@ export interface StagingDeps {
   rateLimiter: RateLimiter;
   /** Best-effort client IP for rate limiting; '' if unknown. */
   clientIp: string;
+  /**
+   * Load the reference furniture photos for a style (image-conditioning), in the
+   * order the prompt expects them. Each entry point supplies this for its
+   * platform (dev reads disk; prod bundles/fetches). If omitted or it returns an
+   * empty array, staging falls back to the named-pieces prompt alone.
+   */
+  loadStyleReferences?: (style: StagingStyle) => Promise<ReferenceImage[]>;
 }
 
 /** A normalized result the entry points translate into their native response. */
@@ -41,17 +55,28 @@ export interface StagingResult {
 
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 
-// "Nano Banana 2" — Google's image-editing model. It keeps the room and adds
-// furniture, returning the result inline as base64. We use the 3.1 flash model
-// (over the older 2.5, which only outputs ~1K) so the staged image is sharp
-// enough to sit beside the high-quality live scan without an obvious quality
-// drop. For maximum fidelity swap to 'gemini-3-pro-image' (Nano Banana Pro),
-// at higher cost/latency.
-const GEMINI_MODEL = 'gemini-3.1-flash-image';
+// Nano Banana Pro. We use the Pro image model (over 3.1-flash) because it holds
+// the room architecture far tighter — windows/doors/walls stay pixel-stable —
+// which the scan<->furnished toggle depends on: a furnished frame whose room
+// drifted no longer lines up with the live scan underneath it. Costs more
+// time/$ than flash; the fidelity is worth it for this feature.
+const GEMINI_MODEL = 'gemini-3-pro-image';
 
 // Output resolution requested via generationConfig.imageConfig (Gemini 3 image
 // models support '1K' | '2K' | '4K'). 2K closely matches the scan's crispness.
 const GEMINI_IMAGE_SIZE = '2K';
+
+// Nano Banana Pro intermittently returns 503 ("model is overloaded" / high
+// demand) — a transient condition, not a real failure. Since the viewer
+// pre-generates in the background, a couple of automatic retries make that
+// invisible to the visitor. Backoff before each retry (ms); the length of this
+// array is the number of RETRIES (so total attempts = length + 1).
+const GEMINI_RETRY_BACKOFF_MS = [2000, 5000];
+// Statuses worth retrying: transient upstream overload/unavailability only.
+// 429 (quota) and 4xx (bad request/key) are not retried — they won't self-heal.
+const GEMINI_RETRYABLE_STATUS = new Set([503, 500]);
+
+const delay = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
 
 // Supported output aspect-ratio enums (Gemini 3 image). We pick the one closest
 // to the captured frame so the staged image lines up with the live scan.
@@ -110,9 +135,17 @@ export async function handleStaging(
     return { status: 400, body: { error: 'Invalid request.' } };
   }
 
-  // 3. Resolve the style id to a server-owned prompt (client never sends text).
+  // 3. Resolve the style id to a server-owned prompt (client never sends text)
+  //    and load that style's reference furniture photos (image-conditioning).
   const style = resolveStyle(request.style);
   const prompt = buildStagingPrompt(style);
+  let references: ReferenceImage[] = [];
+  try {
+    references = (await deps.loadStyleReferences?.(style)) ?? [];
+  } catch (err) {
+    // Missing references shouldn't fail staging — degrade to the prompt alone.
+    console.warn('[staging] reference load failed:', String(err));
+  }
 
   try {
     // 4/5. Generate + extract the inline image.
@@ -123,6 +156,7 @@ export async function handleStaging(
       request.imageBase64,
       request.mimeType,
       aspectRatio,
+      references,
     );
     if (!image) {
       return { status: 502, body: { error: 'No image was generated. Please try again.' } };
@@ -154,8 +188,9 @@ class GeminiError extends Error {
 }
 
 /**
- * Call Gemini's image model with the prompt + the captured frame inline, and
- * return the first generated image as a `data:` URL (or null if none came back).
+ * Call Gemini's image model with the prompt, the captured frame (image 1) and
+ * the style's reference photos (images 2..N) inline, and return the first
+ * generated image as a `data:` URL (or null if none came back).
  */
 async function generateWithGemini(
   apiKey: string,
@@ -163,31 +198,46 @@ async function generateWithGemini(
   imageBase64: string,
   mimeType: string,
   aspectRatio: string,
+  references: ReferenceImage[] = [],
 ): Promise<string | null> {
   const url = `${GEMINI_BASE}/models/${GEMINI_MODEL}:generateContent`;
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'x-goog-api-key': apiKey,
-      'Content-Type': 'application/json',
+  const parts = [
+    { text: prompt },
+    // Image 1: the room to furnish (the captured scan frame).
+    { inline_data: { mime_type: mimeType, data: imageBase64 } },
+    // Images 2..N: the style's reference furniture, in prompt order.
+    ...references.map(r => ({ inline_data: { mime_type: r.mimeType, data: r.base64 } })),
+  ];
+  const requestBody = JSON.stringify({
+    contents: [{ parts }],
+    // Gemini 3 image models: request a high-res output at the frame's aspect.
+    generationConfig: {
+      imageConfig: { imageSize: GEMINI_IMAGE_SIZE, aspectRatio },
     },
-    body: JSON.stringify({
-      contents: [
-        {
-          parts: [
-            { text: prompt },
-            { inline_data: { mime_type: mimeType, data: imageBase64 } },
-          ],
-        },
-      ],
-      // Gemini 3 image models: request a high-res output at the frame's aspect.
-      generationConfig: {
-        imageConfig: { imageSize: GEMINI_IMAGE_SIZE, aspectRatio },
-      },
-    }),
   });
 
-  if (!res.ok) {
+  // Call with automatic retries on transient upstream overload (503/500). Each
+  // attempt re-issues the full request; non-retryable statuses throw immediately.
+  let res: Response | undefined;
+  for (let attempt = 0; ; attempt++) {
+    res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'x-goog-api-key': apiKey,
+        'Content-Type': 'application/json',
+      },
+      body: requestBody,
+    });
+
+    if (res.ok) break;
+
+    const retryable = GEMINI_RETRYABLE_STATUS.has(res.status);
+    if (retryable && attempt < GEMINI_RETRY_BACKOFF_MS.length) {
+      const wait = GEMINI_RETRY_BACKOFF_MS[attempt];
+      console.warn(`[staging] Gemini ${res.status} (transient), retry ${attempt + 1}/${GEMINI_RETRY_BACKOFF_MS.length} in ${wait}ms`);
+      await delay(wait);
+      continue;
+    }
     throw new GeminiError(res.status, await safeText(res));
   }
 

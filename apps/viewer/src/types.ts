@@ -51,6 +51,7 @@ type State = {
     gamingControls: boolean;
     moveLocked: boolean;                        // when true, click/tap-to-navigate is blocked (used by the onboarding gate)
     chatOpen: boolean;                          // true while the AI concierge chat panel is expanded
+    prewarming: boolean;                        // true while staging silently flies to the drone view at load to pre-capture (gates onboarding so it can't fight the camera)
 };
 
 type Global = {

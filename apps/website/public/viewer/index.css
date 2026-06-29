@@ -1616,6 +1616,37 @@ body.measure-active #controlDome #domeMeasure .domeIcon--walk {
   opacity: 1;
 }
 
+#stagePill #stageTrigger.is-revealing {
+  animation: stagePillIn 480ms var(--ease-out) both;
+}
+
+@keyframes stagePillIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  #stagePill #stageTrigger.is-revealing {
+    animation: none;
+  }
+}
+#stagePrewarmCover {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: #0d0d0f;
+  opacity: 1;
+  transition: opacity 450ms var(--ease-out);
+}
+#stagePrewarmCover.is-fading {
+  opacity: 0;
+}
+
 #stagePill #stageTrigger.attention {
   animation: stageArrowGlow 2s ease-in-out infinite;
 }

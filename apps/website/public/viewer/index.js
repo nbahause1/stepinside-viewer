@@ -82130,9 +82130,23 @@ const initStaging = (global) => {
     const nameEl = document.getElementById('stageStyleName');
     if (!pill || !trigger || !label || !overlay || !img || !closeBtn || !toggleBtn || !statusEl || !statusText || !prevBtn || !nextBtn || !nameEl)
         return;
-    // Reveal the pill (hidden until wiring succeeds so a misconfigured build
-    // never shows a dead button).
-    pill.classList.remove('hidden');
+    // The pill stays hidden until it is actually usable. In demo mode that is
+    // immediately (images are local). In live mode we keep it hidden until the
+    // background pre-generation for the default style has landed, then fade it in
+    // — so a click always shows a finished image, never a 60s wait (see prewarm
+    // below). A misconfigured build therefore also never shows a dead button.
+    let pillRevealed = false;
+    const revealPill = () => {
+        if (pillRevealed)
+            return;
+        pillRevealed = true;
+        pill.classList.remove('hidden');
+        // soft entrance (fade + slight rise); class self-clears after the anim
+        trigger.classList.add('is-revealing');
+        window.setTimeout(() => trigger.classList.remove('is-revealing'), 600);
+    };
+    if (demoMode)
+        revealPill();
     let loading = false;
     let styleIndex = 0;
     let selectedStyle = styles[0]?.id;
@@ -82441,6 +82455,91 @@ const initStaging = (global) => {
             closeOverlay();
         }
     });
+    // ---- Silent background prewarm (live mode only) ----------------------------
+    // The model takes ~60s/image. To make that wait invisible, we generate the
+    // DEFAULT style in the background the moment the scene is ready: fly to the
+    // fixed drone view behind an opaque cover (the visitor never sees it and has
+    // no control yet — the spec's "Lade-/Poster-Phase" capture), grab the frame
+    // with the proven on-canvas capture, glide back to the start pose, drop the
+    // cover, and POST while the visitor walks/onboards. The pill only appears once
+    // the result is in the cache, so the first click is instant. The other two
+    // styles stay on-demand (generate() handles them) to keep token cost to one
+    // image per load.
+    if (!demoMode && styles.length > 0) {
+        // Gate onboarding NOW (synchronously, before firstFrame): the tutorial's
+        // 'look' leg watches camera yaw, so it must not run during our sweep.
+        state.prewarming = true;
+        // Full-screen cover, created hidden up front so showing it at firstFrame is
+        // a single synchronous class flip (no paint between poster-hide and cover).
+        const cover = document.createElement('div');
+        cover.id = 'stagePrewarmCover';
+        cover.className = 'hidden';
+        document.body.appendChild(cover);
+        const prewarmDefault = async () => {
+            const styleId = styles[0]?.id;
+            const key = styleId ? `${styleId}:${isPortrait() ? 'p' : 'l'}` : undefined;
+            if (!styleId || !key) {
+                state.prewarming = false;
+                revealPill();
+                return;
+            }
+            cover.classList.remove('hidden'); // hide the camera detour from the visitor
+            let dataUrl;
+            try {
+                await goToStagingAerial(); // glide up to the fixed drone view
+                dataUrl = await captureFrame(); // proven single-camera, correctly-sorted capture
+            }
+            catch (err) {
+                console.warn('Prewarm capture failed:', err);
+            }
+            finally {
+                // Toggle-exit aerial -> glide back to exactly the start pose, settle,
+                // then lift the cover and release the onboarding gate.
+                events.fire('inputEvent', 'aerial');
+                await wait(1200); // no 'arrived' signal on exit; ~match the glide
+                app.renderNextFrame = true;
+                cover.classList.add('is-fading');
+                window.setTimeout(() => { cover.classList.add('hidden'); cover.classList.remove('is-fading'); }, 450);
+                state.prewarming = false; // re-runs the tutorial's start check
+            }
+            if (!dataUrl) {
+                revealPill();
+                return;
+            } // capture failed: degrade to on-click live gen
+            const canvas = app.graphicsDevice.canvas;
+            try {
+                const res = await fetch(endpoint, {
+                    method: 'POST',
+                    headers: { 'content-type': 'application/json' },
+                    body: JSON.stringify({
+                        propertyId,
+                        image: dataUrl,
+                        style: styleId,
+                        width: canvas.width,
+                        height: canvas.height
+                    })
+                });
+                if (res.ok) {
+                    const data = await res.json();
+                    if (typeof data.image === 'string' && data.image.length > 0) {
+                        cache.set(key, data.image);
+                        const pre = new Image(); // warm the decode so the first click paints instantly
+                        pre.src = data.image;
+                    }
+                }
+            }
+            catch (err) {
+                console.warn('Prewarm generation failed:', err);
+            }
+            finally {
+                // Reveal regardless: a hit shows instantly, a miss falls back to the
+                // normal on-click generation (with its loader) so the feature is
+                // never lost. firstFrame fires once, so this runs at most once.
+                revealPill();
+            }
+        };
+        events.on('firstFrame', prewarmDefault);
+    }
 };
 
 // Guided onboarding shown on first entry into walk mode. A chain of gated,
@@ -82728,11 +82827,16 @@ const initTutorial = (global) => {
     const maybeStart = () => {
         if (phase !== 'idle')
             return;
-        if (state.loaded && state.cameraMode === 'walk') {
+        // Hold off while staging is silently flying to the drone view to pre-capture:
+        // the 'look' leg measures camera yaw, so the prewarm sweep would falsely
+        // complete it. Once prewarm clears (camera restored to the start pose) the
+        // 'prewarming:changed' listener re-runs this and onboarding begins cleanly.
+        if (state.loaded && state.cameraMode === 'walk' && !state.prewarming) {
             beginLook();
         }
     };
     events.on('loaded:changed', maybeStart);
+    events.on('prewarming:changed', maybeStart);
     maybeStart();
 };
 
@@ -91559,7 +91663,8 @@ const main = async (canvas, settingsJson, config) => {
         controlsHidden: false,
         gamingControls: localStorage.getItem('gamingControls') === 'true',
         moveLocked: false,
-        chatOpen: false
+        chatOpen: false,
+        prewarming: false
     });
     const global = {
         app,

@@ -1988,6 +1988,34 @@ body.measure-active #controlDome {
     }
 }
 
+// Soft entrance for the pill when it reveals itself after the background
+// pre-generation lands (live mode). Fades + rises in once, then hands back to
+// the normal transitions. Reduced-motion just snaps it in.
+#stagePill #stageTrigger.is-revealing {
+    animation: stagePillIn 480ms var(--ease-out) both;
+}
+@keyframes stagePillIn {
+    from { opacity: 0; transform: translateY(10px) scale(0.9); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+    #stagePill #stageTrigger.is-revealing { animation: none; }
+}
+
+// Opaque cover that hides the silent drone-view detour during the background
+// prewarm capture at load. Matches the scene clear colour ([0.05,0.05,0.06]) so
+// fading it out reveals the live scan with no visible seam.
+#stagePrewarmCover {
+    position: fixed;
+    inset: 0;
+    z-index: 60;                 // above the canvas + all chrome during the brief detour
+    background: #0d0d0f;
+    opacity: 1;
+    transition: opacity 450ms var(--ease-out);
+
+    &.is-fading { opacity: 0; }
+}
+
 // Onboarding glow: the sofa button breathes (soft white glow) while .attention
 // is set. The circle->pill expand + "Möbliert sehen" label are handled in the
 // #stageTrigger block above (shared with .has-message).

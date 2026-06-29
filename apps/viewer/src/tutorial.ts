@@ -303,12 +303,17 @@ const initTutorial = (global: Global) => {
     // first-person mode for walkable interiors).
     const maybeStart = () => {
         if (phase !== 'idle') return;
-        if (state.loaded && state.cameraMode === 'walk') {
+        // Hold off while staging is silently flying to the drone view to pre-capture:
+        // the 'look' leg measures camera yaw, so the prewarm sweep would falsely
+        // complete it. Once prewarm clears (camera restored to the start pose) the
+        // 'prewarming:changed' listener re-runs this and onboarding begins cleanly.
+        if (state.loaded && state.cameraMode === 'walk' && !state.prewarming) {
             beginLook();
         }
     };
 
     events.on('loaded:changed', maybeStart);
+    events.on('prewarming:changed', maybeStart);
     maybeStart();
 };
 
