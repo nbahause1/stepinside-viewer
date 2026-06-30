@@ -2106,3 +2106,31 @@ body.staging-open #stagePill {
   }
 }
 
+
+/* -- "alive" specular sheen: a slow light sweep over the hero glass --
+   Subtle moving highlight (like light gliding across glass) on the two
+   always-visible elements. Pure CSS -> works on iOS Safari. The ::after is
+   clipped to the pill via border-radius:inherit; no parent overflow needed. */
+#brandDome .brandMark { position: relative; }
+#brandDome .brandMark::after,
+#controlDome::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(105deg, transparent 38%, rgba(255,255,255,0.16) 50%, transparent 62%);
+  background-size: 220% 100%;
+  background-position: 160% 0;
+  mix-blend-mode: screen;
+  animation: lgSheen 7s ease-in-out infinite;
+}
+@keyframes lgSheen {
+  0%, 14%  { background-position: 160% 0; }
+  62%, 100% { background-position: -60% 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  #brandDome .brandMark::after,
+  #controlDome::after { animation: none; opacity: 0; }
+}
+
