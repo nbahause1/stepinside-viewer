@@ -2385,3 +2385,90 @@ body.staging-open {
     // (the furnished image uses cover/full-bleed everywhere — on phones it shows
     // the native 9:16 portrait variant, so no cropping hack is needed)
 }
+
+
+/* ================================================================
+   STEPINSIDE - PREMIUM LIQUID GLASS  (erweitert das Basis-Glas)
+   Mobile-first, reines CSS -> laeuft ueberall inkl. iOS Safari.
+   Desktop-Chrome erhaelt zusaetzlich echte SVG-Refraktion (unten).
+   Feintuning zentral ueber die Tokens in :root.
+   ================================================================ */
+:root {
+  --lgd-blur: 22px;   --lgd-sat: 185%;   --lgd-bright: 1.05;   /* dunkles Glas */
+  --lgl-blur: 30px;   --lgl-sat: 180%;   --lgl-bright: 1.08;   /* helles  Glas */
+}
+
+/* -- dunkles Glas: Pillen & Panels ueber der Szene (weisser Inhalt) -- */
+#brandDome .brandMark,
+#controlDome,
+#chatPill #chatToggle,
+#chatPill #chatPanel,
+#stagePill #stageTrigger,
+#stageOverlay #stageBar,
+#stageOverlay .stageArrow {
+  background:
+    radial-gradient(135% 120% at 50% -12%, rgba(255,255,255,0.20), rgba(255,255,255,0) 55%),
+    linear-gradient(177deg, rgba(74,76,84,0.40) 0%, rgba(34,35,42,0.34) 46%, rgba(13,14,19,0.42) 100%);
+  -webkit-backdrop-filter: blur(var(--lgd-blur)) saturate(var(--lgd-sat)) brightness(var(--lgd-bright));
+  backdrop-filter: blur(var(--lgd-blur)) saturate(var(--lgd-sat)) brightness(var(--lgd-bright));
+  border: 1px solid rgba(255,255,255,0.16);
+  box-shadow:
+    0 8px 20px -10px rgba(0,0,0,0.45),
+    0 26px 50px -22px rgba(0,0,0,0.55),
+    inset 0 1px 0.5px 0 rgba(255,255,255,0.50),
+    inset 0 -12px 26px -16px rgba(0,0,0,0.55),
+    inset 0 0 0 0.5px rgba(255,255,255,0.07);
+}
+
+/* das grosse Chat-Panel schwebt hoeher -> etwas mehr Tiefe */
+#chatPill #chatPanel {
+  box-shadow:
+    0 18px 40px -16px rgba(0,0,0,0.55),
+    0 40px 80px -34px rgba(0,0,0,0.60),
+    inset 0 1px 0.5px 0 rgba(255,255,255,0.45),
+    inset 0 -14px 30px -18px rgba(0,0,0,0.50),
+    inset 0 0 0 0.5px rgba(255,255,255,0.07);
+}
+
+/* helleres Glas beim Hover (mehr Lichteinfang) */
+@media (hover: hover) and (pointer: fine) {
+  #chatPill #chatToggle:hover,
+  #stagePill #stageTrigger:hover,
+  #stageOverlay .stageArrow:hover {
+    background:
+      radial-gradient(135% 120% at 50% -12%, rgba(255,255,255,0.28), rgba(255,255,255,0) 55%),
+      linear-gradient(177deg, rgba(92,94,103,0.46) 0%, rgba(44,46,54,0.40) 46%, rgba(20,21,27,0.46) 100%);
+  }
+}
+
+/* -- helles Glas: Tutorial-Karten & Mess-Label (dunkler Text) -- */
+#tutorial .tutorialCard,
+#measureOverlay .measure__label {
+  background:
+    radial-gradient(135% 130% at 50% -14%, rgba(255,255,255,0.96), rgba(255,255,255,0) 62%),
+    linear-gradient(180deg, rgba(255,255,255,0.74), rgba(246,247,250,0.56));
+  -webkit-backdrop-filter: blur(var(--lgl-blur)) saturate(var(--lgl-sat)) brightness(var(--lgl-bright));
+  backdrop-filter: blur(var(--lgl-blur)) saturate(var(--lgl-sat)) brightness(var(--lgl-bright));
+  border: 1px solid rgba(255,255,255,0.68);
+  box-shadow:
+    0 12px 30px -12px rgba(0,0,0,0.26),
+    0 30px 60px -28px rgba(0,0,0,0.30),
+    inset 0 1px 0 0 rgba(255,255,255,0.95),
+    inset 0 -1px 0 0 rgba(0,0,0,0.05);
+}
+
+/* -- Hybrid-Bonus: echte SVG-Refraktion, NUR Desktop-Chrome --
+   Auf iOS / Safari / Firefox / Touch wird dieser Block ignoriert
+   (kein Effekt, keine Performance-Kosten -> Handy bleibt fluessig). */
+@supports (backdrop-filter: url('#liquidGlass')) {
+  @media (hover: hover) and (pointer: fine) and (min-width: 760px) {
+    #brandDome .brandMark,
+    #controlDome,
+    #chatPill #chatToggle,
+    #stagePill #stageTrigger,
+    #stageOverlay .stageArrow {
+      backdrop-filter: url('#liquidGlass') blur(14px) saturate(var(--lgd-sat)) brightness(var(--lgd-bright));
+    }
+  }
+}
+

@@ -70,6 +70,18 @@
         </script>
     </head>
     <body>
+        <!-- StepInside premium liquid-glass refraction filter. Only desktop
+             Chromium applies it (gated in CSS via @supports + pointer:fine);
+             everywhere else it is inert. Subtle backdrop displacement that
+             reads as thick, refractive glass. -->
+        <svg id="lg-filters" width="0" height="0" aria-hidden="true" style="position:absolute;pointer-events:none">
+            <filter id="liquidGlass" x="-35%" y="-35%" width="170%" height="170%" color-interpolation-filters="sRGB">
+                <feTurbulence type="fractalNoise" baseFrequency="0.009 0.011" numOctaves="2" seed="11" result="n"/>
+                <feGaussianBlur in="n" stdDeviation="1.4" result="nb"/>
+                <feDisplacementMap in="SourceGraphic" in2="nb" scale="11" xChannelSelector="R" yChannelSelector="G"/>
+            </filter>
+        </svg>
+
         <canvas id="application-canvas"></canvas>
 
         <!-- Peripheral-vision overlay for walk mode: soft, darkened, slightly
