@@ -56,11 +56,10 @@ html {
   overscroll-behavior: none;
 }
 
-@media (prefers-reduced-motion: no-preference) {
-  html {
-    scroll-behavior: smooth;
-  }
-}
+/* Smooth scrolling is handled by Lenis (see components/ui/SmoothScroll.tsx).
+   CSS `scroll-behavior: smooth` is intentionally NOT set here — it fights Lenis
+   over the same scroll. Reduced-motion users get native instant scroll because
+   SmoothScroll skips Lenis for them. */
 
 body {
   background-color: var(--color-paper);
