@@ -2484,15 +2484,15 @@ body.staging-open {
   inset: 0;
   border-radius: inherit;
   pointer-events: none;
-  background: linear-gradient(105deg, transparent 38%, rgba(255,255,255,0.16) 50%, transparent 62%);
+  background: linear-gradient(105deg, transparent 36%, rgba(255,255,255,0.16) 50%, transparent 64%);
   background-size: 220% 100%;
   background-position: 160% 0;
-  mix-blend-mode: screen;
-  animation: lgSheen 7s ease-in-out infinite;
+  animation: lgSheen 12s ease-in-out infinite;
 }
 @keyframes lgSheen {
-  0%, 14%  { background-position: 160% 0; }
-  62%, 100% { background-position: -60% 0; }
+  0%   { background-position: 160% 0; }
+  45%  { background-position: -60% 0; }
+  100% { background-position: -60% 0; }
 }
 @media (prefers-reduced-motion: reduce) {
   #brandDome .brandMark::after,
