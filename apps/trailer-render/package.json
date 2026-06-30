@@ -1,0 +1,15 @@
+{
+  "name": "stepinside-trailer-render",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Local offline renderer: drives the viewer headless and encodes a cinematic trailer MP4.",
+  "scripts": {
+    "probe": "node render.mjs --probe",
+    "render": "node render.mjs"
+  },
+  "dependencies": {
+    "ffmpeg-static": "^5.2.0",
+    "puppeteer": "^23.11.1"
+  }
+}
