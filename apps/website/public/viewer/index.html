@@ -921,5 +921,98 @@
                 const viewer = await main(canvas, settingsJson, config);
             });
         </script>
+
+        <!-- StepInside trailer recorder (Option A, real-time). Inert unless the
+             URL has ?record. Records the live canvas to a .webm while the camera
+             animation plays. Recommended trailer URL (desktop Chrome):
+             index.html?settings=./settings.trailer.json&webgl&noui&record -->
+        <script>
+          (function () {
+            if (!new URL(location.href).searchParams.has('record')) return;
+            window.addEventListener('load', function () {
+              var canvas = document.getElementById('application-canvas');
+              if (!canvas || !canvas.captureStream) return;
+              var btn = document.createElement('button');
+              btn.textContent = '● Aufnahme';
+              btn.style.cssText = 'position:fixed;top:14px;right:14px;z-index:99999;padding:11px 18px;border-radius:999px;border:0;background:#e03131;color:#fff;font:600 14px sans-serif;cursor:pointer;box-shadow:0 6px 20px rgba(0,0,0,.35)';
+              document.body.appendChild(btn);
+              var rec, chunks;
+              btn.addEventListener('click', function () {
+                if (rec && rec.state === 'recording') { rec.stop(); return; }
+                var stream = canvas.captureStream(60);
+                var mime = MediaRecorder.isTypeSupported('video/webm;codecs=vp9') ? 'video/webm;codecs=vp9' : 'video/webm';
+                rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 24000000 });
+                chunks = [];
+                rec.ondataavailable = function (e) { if (e.data && e.data.size) chunks.push(e.data); };
+                rec.onstop = function () {
+                  var blob = new Blob(chunks, { type: 'video/webm' });
+                  var a = document.createElement('a');
+                  a.href = URL.createObjectURL(blob);
+                  a.download = 'stepinside-trailer.webm';
+                  a.click();
+                  btn.textContent = '● Aufnahme';
+                  btn.style.background = '#e03131';
+                };
+                rec.start();
+                btn.textContent = '■ Stop & Download';
+                btn.style.background = '#2f9e44';
+              });
+            });
+          })();
+        </script>
+        <!-- StepInside scout tool: capture nice vantage points to author a
+             cinematic camera path. Load the NORMAL viewer with ?debug&scout
+             (free camera). Fly/walk to a spot, frame it, click "Punkt
+             aufnehmen"; copy the JSON and hand it back. ?debug exposes
+             window.getCameraState; target is derived from the camera euler
+             exactly like the engine (quat-from-euler * FORWARD * distance). -->
+        <script>
+          (function () {
+            if (!new URL(location.href).searchParams.has('scout')) return;
+            function eulerForward(ax, ay, az) {
+              var D = Math.PI / 180;
+              var ex = ax*0.5*D, ey = ay*0.5*D, ez = az*0.5*D;
+              var sx=Math.sin(ex), cx=Math.cos(ex), sy=Math.sin(ey), cy=Math.cos(ey), sz=Math.sin(ez), cz=Math.cos(ez);
+              var qx = sx*cy*cz - cx*sy*sz, qy = cx*sy*cz + sx*cy*sz, qz = cx*cy*sz - sx*sy*cz, qw = cx*cy*cz + sx*sy*sz;
+              var vx=0, vy=0, vz=-1;
+              var tx = 2*(qy*vz - qz*vy), ty = 2*(qz*vx - qx*vz), tz = 2*(qx*vy - qy*vx);
+              return [vx + qw*tx + (qy*tz - qz*ty), vy + qw*ty + (qz*tx - qx*tz), vz + qw*tz + (qx*ty - qy*tx)];
+            }
+            function r(n){ return Math.round(n*1000)/1000; }
+            window.addEventListener('load', function () {
+              var pts = [];
+              var box = document.createElement('div');
+              box.style.cssText = 'position:fixed;left:14px;bottom:14px;z-index:99999;width:300px;font:13px/1.4 sans-serif;color:#fff;background:rgba(20,20,24,.88);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);border:1px solid rgba(255,255,255,.15);border-radius:14px;padding:12px;box-shadow:0 10px 30px rgba(0,0,0,.4)';
+              var title = document.createElement('div');
+              title.style.cssText = 'font-weight:700;margin-bottom:8px';
+              title.innerHTML = '📍 Scout <span id="sc-n" style="opacity:.7;font-weight:400">(0 Punkte)</span>';
+              var cap = document.createElement('button');
+              cap.textContent = '📍 Punkt aufnehmen';
+              cap.style.cssText = 'width:100%;padding:10px;margin-bottom:6px;border:0;border-radius:9px;background:#2f9e44;color:#fff;font-weight:600;cursor:pointer';
+              var rowEl = document.createElement('div'); rowEl.style.cssText='display:flex;gap:6px;margin-bottom:8px';
+              var copy = document.createElement('button'); copy.textContent='Kopieren';
+              var undo = document.createElement('button'); undo.textContent='Letzten loeschen';
+              copy.style.cssText = undo.style.cssText = 'flex:1;padding:8px;border:0;border-radius:9px;background:rgba(255,255,255,.14);color:#fff;cursor:pointer';
+              var ta = document.createElement('textarea');
+              ta.readOnly = true;
+              ta.style.cssText = 'width:100%;height:120px;box-sizing:border-box;background:rgba(0,0,0,.4);color:#cde;border:1px solid rgba(255,255,255,.12);border-radius:8px;padding:6px;font:11px monospace;resize:vertical';
+              box.appendChild(title); box.appendChild(cap); rowEl.appendChild(undo); rowEl.appendChild(copy); box.appendChild(rowEl); box.appendChild(ta);
+              document.body.appendChild(box);
+              function refresh(){ document.getElementById('sc-n').textContent='('+pts.length+' Punkte)'; ta.value = JSON.stringify(pts); }
+              cap.addEventListener('click', function(){
+                if (typeof window.getCameraState !== 'function') { ta.value='Bitte die URL um  &debug  ergaenzen und neu laden.'; return; }
+                var s = window.getCameraState();
+                var f = eulerForward(s.angles[0], s.angles[1], s.angles[2]);
+                var d = Math.min(Math.max(s.distance || 3, 1.5), 10);
+                var t = [s.position[0]+f[0]*d, s.position[1]+f[1]*d, s.position[2]+f[2]*d];
+                pts.push({ position:[r(s.position[0]),r(s.position[1]),r(s.position[2])], target:[r(t[0]),r(t[1]),r(t[2])], fov:r(s.fov) });
+                refresh();
+              });
+              undo.addEventListener('click', function(){ pts.pop(); refresh(); });
+              copy.addEventListener('click', function(){ ta.select(); try{ navigator.clipboard.writeText(ta.value); }catch(e){ document.execCommand('copy'); } copy.textContent='kopiert!'; setTimeout(function(){copy.textContent='Kopieren';},1200); });
+              refresh();
+            });
+          })();
+        </script>
     </body>
 </html>

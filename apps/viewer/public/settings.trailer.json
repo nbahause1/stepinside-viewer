@@ -1,0 +1,59 @@
+{
+  "version": 2,
+  "tonemapping": "none",
+  "highPrecisionRendering": false,
+  "background": {
+    "color": [0.05, 0.05, 0.06]
+  },
+  "postEffectSettings": {
+    "sharpness": { "enabled": true, "amount": 0.5 },
+    "bloom": { "enabled": false, "intensity": 1, "blurLevel": 2 },
+    "grading": { "enabled": false, "brightness": 0, "contrast": 1, "saturation": 1, "tint": [1, 1, 1] },
+    "vignette": { "enabled": false, "intensity": 0.5, "inner": 0.3, "outer": 0.75, "curvature": 1 },
+    "fringing": { "enabled": false, "intensity": 0.5 }
+  },
+  "animTracks": [
+    {
+      "name": "trailer",
+      "duration": 44,
+      "frameRate": 1,
+      "loopMode": "repeat",
+      "interpolation": "spline",
+      "smoothness": 1,
+      "keyframes": {
+        "times": [0, 12, 22, 31, 44],
+        "values": {
+          "position": [
+            2.635, 1.55, -0.403,
+            2.437, 1.55, 7.117,
+            6.837, 1.55, 2.619,
+            3.99, 2.3, 7.202,
+            3.99, 2.3, -0.598
+          ],
+          "target": [
+            4.091, 1.215, 4.378,
+            4.424, 1.672, 2.521,
+            1.835, 1.647, 2.862,
+            8.771, 1.4, 3.823,
+            1.032, 1.4, 4.201
+          ],
+          "fov": [96, 96, 96, 95, 95]
+        }
+      }
+    }
+  ],
+  "cameras": [
+    {
+      "initial": {
+        "position": [3.24, 1.2, 0.9],
+        "target": [3.99, 1.05, 5.85],
+        "fov": 80
+      }
+    }
+  ],
+  "annotations": [],
+  "startMode": "animTrack",
+  "concierge": { "mode": "scripted", "greeting": "Frag mich etwas zur Wohnung.", "endpoint": "http://localhost:8787/concierge", "propertyId": "example-fewo" },
+  "staging": { "enabled": false, "mode": "demo", "endpoint": "http://localhost:8787/stage", "propertyId": "example-fewo", "styles": [] },
+  "pois": []
+}
