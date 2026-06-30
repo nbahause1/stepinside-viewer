@@ -2394,7 +2394,7 @@ body.staging-open {
    Feintuning zentral ueber die Tokens in :root.
    ================================================================ */
 :root {
-  --lgd-blur: 22px;   --lgd-sat: 185%;   --lgd-bright: 1.05;   /* dunkles Glas */
+  --lgd-blur: 24px;   --lgd-sat: 180%;   --lgd-bright: 1.08;   /* dunkles Glas */
   --lgl-blur: 30px;   --lgl-sat: 180%;   --lgl-bright: 1.08;   /* helles  Glas */
 }
 
@@ -2407,27 +2407,27 @@ body.staging-open {
 #stageOverlay #stageBar,
 #stageOverlay .stageArrow {
   background:
-    radial-gradient(135% 120% at 50% -12%, rgba(255,255,255,0.20), rgba(255,255,255,0) 55%),
-    linear-gradient(177deg, rgba(74,76,84,0.40) 0%, rgba(34,35,42,0.34) 46%, rgba(13,14,19,0.42) 100%);
+    radial-gradient(130% 120% at 50% -15%, rgba(255,255,255,0.24), rgba(255,255,255,0) 60%),
+    linear-gradient(180deg, rgba(92,94,102,0.22), rgba(42,44,52,0.22));
   -webkit-backdrop-filter: blur(var(--lgd-blur)) saturate(var(--lgd-sat)) brightness(var(--lgd-bright));
   backdrop-filter: blur(var(--lgd-blur)) saturate(var(--lgd-sat)) brightness(var(--lgd-bright));
-  border: 1px solid rgba(255,255,255,0.16);
+  border: 1px solid rgba(255,255,255,0.20);
   box-shadow:
-    0 8px 20px -10px rgba(0,0,0,0.45),
-    0 26px 50px -22px rgba(0,0,0,0.55),
-    inset 0 1px 0.5px 0 rgba(255,255,255,0.50),
-    inset 0 -12px 26px -16px rgba(0,0,0,0.55),
-    inset 0 0 0 0.5px rgba(255,255,255,0.07);
+    0 8px 22px -12px rgba(0,0,0,0.32),
+    0 24px 46px -24px rgba(0,0,0,0.38),
+    inset 0 1px 0.5px 0 rgba(255,255,255,0.55),
+    inset 0 -8px 18px -16px rgba(0,0,0,0.20),
+    inset 0 0 0 0.5px rgba(255,255,255,0.10);
 }
 
 /* das grosse Chat-Panel schwebt hoeher -> etwas mehr Tiefe */
 #chatPill #chatPanel {
   box-shadow:
-    0 18px 40px -16px rgba(0,0,0,0.55),
-    0 40px 80px -34px rgba(0,0,0,0.60),
-    inset 0 1px 0.5px 0 rgba(255,255,255,0.45),
-    inset 0 -14px 30px -18px rgba(0,0,0,0.50),
-    inset 0 0 0 0.5px rgba(255,255,255,0.07);
+    0 18px 40px -18px rgba(0,0,0,0.42),
+    0 40px 80px -36px rgba(0,0,0,0.46),
+    inset 0 1px 0.5px 0 rgba(255,255,255,0.50),
+    inset 0 -12px 26px -18px rgba(0,0,0,0.22),
+    inset 0 0 0 0.5px rgba(255,255,255,0.10);
 }
 
 /* helleres Glas beim Hover (mehr Lichteinfang) */
@@ -2436,8 +2436,8 @@ body.staging-open {
   #stagePill #stageTrigger:hover,
   #stageOverlay .stageArrow:hover {
     background:
-      radial-gradient(135% 120% at 50% -12%, rgba(255,255,255,0.28), rgba(255,255,255,0) 55%),
-      linear-gradient(177deg, rgba(92,94,103,0.46) 0%, rgba(44,46,54,0.40) 46%, rgba(20,21,27,0.46) 100%);
+      radial-gradient(130% 120% at 50% -15%, rgba(255,255,255,0.32), rgba(255,255,255,0) 60%),
+      linear-gradient(180deg, rgba(112,114,122,0.26), rgba(58,60,68,0.26));
   }
 }
 
@@ -2457,18 +2457,17 @@ body.staging-open {
     inset 0 -1px 0 0 rgba(0,0,0,0.05);
 }
 
-/* -- Hybrid-Bonus: echte SVG-Refraktion, NUR Desktop-Chrome --
-   Auf iOS / Safari / Firefox / Touch wird dieser Block ignoriert
-   (kein Effekt, keine Performance-Kosten -> Handy bleibt fluessig). */
+/* -- Hybrid-Bonus: echte Kanten-Refraktion (shuding-Stil), Chromium only --
+   Greift in Chrome/Edge (Desktop) UND Android-Chrome. iOS/Safari/Firefox
+   ignorieren url()-backdrop-filter -> dort bleibt das edle Frosted-Glas.
+   Wenig Blur, damit die Refraktion an den Kanten sichtbar bleibt. */
 @supports (backdrop-filter: url('#liquidGlass')) {
-  @media (hover: hover) and (pointer: fine) and (min-width: 760px) {
-    #brandDome .brandMark,
-    #controlDome,
-    #chatPill #chatToggle,
-    #stagePill #stageTrigger,
-    #stageOverlay .stageArrow {
-      backdrop-filter: url('#liquidGlass') blur(14px) saturate(var(--lgd-sat)) brightness(var(--lgd-bright));
-    }
+  #brandDome .brandMark,
+  #controlDome,
+  #chatPill #chatToggle,
+  #stagePill #stageTrigger,
+  #stageOverlay .stageArrow {
+    backdrop-filter: url('#liquidGlass') blur(7px) saturate(var(--lgd-sat)) brightness(var(--lgd-bright));
   }
 }
 
