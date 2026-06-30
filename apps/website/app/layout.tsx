@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Montserrat, Lora } from "next/font/google";
 import { config } from "@/lib/config";
+import SmoothScroll from "@/components/ui/SmoothScroll";
 import "./globals.css";
 
 const montserrat = Montserrat({
@@ -81,7 +82,7 @@ export default function RootLayout({
           type="application/ld+json"
           dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
         />
-        {children}
+        <SmoothScroll>{children}</SmoothScroll>
       </body>
     </html>
   );
