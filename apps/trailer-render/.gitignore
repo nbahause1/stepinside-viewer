@@ -1,4 +1,5 @@
 node_modules/
 frames/
+frames-list.txt
 *.mp4
 *.png
