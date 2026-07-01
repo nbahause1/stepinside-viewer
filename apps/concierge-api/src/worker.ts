@@ -44,6 +44,8 @@ import { parseAllowedOrigins, resolveAllowOrigin, corsHeaders } from './cors.js'
 interface Env {
   ANTHROPIC_API_KEY: string;
   GEMINI_API_KEY?: string;
+  FAL_KEY?: string;
+  STAGING_ENGINE?: string;
   ALLOWED_ORIGINS?: string;
   /** KV namespace for shared rate limiting + the daily spend cap (wrangler.toml). */
   RATE_LIMIT_KV?: KvLike;
@@ -330,11 +332,14 @@ export default {
     }
 
     if (isStage) {
-      if (!env.GEMINI_API_KEY) {
+      const engine = env.STAGING_ENGINE === 'fal' ? 'fal' as const : 'gemini' as const;
+      if ((engine === 'gemini' && !env.GEMINI_API_KEY) || (engine === 'fal' && !env.FAL_KEY)) {
         return jsonResponse(500, { error: 'Server is not configured.' }, cors);
       }
       const result = await handleStaging(rawBody, {
+        engine,
         geminiApiKey: env.GEMINI_API_KEY,
+        falApiKey: env.FAL_KEY,
         rateLimiter: checkedLimiter,
         clientIp,
         // Kill-switch against cost abuse: hard daily generation budget, shared

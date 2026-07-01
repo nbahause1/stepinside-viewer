@@ -153,13 +153,17 @@ export default async function handler(
   // Route by path. /stage = virtual staging (Gemini); everything else falls
   // through to the concierge for backward compatibility.
   if (path === '/stage' || path.endsWith('/stage')) {
+    const engine = process.env.STAGING_ENGINE === 'fal' ? 'fal' as const : 'gemini' as const;
     const geminiApiKey = process.env.GEMINI_API_KEY;
-    if (!geminiApiKey) {
+    const falApiKey = process.env.FAL_KEY;
+    if ((engine === 'gemini' && !geminiApiKey) || (engine === 'fal' && !falApiKey)) {
       res.status(500).json({ error: 'Server is not configured.' });
       return;
     }
     const staged = await handleStaging(rawBody, {
+      engine,
       geminiApiKey,
+      falApiKey,
       rateLimiter: stagingRateLimiter,
       clientIp: clientIpOf(req),
     });
