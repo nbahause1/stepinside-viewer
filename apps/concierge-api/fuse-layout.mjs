@@ -16,7 +16,7 @@ if (!key) { console.error('missing FAL_KEY'); process.exit(1); }
 
 // image dimensions (parse from ffmpeg -i)
 let iw = 1536, ih = 864;
-try { execFileSync(FF, ['-i', IMG]); } catch (e) {
+try { execFileSync(FF, ['-i', IMG], { stdio: ['ignore', 'ignore', 'pipe'] }); } catch (e) {
   const m = /,\s(\d{3,5})x(\d{3,5})/.exec((e.stderr || '').toString());
   if (m) { iw = +m[1]; ih = +m[2]; }
 }
