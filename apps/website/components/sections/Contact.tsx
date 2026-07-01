@@ -138,16 +138,18 @@ export default function Contact() {
                 reserved for exactly these inline links (Aker treatment). */}
             <div className="lg:text-right">
               <p className="text-[14px] text-pewter">{t.contact.directLabel}</p>
-              <div className="mt-3 flex flex-col gap-2 lg:items-end">
+              {/* Ember at rest so the links read as links without hover (touch
+                  devices never hover); each row is a >=44px tap target. */}
+              <div className="mt-2 flex flex-col lg:items-end">
                 <a
                   href={`mailto:${config.email}`}
-                  className="text-[17px] text-ink transition-colors hover:text-ember"
+                  className="flex min-h-11 items-center py-2 text-[17px] text-ember transition-colors hover:text-ink"
                 >
                   {config.email}
                 </a>
                 <a
                   href={`tel:${config.phoneHref}`}
-                  className="text-[17px] text-ink transition-colors hover:text-ember"
+                  className="flex min-h-11 items-center py-2 text-[17px] text-ember transition-colors hover:text-ink"
                 >
                   {config.phone}
                 </a>
@@ -157,7 +159,7 @@ export default function Contact() {
                     href={config.calendlyUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-[17px] text-ink transition-colors hover:text-ember"
+                    className="flex min-h-11 items-center py-2 text-[17px] text-ember transition-colors hover:text-ink"
                   >
                     {t.contact.bookLabel}
                   </a>

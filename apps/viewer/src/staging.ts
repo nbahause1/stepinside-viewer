@@ -334,9 +334,17 @@ const initStaging = (global: Global) => {
             });
 
             if (!res.ok) {
-                failBack(res.status === 429 ?
-                    'Zu viele Anfragen. Bitte warte einen Moment.' :
-                    'Hat nicht geklappt. Bitte gleich nochmal.');
+                if (res.status === 429) {
+                    // The server sends 429 for both short-term rate limits and
+                    // the daily spend cap; the latter sets Retry-After to the
+                    // seconds until UTC midnight (always > 1h).
+                    const retryAfter = parseInt(res.headers.get('retry-after') ?? '', 10);
+                    failBack(retryAfter > 3600 ?
+                        'Das tägliche Kontingent ist erreicht. Morgen geht\'s weiter.' :
+                        'Zu viele Anfragen. Bitte warte einen Moment.');
+                } else {
+                    failBack('Hat nicht geklappt. Bitte gleich nochmal.');
+                }
                 return;
             }
 

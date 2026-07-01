@@ -23,9 +23,12 @@ The walkable demo in the "Demos" section is the built viewer app from
 npm run sync:viewer
 ```
 
-**Caveat:** this command **deletes and recreates `public/viewer/` entirely**
-(it rebuilds `apps/viewer` and copies its output over). Never place hand-edited
-files inside `public/viewer/` — they will be wiped on the next sync.
+**Caveat:** this command rebuilds `apps/viewer` and copies **only the build
+artifacts** (`index.html`, `index.js`, `index.css` and, if present,
+`settings.json`) over the existing files in `public/viewer/`. Everything else
+in that directory — most importantly the scene assets (`scene.sog` etc.),
+which exist nowhere else — is left untouched. Still, never hand-edit the four
+artifact files themselves; they will be overwritten on the next sync.
 
 ## Configuration
 
