@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
     <head>
-        <title>SuperSplat Viewer</title>
+        <title>StepInside</title>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
         <base href="">
@@ -61,6 +61,9 @@
                 heatmap: url.searchParams.has('heatmap'),
                 fullload: url.searchParams.has('fullload'),
                 debug: url.searchParams.has('debug'),
+                // dev helpers (window.viewer, captureView, debug panel) are only
+                // exposed for the authoring/tooling entry points, never for visitors
+                devtools: ['debug', 'scout', 'record'].some(p => url.searchParams.has(p)),
             };
 
             window.sse = {
@@ -553,7 +556,7 @@
                             <g class='stroke'><use href="#supersplatIcon"/></g>
                             <g class='fill'><use href="#supersplatIcon"/></g>
                         </svg>
-                        <span class="title-name">SuperSplat Viewer</span>
+                        <span class="title-name">StepInside Viewer</span>
                         <span class="title-version">v<span id="appVersionLabel"></span></span>
                     </a>
                     <div id="infoPanels">
@@ -897,12 +900,34 @@
             </symbol>
         </svg>
 
+        <!-- Fatal-error card: shown when the scene or the graphics device fails
+             to initialise. Body-level sibling of #ui so the #ui pointer-events
+             rules don't apply; styled inline to match the frosted-glass look. -->
+        <div id="errorCard" style="display: none; position: fixed; inset: 0; z-index: 9999; align-items: center; justify-content: center; padding: 24px; background: rgba(0, 0, 0, 0.45);">
+            <div style="max-width: 340px; width: 100%; padding: 28px 24px; border-radius: 24px; background: rgba(28, 28, 32, 0.55); backdrop-filter: blur(20px) saturate(150%); -webkit-backdrop-filter: blur(20px) saturate(150%); border: 1px solid rgba(255, 255, 255, 0.14); box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35); text-align: center; font-family: 'Montserrat', sans-serif; color: #fff;">
+                <div style="font-size: 16px; font-weight: 600; margin-bottom: 8px;">Der Rundgang konnte nicht geladen werden.</div>
+                <div style="font-size: 13px; font-weight: 500; line-height: 1.5; color: rgba(255, 255, 255, 0.7); margin-bottom: 20px;">Bitte versuchen Sie es in einem Augenblick erneut.</div>
+                <button id="errorRetry" type="button" style="appearance: none; border: 1px solid rgba(255, 255, 255, 0.25); background: rgba(255, 255, 255, 0.12); color: #fff; font-family: inherit; font-size: 14px; font-weight: 600; padding: 10px 24px; border-radius: 999px; cursor: pointer;">Erneut versuchen</button>
+            </div>
+        </div>
+
         <!-- Application Script -->
         <script type="module">
             import { main } from './index.js';
 
             const { config, settings } = window.sse;
             const { poster } = config;
+
+            // Fatal-error UX: hide the loading UI and show the glass error card.
+            // Covers (a) scene/content load failures (signalled via the
+            // 'sse:error' window event from the viewer) and (b) graphics-device
+            // or startup failures (main() throwing below).
+            const showFatalError = () => {
+                document.getElementById('loadingWrap')?.classList.add('hidden');
+                document.getElementById('errorCard').style.display = 'flex';
+            };
+            document.getElementById('errorRetry').addEventListener('click', () => location.reload());
+            window.addEventListener('sse:error', showFatalError);
 
             // Show the poster image
             if (poster) {
@@ -917,8 +942,13 @@
 
             document.addEventListener('DOMContentLoaded', async () => {
                 const canvas = document.getElementById('application-canvas');
-                const settingsJson = await settings;
-                const viewer = await main(canvas, settingsJson, config);
+                try {
+                    const settingsJson = await settings;
+                    await main(canvas, settingsJson, config);
+                } catch (err) {
+                    console.error(err);
+                    showFatalError();
+                }
             });
         </script>
     </body>

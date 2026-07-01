@@ -26,6 +26,7 @@ type Config = {
     renderer: 'webgl' | 'webgpu';               // requested renderer; the actual one (after engine fallback) is exposed as Global.renderer
     heatmap: boolean;                           // render heatmap debug overlay (WebGPU only)
     debug: boolean;                             // auto-open the developer debug panel; can also be toggled with Ctrl+Shift+D
+    devtools: boolean;                          // expose dev helpers (window.viewer, captureView, debug panel); implied by ?debug, ?scout or ?record
 };
 
 // observable state that can change at runtime

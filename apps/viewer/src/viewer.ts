@@ -445,7 +445,11 @@ class Viewer {
                 this.navCursor = new NavCursor(app, camera, collision ?? null, events, state);
             }
 
-            this.debugPanel = new DebugPanel(global, this.cameraManager);
+            // developer panel (exposes window.getCameraState/setCameraState) —
+            // authoring/tooling entry points only, never for visitors
+            if (config.devtools) {
+                this.debugPanel = new DebugPanel(global, this.cameraManager);
+            }
 
             const { gsplat } = app.scene;
 
@@ -556,6 +560,11 @@ class Viewer {
             };
 
             eventHandler.on('frame:ready', readyHandler);
+        }).catch((err) => {
+            // scene load or setup failed — surface the user-facing error card
+            // (index.html listens for this) instead of a stuck loading bar
+            console.error(err);
+            window.dispatchEvent(new CustomEvent('sse:error', { detail: err }));
         });
     }
 

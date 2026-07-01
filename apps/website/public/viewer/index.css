@@ -2019,9 +2019,6 @@ body.staging-open #stagePill {
     opacity: 0;
   }
 }
-
-/*# sourceMappingURL=index.css.map */
-
 /* ================================================================
    STEPINSIDE - PREMIUM LIQUID GLASS  (erweitert das Basis-Glas)
    Mobile-first, reines CSS -> laeuft ueberall inkl. iOS Safari.
@@ -2029,8 +2026,12 @@ body.staging-open #stagePill {
    Feintuning zentral ueber die Tokens in :root.
    ================================================================ */
 :root {
-  --lgd-blur: 24px;   --lgd-sat: 180%;   --lgd-bright: 1.08;   /* dunkles Glas */
-  --lgl-blur: 30px;   --lgl-sat: 180%;   --lgl-bright: 1.08;   /* helles  Glas */
+  --lgd-blur: 24px;
+  --lgd-sat: 180%;
+  --lgd-bright: 1.08; /* dunkles Glas */
+  --lgl-blur: 30px;
+  --lgl-sat: 180%;
+  --lgl-bright: 1.08; /* helles  Glas */
 }
 
 /* -- dunkles Glas: Pillen & Panels ueber der Szene (weisser Inhalt) -- */
@@ -2041,28 +2042,15 @@ body.staging-open #stagePill {
 #stagePill #stageTrigger,
 #stageOverlay #stageBar,
 #stageOverlay .stageArrow {
-  background:
-    radial-gradient(130% 120% at 50% -15%, rgba(255,255,255,0.24), rgba(255,255,255,0) 60%),
-    linear-gradient(180deg, rgba(92,94,102,0.22), rgba(42,44,52,0.22));
-  -webkit-backdrop-filter: blur(var(--lgd-blur)) saturate(var(--lgd-sat)) brightness(var(--lgd-bright));
+  background: radial-gradient(130% 120% at 50% -15%, rgba(255, 255, 255, 0.24), rgba(255, 255, 255, 0) 60%), linear-gradient(180deg, rgba(92, 94, 102, 0.22), rgba(42, 44, 52, 0.22));
   backdrop-filter: blur(var(--lgd-blur)) saturate(var(--lgd-sat)) brightness(var(--lgd-bright));
-  border: 1px solid rgba(255,255,255,0.20);
-  box-shadow:
-    0 8px 22px -12px rgba(0,0,0,0.32),
-    0 24px 46px -24px rgba(0,0,0,0.38),
-    inset 0 1px 0.5px 0 rgba(255,255,255,0.55),
-    inset 0 -8px 18px -16px rgba(0,0,0,0.20),
-    inset 0 0 0 0.5px rgba(255,255,255,0.10);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  box-shadow: 0 8px 22px -12px rgba(0, 0, 0, 0.32), 0 24px 46px -24px rgba(0, 0, 0, 0.38), inset 0 1px 0.5px 0 rgba(255, 255, 255, 0.55), inset 0 -8px 18px -16px rgba(0, 0, 0, 0.2), inset 0 0 0 0.5px rgba(255, 255, 255, 0.1);
 }
 
 /* das grosse Chat-Panel schwebt hoeher -> etwas mehr Tiefe */
 #chatPill #chatPanel {
-  box-shadow:
-    0 18px 40px -18px rgba(0,0,0,0.42),
-    0 40px 80px -36px rgba(0,0,0,0.46),
-    inset 0 1px 0.5px 0 rgba(255,255,255,0.50),
-    inset 0 -12px 26px -18px rgba(0,0,0,0.22),
-    inset 0 0 0 0.5px rgba(255,255,255,0.10);
+  box-shadow: 0 18px 40px -18px rgba(0, 0, 0, 0.42), 0 40px 80px -36px rgba(0, 0, 0, 0.46), inset 0 1px 0.5px 0 rgba(255, 255, 255, 0.5), inset 0 -12px 26px -18px rgba(0, 0, 0, 0.22), inset 0 0 0 0.5px rgba(255, 255, 255, 0.1);
 }
 
 /* helleres Glas beim Hover (mehr Lichteinfang) */
@@ -2070,48 +2058,39 @@ body.staging-open #stagePill {
   #chatPill #chatToggle:hover,
   #stagePill #stageTrigger:hover,
   #stageOverlay .stageArrow:hover {
-    background:
-      radial-gradient(130% 120% at 50% -15%, rgba(255,255,255,0.32), rgba(255,255,255,0) 60%),
-      linear-gradient(180deg, rgba(112,114,122,0.26), rgba(58,60,68,0.26));
+    background: radial-gradient(130% 120% at 50% -15%, rgba(255, 255, 255, 0.32), rgba(255, 255, 255, 0) 60%), linear-gradient(180deg, rgba(112, 114, 122, 0.26), rgba(58, 60, 68, 0.26));
   }
 }
-
 /* -- helles Glas: Tutorial-Karten & Mess-Label (dunkler Text) -- */
 #tutorial .tutorialCard,
 #measureOverlay .measure__label {
-  background:
-    radial-gradient(135% 130% at 50% -14%, rgba(255,255,255,0.96), rgba(255,255,255,0) 62%),
-    linear-gradient(180deg, rgba(255,255,255,0.74), rgba(246,247,250,0.56));
-  -webkit-backdrop-filter: blur(var(--lgl-blur)) saturate(var(--lgl-sat)) brightness(var(--lgl-bright));
+  background: radial-gradient(135% 130% at 50% -14%, rgba(255, 255, 255, 0.96), rgba(255, 255, 255, 0) 62%), linear-gradient(180deg, rgba(255, 255, 255, 0.74), rgba(246, 247, 250, 0.56));
   backdrop-filter: blur(var(--lgl-blur)) saturate(var(--lgl-sat)) brightness(var(--lgl-bright));
-  border: 1px solid rgba(255,255,255,0.68);
-  box-shadow:
-    0 12px 30px -12px rgba(0,0,0,0.26),
-    0 30px 60px -28px rgba(0,0,0,0.30),
-    inset 0 1px 0 0 rgba(255,255,255,0.95),
-    inset 0 -1px 0 0 rgba(0,0,0,0.05);
+  border: 1px solid rgba(255, 255, 255, 0.68);
+  box-shadow: 0 12px 30px -12px rgba(0, 0, 0, 0.26), 0 30px 60px -28px rgba(0, 0, 0, 0.3), inset 0 1px 0 0 rgba(255, 255, 255, 0.95), inset 0 -1px 0 0 rgba(0, 0, 0, 0.05);
 }
 
 /* -- Hybrid-Bonus: echte Kanten-Refraktion (shuding-Stil), Chromium only --
    Greift in Chrome/Edge (Desktop) UND Android-Chrome. iOS/Safari/Firefox
    ignorieren url()-backdrop-filter -> dort bleibt das edle Frosted-Glas.
    Wenig Blur, damit die Refraktion an den Kanten sichtbar bleibt. */
-@supports (backdrop-filter: url('#liquidGlass')) {
+@supports (backdrop-filter: url("#liquidGlass")) {
   #brandDome .brandMark,
   #controlDome,
   #chatPill #chatToggle,
   #stagePill #stageTrigger,
   #stageOverlay .stageArrow {
-    backdrop-filter: url('#liquidGlass') blur(7px) saturate(var(--lgd-sat)) brightness(var(--lgd-bright));
+    backdrop-filter: url("#liquidGlass") blur(7px) saturate(var(--lgd-sat)) brightness(var(--lgd-bright));
   }
 }
-
-
 /* -- "alive" specular sheen: a slow light sweep over the hero glass --
    Subtle moving highlight (like light gliding across glass) on the two
    always-visible elements. Pure CSS -> works on iOS Safari. The ::after is
    clipped to the pill via border-radius:inherit; no parent overflow needed. */
-#brandDome .brandMark { position: relative; }
+#brandDome .brandMark {
+  position: relative;
+}
+
 #brandDome .brandMark::after,
 #controlDome::after {
   content: "";
@@ -2119,18 +2098,29 @@ body.staging-open #stagePill {
   inset: 0;
   border-radius: inherit;
   pointer-events: none;
-  background: linear-gradient(105deg, transparent 36%, rgba(255,255,255,0.16) 50%, transparent 64%);
+  background: linear-gradient(105deg, transparent 36%, rgba(255, 255, 255, 0.16) 50%, transparent 64%);
   background-size: 220% 100%;
   background-position: 160% 0;
   animation: lgSheen 12s ease-in-out infinite;
 }
+
 @keyframes lgSheen {
-  0%   { background-position: 160% 0; }
-  45%  { background-position: -60% 0; }
-  100% { background-position: -60% 0; }
+  0% {
+    background-position: 160% 0;
+  }
+  45% {
+    background-position: -60% 0;
+  }
+  100% {
+    background-position: -60% 0;
+  }
 }
 @media (prefers-reduced-motion: reduce) {
   #brandDome .brandMark::after,
-  #controlDome::after { animation: none; opacity: 0; }
+  #controlDome::after {
+    animation: none;
+    opacity: 0;
+  }
 }
 
+/*# sourceMappingURL=index.css.map */

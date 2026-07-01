@@ -86308,18 +86308,22 @@ class CameraManager {
         // Authoring helper: log the current camera as a ready-to-paste POI
         // viewpoint. Frame a spot in the viewer, then call captureView() in the
         // browser console and paste the result into settings.json `pois`.
-        window.captureView = () => {
-            const p = global.camera.getPosition();
-            const f = global.camera.forward;
-            const r = (n) => Math.round(n * 1000) / 1000;
-            const poi = {
-                position: [r(p.x), r(p.y), r(p.z)],
-                target: [r(p.x + f.x * 2), r(p.y + f.y * 2), r(p.z + f.z * 2)],
-                fov: Math.round(this.camera.fov)
+        // Only exposed for the authoring/tooling entry points (?debug / ?scout
+        // / ?record), never in the visitor path.
+        if (global.config.devtools) {
+            window.captureView = () => {
+                const p = global.camera.getPosition();
+                const f = global.camera.forward;
+                const r = (n) => Math.round(n * 1000) / 1000;
+                const poi = {
+                    position: [r(p.x), r(p.y), r(p.z)],
+                    target: [r(p.x + f.x * 2), r(p.y + f.y * 2), r(p.z + f.z * 2)],
+                    fov: Math.round(this.camera.fov)
+                };
+                console.log(`captureView →\n${JSON.stringify(poi)}`);
+                return poi;
             };
-            console.log(`captureView →\n${JSON.stringify(poi)}`);
-            return poi;
-        };
+        }
         // handle camera mode switching
         events.on('cameraMode:changed', (value, prev) => {
             sourcesByMode[prev]?.cancel();
@@ -90338,7 +90342,11 @@ class Viewer {
             if (!config.noui) {
                 this.navCursor = new NavCursor(app, camera, collision ?? null, events, state);
             }
-            this.debugPanel = new DebugPanel(global, this.cameraManager);
+            // developer panel (exposes window.getCameraState/setCameraState) —
+            // authoring/tooling entry points only, never for visitors
+            if (config.devtools) {
+                this.debugPanel = new DebugPanel(global, this.cameraManager);
+            }
             const { gsplat } = app.scene;
             // quality budget
             const budgets = {
@@ -90430,6 +90438,11 @@ class Viewer {
                 }
             };
             eventHandler.on('frame:ready', readyHandler);
+        }).catch((err) => {
+            // scene load or setup failed — surface the user-facing error card
+            // (index.html listens for this) instead of a stuck loading bar
+            console.error(err);
+            window.dispatchEvent(new CustomEvent('sse:error', { detail: err }));
         });
     }
     // configure camera based on application mode and post process settings
@@ -91490,7 +91503,9 @@ const loadGsplat = async (app, config, progressCallback) => {
             }
         });
         asset.on('error', (err) => {
-            console.log(err);
+            if (config.devtools) {
+                console.error(err);
+            }
             reject(err);
         });
         app.assets.add(asset);
@@ -91511,7 +91526,7 @@ const loadSkybox = (app, url) => {
             resolve(asset);
         });
         asset.on('error', (err) => {
-            console.log(err);
+            // the caller logs a warning; avoid dumping the raw error for visitors
             reject(err);
         });
         app.assets.add(asset);
@@ -91532,7 +91547,9 @@ const createApp = async (canvas, config) => {
         xrCompatible: true,
         powerPreference: 'high-performance'
     });
-    console.log(`Renderer: ${device.deviceType}`);
+    if (config.devtools) {
+        console.log(`Renderer: ${device.deviceType}`);
+    }
     // The engine may have fallen back from WebGPU to WebGL2; downstream code
     // (voxel overlay, XR, gsplat renderer selection) needs the *actual* renderer.
     const renderer = device.deviceType === 'webgpu' ? 'webgpu' : 'webgl';
@@ -91677,8 +91694,11 @@ const main = async (canvas, settingsJson, config) => {
         cameraMoving: false
     };
     initCanvas(global);
-    // DEV: expose globals for camera tuning (remove before production)
-    window.viewer = global;
+    // DEV: expose globals for camera tuning — only for the authoring/tooling
+    // entry points (?debug / ?scout / ?record), never in the visitor path
+    if (config.devtools) {
+        window.viewer = global;
+    }
     // start the application
     app.start();
     // Initialize the load-time poster
@@ -91740,7 +91760,7 @@ const main = async (canvas, settingsJson, config) => {
     // Create the viewer
     return new Viewer(global, gsplatLoad, skyboxLoad, collisionLoad);
 };
-console.log(`SuperSplat Viewer v${version} | Engine v${version$1} (${revision})`);
+console.log(`StepInside Viewer v${version} | Engine v${version$1} (${revision})`);
 
 export { main };
 //# sourceMappingURL=index.js.map

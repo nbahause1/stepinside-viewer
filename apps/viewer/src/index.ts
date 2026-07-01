@@ -63,7 +63,9 @@ const loadGsplat = async (app: AppBase, config: Config, progressCallback: (progr
         });
 
         asset.on('error', (err) => {
-            console.log(err);
+            if (config.devtools) {
+                console.error(err);
+            }
             reject(err);
         });
 
@@ -88,7 +90,7 @@ const loadSkybox = (app: AppBase, url: string) => {
         });
 
         asset.on('error', (err) => {
-            console.log(err);
+            // the caller logs a warning; avoid dumping the raw error for visitors
             reject(err);
         });
 
@@ -113,7 +115,9 @@ const createApp = async (canvas: HTMLCanvasElement, config: Config) => {
         powerPreference: 'high-performance'
     });
 
-    console.log(`Renderer: ${device.deviceType}`);
+    if (config.devtools) {
+        console.log(`Renderer: ${device.deviceType}`);
+    }
 
     // The engine may have fallen back from WebGPU to WebGL2; downstream code
     // (voxel overlay, XR, gsplat renderer selection) needs the *actual* renderer.
@@ -284,8 +288,11 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
 
     initCanvas(global);
 
-    // DEV: expose globals for camera tuning (remove before production)
-    (window as any).viewer = global;
+    // DEV: expose globals for camera tuning — only for the authoring/tooling
+    // entry points (?debug / ?scout / ?record), never in the visitor path
+    if (config.devtools) {
+        (window as any).viewer = global;
+    }
 
     // start the application
     app.start();
@@ -361,6 +368,6 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
     return new Viewer(global, gsplatLoad, skyboxLoad, collisionLoad);
 };
 
-console.log(`SuperSplat Viewer v${appVersion} | Engine v${engineVersion} (${engineRevision})`);
+console.log(`StepInside Viewer v${appVersion} | Engine v${engineVersion} (${engineRevision})`);
 
 export { main };

@@ -372,18 +372,22 @@ class CameraManager {
         // Authoring helper: log the current camera as a ready-to-paste POI
         // viewpoint. Frame a spot in the viewer, then call captureView() in the
         // browser console and paste the result into settings.json `pois`.
-        (window as unknown as { captureView: () => unknown }).captureView = () => {
-            const p = global.camera.getPosition();
-            const f = global.camera.forward;
-            const r = (n: number) => Math.round(n * 1000) / 1000;
-            const poi = {
-                position: [r(p.x), r(p.y), r(p.z)],
-                target: [r(p.x + f.x * 2), r(p.y + f.y * 2), r(p.z + f.z * 2)],
-                fov: Math.round(this.camera.fov)
+        // Only exposed for the authoring/tooling entry points (?debug / ?scout
+        // / ?record), never in the visitor path.
+        if (global.config.devtools) {
+            (window as unknown as { captureView: () => unknown }).captureView = () => {
+                const p = global.camera.getPosition();
+                const f = global.camera.forward;
+                const r = (n: number) => Math.round(n * 1000) / 1000;
+                const poi = {
+                    position: [r(p.x), r(p.y), r(p.z)],
+                    target: [r(p.x + f.x * 2), r(p.y + f.y * 2), r(p.z + f.z * 2)],
+                    fov: Math.round(this.camera.fov)
+                };
+                console.log(`captureView →\n${JSON.stringify(poi)}`);
+                return poi;
             };
-            console.log(`captureView →\n${JSON.stringify(poi)}`);
-            return poi;
-        };
+        }
 
         // handle camera mode switching
         events.on('cameraMode:changed', (value: CameraMode, prev: CameraMode) => {
