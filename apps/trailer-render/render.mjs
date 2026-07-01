@@ -1,120 +1,129 @@
-// StepInside local trailer renderer (Option B, MVP).
-// Drives the viewer headless via Chrome, captures the canvas frame-by-frame
-// (CDP screencast), then encodes a clean MP4 with ffmpeg.
+// StepInside local trailer renderer (Option B).
+// Smooth, high-res output via the "slow-shoot" technique: play the camera
+// animation SLOWMO× slower, capture every painted frame, then encode back at
+// the original speed → many frames per second of motion = butter-smooth, even
+// in 4K (each frame is fully rendered; nothing is dropped to keep real time).
 //
-//   npm run probe     -> one screenshot (probe.png) to verify the scene renders
-//   npm run render    -> full capture + encode to OUT
+//   npm run probe                 -> one screenshot (probe.png) to verify render
+//   npm run render                -> full trailer (defaults: 4K, 60fps out)
+//   WIDTH=1920 HEIGHT=1080 npm run render   -> 1080p (faster)
 //
-// Tunables via env:
-//   TRAILER_URL  (default: local dev server, webgl, no UI)
-//   DURATION (s) FPS  WIDTH  HEIGHT  OUT
+// Env: WIDTH HEIGHT SLOWMO TARGET_FPS OUT TRAILER_BASE
 import puppeteer from 'puppeteer';
 import ffmpegPath from 'ffmpeg-static';
 import { spawn } from 'node:child_process';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
 
 const argv = process.argv.slice(2);
 const PROBE = argv.includes('--probe');
 
-const URL = process.env.TRAILER_URL ||
-  'http://localhost:3000/viewer/index.html?settings=./settings.trailer.json&webgl&noui';
-const DURATION = Number(process.env.DURATION || 46);   // capture window in seconds
-const FPS      = Number(process.env.FPS || 60);
-const WIDTH    = Number(process.env.WIDTH || 1920);
-const HEIGHT   = Number(process.env.HEIGHT || 1080);
-const OUT      = process.env.OUT || 'stepinside-trailer.mp4';
-const FRAMES   = path.resolve('frames');
+// Window stays at WIDTH×HEIGHT (headless WebGL fails on windows > ~1080p here),
+// but DPR (deviceScaleFactor) supersamples: effective output = WIDTH*DPR × HEIGHT*DPR.
+// So 1920×1080 @ DPR 2 = true 3840×2160 (4K) without a 4K window.
+const WIDTH      = Number(process.env.WIDTH || 1920);
+const HEIGHT     = Number(process.env.HEIGHT || 1080);
+const DPR        = Number(process.env.DPR || 2);
+const SLOWMO     = Number(process.env.SLOWMO || 8);     // animation slowdown factor
+const TARGET_FPS = Number(process.env.TARGET_FPS || 60);
+const OUT        = process.env.OUT || 'stepinside-trailer.mp4';
+const FRAMES     = path.resolve('frames');
+
+// Generate a slowed copy of the trailer settings (served by the dev server).
+const VIEWER_DIR = path.resolve('..', 'website', 'public', 'viewer');
+// Prefer the constant-speed smoothed path (run smooth-path.mjs) if present.
+const BASE_NAME = existsSync(path.join(VIEWER_DIR, 'settings.trailer.smooth.json'))
+  ? 'settings.trailer.smooth.json' : 'settings.trailer.json';
+const base = JSON.parse(readFileSync(path.join(VIEWER_DIR, BASE_NAME), 'utf8'));
+console.log('Path base:', BASE_NAME);
+const ORIG_DURATION = base.animTracks[0].duration;
+const slow = JSON.parse(JSON.stringify(base));
+slow.animTracks[0].duration = ORIG_DURATION * SLOWMO;
+slow.animTracks[0].keyframes.times = base.animTracks[0].keyframes.times.map(t => t * SLOWMO);
+writeFileSync(path.join(VIEWER_DIR, 'settings.trailer.slow.json'), JSON.stringify(slow));
+
+const SETTINGS = PROBE ? 'settings.trailer.json' : 'settings.trailer.slow.json';
+const URL = `http://localhost:3000/viewer/index.html?settings=./${SETTINGS}&webgl&noui`;
+const CAPTURE_SECONDS = ORIG_DURATION * SLOWMO + 2;
 
 const GPU_ARGS = [
-  '--no-sandbox',
-  '--ignore-gpu-blocklist',
-  '--enable-gpu',
-  '--use-gl=angle',
-  '--use-angle=gl',
-  '--enable-unsafe-webgpu',
-  `--window-size=${WIDTH},${HEIGHT}`,
-  '--hide-scrollbars',
-  '--mute-audio'
+  '--no-sandbox', '--ignore-gpu-blocklist', '--enable-gpu',
+  '--use-gl=angle', '--use-angle=gl', '--enable-unsafe-webgpu',
+  `--window-size=${WIDTH},${HEIGHT}`, '--hide-scrollbars', '--mute-audio'
 ];
 
-console.log('Launching headless Chrome (GPU)…');
+console.log(`Render ${WIDTH}x${HEIGHT}, slowmo ${SLOWMO}x, target ${TARGET_FPS}fps, path ${ORIG_DURATION}s`);
 const browser = await puppeteer.launch({ headless: 'new', args: GPU_ARGS });
 const page = await browser.newPage();
-await page.setViewport({ width: WIDTH, height: HEIGHT, deviceScaleFactor: 1 });
+await page.setViewport({ width: WIDTH, height: HEIGHT, deviceScaleFactor: DPR });
 
-console.log('Loading viewer:', URL);
+console.log('Loading:', URL);
 await page.goto(URL, { waitUntil: 'networkidle2', timeout: 180000 });
-
-// Report the WebGL renderer so we can confirm the GPU is really being used.
 const gl = await page.evaluate(() => {
   const c = document.createElement('canvas');
   const g = c.getContext('webgl2') || c.getContext('webgl');
-  if (!g) return 'NO-WEBGL';
-  const dbg = g.getExtension('WEBGL_debug_renderer_info');
-  return dbg ? g.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : 'webgl-ok';
+  const d = g && g.getExtension('WEBGL_debug_renderer_info');
+  return d ? g.getParameter(d.UNMASKED_RENDERER_WEBGL) : (g ? 'webgl' : 'NO-WEBGL');
 });
-console.log('WebGL renderer:', gl);
+console.log('WebGL:', gl);
+await new Promise(r => setTimeout(r, 4000));   // let the scene paint at full quality
 
-// Give the splat scene time to load + start the camera animation.
-console.log('Warming up scene…');
-await new Promise(r => setTimeout(r, 5000));
+if (PROBE) { await page.screenshot({ path: 'probe.png' }); console.log('PROBE -> probe.png'); await browser.close(); process.exit(0); }
 
-if (PROBE) {
-  await page.screenshot({ path: 'probe.png' });
-  console.log('PROBE -> probe.png');
-  await browser.close();
-  process.exit(0);
-}
-
-// Fresh restart so the camera animation begins near its start (assets are warm).
-console.log('Reloading for a clean start…');
+// Clean restart so the (slow) animation begins near its start.
 await page.reload({ waitUntil: 'networkidle2', timeout: 120000 });
-await new Promise(r => setTimeout(r, 2500));
+await new Promise(r => setTimeout(r, 4000));
 
 rmSync(FRAMES, { recursive: true, force: true });
 mkdirSync(FRAMES, { recursive: true });
 
 const client = await page.target().createCDPSession();
-const buf = [];
-client.on('Page.screencastFrame', async (f) => {
-  buf.push(Buffer.from(f.data, 'base64'));            // buffer in memory (no disk stall)
-  try { await client.send('Page.screencastFrameAck', { sessionId: f.sessionId }); } catch {}
+let n = 0;
+const ts = [];   // real capture timestamp per frame (to correct timing jitter)
+client.on('Page.screencastFrame', (f) => {
+  writeFileSync(path.join(FRAMES, `f-${String(n).padStart(6, '0')}.jpg`), Buffer.from(f.data, 'base64'));
+  ts.push((f.metadata && f.metadata.timestamp) ? f.metadata.timestamp : Date.now() / 1000);
+  n++;
+  client.send('Page.screencastFrameAck', { sessionId: f.sessionId }).catch(() => {});
 });
 
-console.log(`Capturing ~${DURATION}s …`);
-const tStart = Date.now();
-await client.send('Page.startScreencast', { format: 'jpeg', quality: 95, everyNthFrame: 1 });
-await new Promise(r => setTimeout(r, DURATION * 1000));
+console.log(`Capturing ~${CAPTURE_SECONDS}s of slowed playback…`);
+const t0 = Date.now();
+await client.send('Page.startScreencast', { format: 'jpeg', quality: 95, everyNthFrame: 1, maxWidth: WIDTH * DPR, maxHeight: HEIGHT * DPR });
+await new Promise(r => setTimeout(r, CAPTURE_SECONDS * 1000));
 await client.send('Page.stopScreencast');
-const elapsed = (Date.now() - tStart) / 1000;
+const elapsed = (Date.now() - t0) / 1000;
 await browser.close();
 
-const capFps = buf.length / elapsed;
-console.log(`Captured ${buf.length} frames over ${elapsed.toFixed(1)}s -> ${capFps.toFixed(1)} fps.`);
-if (buf.length < 5) { console.error('Too few frames — scene did not render.'); process.exit(1); }
+console.log(`Captured ${n} frames in ${elapsed.toFixed(0)}s.`);
+if (n < 30) { console.error('Too few frames — scene did not render.'); process.exit(1); }
 
-console.log('Writing frames…');
-buf.forEach((b, i) => writeFileSync(path.join(FRAMES, `f-${String(i).padStart(5, '0')}.jpg`), b));
-
-// Encode at the MEASURED fps so playback speed is correct. SMOOTH=1 adds
-// motion-interpolation up to FPS for extra smoothness (slower, can warp edges).
-const SMOOTH = process.env.SMOOTH === '1';
-const vf = SMOOTH ? ['-vf', `minterpolate=fps=${FPS}:mi_mode=mci:mc_mode=aobmc`] : [];
-console.log('Encoding MP4' + (SMOOTH ? ` (interpolated to ${FPS}fps)…` : ` at native ${capFps.toFixed(1)}fps…`));
+// Encode using each frame's REAL timestamp (mapped back to original speed by
+// /SLOWMO) via the concat demuxer, then conform to constant TARGET_FPS. This
+// compensates for uneven capture intervals -> smooth, correct-speed motion.
+const tsBase = ts[0];
+let list = '';
+for (let i = 0; i < n; i++) {
+  const cur = (ts[i] - tsBase) / SLOWMO;
+  const next = (i < n - 1) ? (ts[i + 1] - tsBase) / SLOWMO : cur + 1 / TARGET_FPS;
+  const dur = Math.max(0.0001, next - cur);
+  const file = path.join(FRAMES, `f-${String(i).padStart(6, '0')}.jpg`).replace(/\\/g, '/');
+  list += `file '${file}'\nduration ${dur.toFixed(5)}\n`;
+}
+list += `file '${path.join(FRAMES, `f-${String(n - 1).padStart(6, '0')}.jpg`).replace(/\\/g, '/')}'\n`;
+const listPath = path.resolve('frames-list.txt');
+writeFileSync(listPath, list);
+const motionSpan = (ts[n - 1] - tsBase) / SLOWMO;
+console.log(`Encoding ${n} timestamp-corrected frames over ${motionSpan.toFixed(1)}s -> ${TARGET_FPS}fps.`);
 await new Promise((res, rej) => {
   const ff = spawn(ffmpegPath, [
     '-y',
-    '-framerate', capFps.toFixed(3),
-    '-i', path.join(FRAMES, 'f-%05d.jpg'),
-    ...vf,
-    '-c:v', 'libx264',
-    '-pix_fmt', 'yuv420p',
-    '-crf', '18',
-    '-preset', 'medium',
+    '-f', 'concat', '-safe', '0', '-i', listPath,
+    '-vsync', 'cfr', '-r', String(TARGET_FPS),
+    '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-crf', '18', '-preset', 'medium',
     '-movflags', '+faststart',
     OUT
   ], { stdio: 'inherit' });
-  ff.on('close', c => c === 0 ? res() : rej(new Error('ffmpeg exit ' + c)));
+  ff.on('close', c => c === 0 ? res() : rej(new Error('ffmpeg ' + c)));
 });
-console.log('DONE ->', path.resolve(OUT));
+console.log('DONE ->', path.resolve(OUT), '|', `${WIDTH}x${HEIGHT} @ ${TARGET_FPS}fps, ${ORIG_DURATION}s`);
