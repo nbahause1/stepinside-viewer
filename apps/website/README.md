@@ -1,36 +1,33 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# StepInside Website
 
-## Getting Started
+Marketing site for StepInside (stepinside.eu) — photorealistic, walkable 3D tours
+(Gaussian splatting) for real estate, hotels, gastronomy and more. Next.js 16
+app router, Tailwind v4, German-first copy (an English dictionary exists but is
+currently deactivated).
 
-First, run the development server:
+## Development
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open http://localhost:3000.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## The embedded viewer (`public/viewer/`)
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+The walkable demo in the "Demos" section is the built viewer app from
+`apps/viewer`, bundled into this site so it ships on the same domain:
 
-## Learn More
+```bash
+npm run sync:viewer
+```
 
-To learn more about Next.js, take a look at the following resources:
+**Caveat:** this command **deletes and recreates `public/viewer/` entirely**
+(it rebuilds `apps/viewer` and copies its output over). Never place hand-edited
+files inside `public/viewer/` — they will be wiped on the next sync.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Configuration
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Runtime values (contact details, Formspree ID, viewer URL, legal data) live in
+`lib/config.ts`. UI copy lives in `components/i18n/dictionary.ts`.

@@ -37,9 +37,10 @@ export const metadata: Metadata = {
   },
   alternates: {
     canonical: "https://stepinside.eu",
+    // The English version is deactivated for launch (no switcher in the UI);
+    // the EN dictionary is kept in the codebase for later.
     languages: {
       de: "https://stepinside.eu",
-      en: "https://stepinside.eu/?lang=en",
     },
   },
 };

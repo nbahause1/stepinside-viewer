@@ -128,12 +128,42 @@ export default function Contact() {
             </form>
           </Reveal>
 
-          {/* RIGHT: big StepInside wordmark filling the empty space. */}
+          {/* RIGHT: direct contact details above the big StepInside wordmark. */}
           <Reveal
             as="div"
             delay={0.05}
             className="flex h-full flex-col justify-end gap-12"
           >
+            {/* Direct email / phone — the fast lane past the form. Ember is
+                reserved for exactly these inline links (Aker treatment). */}
+            <div className="lg:text-right">
+              <p className="text-[14px] text-pewter">{t.contact.directLabel}</p>
+              <div className="mt-3 flex flex-col gap-2 lg:items-end">
+                <a
+                  href={`mailto:${config.email}`}
+                  className="text-[17px] text-ink transition-colors hover:text-ember"
+                >
+                  {config.email}
+                </a>
+                <a
+                  href={`tel:${config.phoneHref}`}
+                  className="text-[17px] text-ink transition-colors hover:text-ember"
+                >
+                  {config.phone}
+                </a>
+                {/* Booking link appears only once a Calendly URL is configured. */}
+                {config.calendlyUrl && (
+                  <a
+                    href={config.calendlyUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-[17px] text-ink transition-colors hover:text-ember"
+                  >
+                    {t.contact.bookLabel}
+                  </a>
+                )}
+              </div>
+            </div>
             {/* Big brand wordmark filling the empty right-hand space. The
                 lg:mb lifts it so its bottom lines up with the message box's
                 bottom edge (clearing the send-button area below the textarea). */}
