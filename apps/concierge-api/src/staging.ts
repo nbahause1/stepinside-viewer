@@ -23,6 +23,7 @@ import { validateStagingRequest, StagingValidationError } from './staging-valida
 import { buildStagingPrompt, resolveStyle } from './staging-prompt.js';
 import type { StagingStyle } from './staging-prompt.js';
 import type { RateLimiter } from './ratelimit.js';
+import { generateWithFalKontext, FalError } from './staging-fal.js';
 
 /** A reference furniture photo used to condition the generation. */
 export interface ReferenceImage {
@@ -32,8 +33,16 @@ export interface ReferenceImage {
 
 /** Dependencies injected by each entry point. */
 export interface StagingDeps {
-  /** Google Gemini API key (server-side only). */
-  geminiApiKey: string;
+  /**
+   * Which generation engine to use (defaults to 'gemini' for back-compat).
+   * 'fal' = FLUX Kontext [max] multi (Track A backbone, docs/ai-virtual-staging-v2-plan.md);
+   * natively places our reference furniture. 'gemini' = Nano Banana (kept as fallback).
+   */
+  engine?: 'gemini' | 'fal';
+  /** Google Gemini API key (server-side only). Required when engine === 'gemini'. */
+  geminiApiKey?: string;
+  /** fal.ai API key (server-side only). Required when engine === 'fal'. */
+  falApiKey?: string;
   rateLimiter: RateLimiter;
   /** Best-effort client IP for rate limiting; '' if unknown. */
   clientIp: string;
@@ -148,22 +157,50 @@ export async function handleStaging(
   }
 
   try {
-    // 4/5. Generate + extract the inline image.
+    // 4/5. Generate + extract the inline image, on the configured engine.
     const aspectRatio = pickAspectRatio(request.width, request.height);
-    const image = await generateWithGemini(
-      deps.geminiApiKey,
-      prompt,
-      request.imageBase64,
-      request.mimeType,
-      aspectRatio,
-      references,
-    );
+    const engine = deps.engine ?? 'gemini';
+    let image: string | null;
+    if (engine === 'fal') {
+      if (!deps.falApiKey) {
+        return { status: 502, body: { error: 'The staging service is misconfigured.' } };
+      }
+      image = await generateWithFalKontext(
+        deps.falApiKey,
+        prompt,
+        request.imageBase64,
+        request.mimeType,
+        aspectRatio,
+        references,
+      );
+    } else {
+      if (!deps.geminiApiKey) {
+        return { status: 502, body: { error: 'The staging service is misconfigured.' } };
+      }
+      image = await generateWithGemini(
+        deps.geminiApiKey,
+        prompt,
+        request.imageBase64,
+        request.mimeType,
+        aspectRatio,
+        references,
+      );
+    }
     if (!image) {
       return { status: 502, body: { error: 'No image was generated. Please try again.' } };
     }
     return { status: 200, body: { image, style: style.id } };
   } catch (err) {
-    if (err instanceof GeminiError) {
+    if (err instanceof FalError) {
+      console.warn(`[staging] fal ${err.status}:`, err.detail.slice(0, 600));
+      if (err.status === 429) {
+        return { status: 429, body: { error: 'Upstream rate limit. Please retry shortly.' }, retryAfterSeconds: 30 };
+      }
+      if (err.status === 401 || err.status === 403 || err.status === 422) {
+        // Bad key or malformed request on our side.
+        return { status: 502, body: { error: 'The staging service is misconfigured.' } };
+      }
+    } else if (err instanceof GeminiError) {
       console.warn(`[staging] Gemini ${err.status}:`, err.detail.slice(0, 600));
       if (err.status === 429) {
         return { status: 429, body: { error: 'Upstream rate limit. Please retry shortly.' }, retryAfterSeconds: 30 };

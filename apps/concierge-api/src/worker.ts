@@ -16,6 +16,8 @@ import { parseAllowedOrigins, resolveAllowOrigin, corsHeaders } from './cors.js'
 interface Env {
   ANTHROPIC_API_KEY: string;
   GEMINI_API_KEY?: string;
+  FAL_KEY?: string;
+  STAGING_ENGINE?: string;
   ALLOWED_ORIGINS?: string;
 }
 
@@ -79,11 +81,14 @@ export default {
     // Route by path. /stage = virtual staging (Gemini); everything else falls
     // through to the concierge for backward compatibility.
     if (path === '/stage') {
-      if (!env.GEMINI_API_KEY) {
+      const engine = env.STAGING_ENGINE === 'fal' ? 'fal' as const : 'gemini' as const;
+      if ((engine === 'gemini' && !env.GEMINI_API_KEY) || (engine === 'fal' && !env.FAL_KEY)) {
         return jsonResponse(500, { error: 'Server is not configured.' }, cors);
       }
       const result = await handleStaging(rawBody, {
+        engine,
         geminiApiKey: env.GEMINI_API_KEY,
+        falApiKey: env.FAL_KEY,
         rateLimiter: stagingRateLimiter,
         clientIp,
       });
