@@ -6,6 +6,13 @@
  * do NOT share memory, so a production deployment must back the limiter with KV
  * (KvRateLimiter below) or a Durable Object. KvDailyBudget adds a global daily
  * spend cap on top — the kill-switch against cost abuse on the paid endpoints.
+ *
+ * SOFT LIMITS: both KV-backed classes treat KV I/O failures as non-fatal. A KV
+ * error (e.g. the 1-write/sec-per-key cap on a hot counter key) logs a warning
+ * and FAILS OPEN — the request is allowed rather than 500ing every visitor.
+ * Combined with KV's eventual consistency this means limits can overshoot under
+ * bursts or KV outages; they are abuse/cost ceilings, not billing meters. Use a
+ * Durable Object if you ever need strict counting.
  */
 
 export interface RateLimitResult {
@@ -17,6 +24,41 @@ export interface RateLimitResult {
 export interface RateLimiter {
   /** Record a hit for `key` and report whether it is within the limit. */
   check(key: string): Promise<RateLimitResult>;
+}
+
+/**
+ * A limiter that always allows. Handed into the core handlers by entry points
+ * that already ran the real rate-limit check BEFORE parsing the request body
+ * (see worker.ts), so the handler's own check never double-counts a request.
+ */
+export class PassThroughRateLimiter implements RateLimiter {
+  check(): Promise<RateLimitResult> {
+    return Promise.resolve({ allowed: true, retryAfterSeconds: 0 });
+  }
+}
+
+/**
+ * Runs several limiters in order; ALL must allow. The first denial wins (later
+ * layers are then not consulted and record no hit). Used to layer the free
+ * in-memory limiter (catches same-isolate bursts, including the KV get/put race)
+ * in front of the KV limiter (cross-isolate, eventually consistent).
+ */
+export class LayeredRateLimiter implements RateLimiter {
+  private readonly layers: RateLimiter[];
+
+  constructor(layers: RateLimiter[]) {
+    this.layers = layers;
+  }
+
+  async check(key: string): Promise<RateLimitResult> {
+    for (const layer of this.layers) {
+      const result = await layer.check(key);
+      if (!result.allowed) {
+        return result;
+      }
+    }
+    return { allowed: true, retryAfterSeconds: 0 };
+  }
 }
 
 const DEFAULT_LIMIT = 20;
@@ -129,8 +171,15 @@ export class KvRateLimiter implements RateLimiter {
     const windowIndex = Math.floor(now / this.windowMs);
     const kvKey = `${this.prefix}:${key}:${windowIndex}`;
 
-    const raw = await this.kv.get(kvKey);
-    const count = raw ? Number.parseInt(raw, 10) || 0 : 0;
+    let count = 0;
+    try {
+      const raw = await this.kv.get(kvKey);
+      count = raw ? Number.parseInt(raw, 10) || 0 : 0;
+    } catch (err) {
+      // Soft limit: a KV read failure must not 500 the endpoint. FAIL OPEN.
+      console.warn(`[ratelimit] KV get failed for ${kvKey}, failing open:`, String(err));
+      return { allowed: true, retryAfterSeconds: 0 };
+    }
 
     if (count >= this.limit) {
       const windowEnd = (windowIndex + 1) * this.windowMs;
@@ -138,10 +187,16 @@ export class KvRateLimiter implements RateLimiter {
       return { allowed: false, retryAfterSeconds };
     }
 
-    await this.kv.put(kvKey, String(count + 1), {
-      // KV minimum TTL is 60s; keep the counter alive slightly past window end.
-      expirationTtl: Math.max(60, Math.ceil(this.windowMs / 1000) + 60),
-    });
+    try {
+      await this.kv.put(kvKey, String(count + 1), {
+        // KV minimum TTL is 60s; keep the counter alive slightly past window end.
+        expirationTtl: Math.max(60, Math.ceil(this.windowMs / 1000) + 60),
+      });
+    } catch (err) {
+      // Soft limit: e.g. KV's 1-write/sec-per-key cap under a burst. The hit is
+      // simply not recorded; the request still goes through. FAIL OPEN.
+      console.warn(`[ratelimit] KV put failed for ${kvKey}, failing open:`, String(err));
+    }
     return { allowed: true, retryAfterSeconds: 0 };
   }
 }
@@ -149,31 +204,44 @@ export class KvRateLimiter implements RateLimiter {
 /**
  * Global daily spend cap ("kill-switch") backed by KV.
  *
- * Maintains one counter per UTC day (`spend:YYYY-MM-DD`, TTL 2 days) shared by
- * ALL clients. Once `limit` generations have been consumed, every further
- * request is rejected until UTC midnight — this bounds the worst-case daily
- * cost of the paid /stage endpoint no matter how distributed an abuser is.
+ * Maintains one counter per UTC day (`<prefix>:YYYY-MM-DD`, TTL 2 days) shared
+ * by ALL clients. Once `limit` calls have been consumed, every further request
+ * is rejected until UTC midnight — this bounds the worst-case daily cost of a
+ * paid endpoint no matter how distributed an abuser is. Each paid endpoint gets
+ * its own prefix (`spend` for /stage, `spend:concierge` for the concierge) so
+ * one budget can't be drained through the other.
  *
- * Same softness caveat as KvRateLimiter (KV get/put races can overshoot by a
- * few requests under a burst), which is acceptable for a cost ceiling.
+ * SOFT LIMIT: same caveats as KvRateLimiter — KV get/put races can overshoot
+ * by a few requests under a burst, and any KV I/O error (e.g. the
+ * 1-write/sec-per-key cap on this deliberately hot key) logs a warning and
+ * FAILS OPEN instead of 500ing the request. Acceptable for a cost ceiling.
  */
 export class KvDailyBudget {
   private readonly kv: KvLike;
   private readonly limit: number;
+  private readonly prefix: string;
 
-  constructor(kv: KvLike, limit: number) {
+  constructor(kv: KvLike, limit: number, prefix: string = 'spend') {
     this.kv = kv;
     this.limit = limit;
+    this.prefix = prefix;
   }
 
   /** Consume one unit of today's budget; disallow once the cap is reached. */
   async consume(): Promise<RateLimitResult> {
     const now = new Date();
     const day = now.toISOString().slice(0, 10); // YYYY-MM-DD (UTC)
-    const key = `spend:${day}`;
+    const key = `${this.prefix}:${day}`;
 
-    const raw = await this.kv.get(key);
-    const used = raw ? Number.parseInt(raw, 10) || 0 : 0;
+    let used = 0;
+    try {
+      const raw = await this.kv.get(key);
+      used = raw ? Number.parseInt(raw, 10) || 0 : 0;
+    } catch (err) {
+      // Soft limit: a KV read failure must not 500 the endpoint. FAIL OPEN.
+      console.warn(`[budget] KV get failed for ${key}, failing open:`, String(err));
+      return { allowed: true, retryAfterSeconds: 0 };
+    }
 
     if (used >= this.limit) {
       const nextMidnightUtc = Date.UTC(
@@ -185,7 +253,13 @@ export class KvDailyBudget {
       return { allowed: false, retryAfterSeconds };
     }
 
-    await this.kv.put(key, String(used + 1), { expirationTtl: 2 * 24 * 60 * 60 });
+    try {
+      await this.kv.put(key, String(used + 1), { expirationTtl: 2 * 24 * 60 * 60 });
+    } catch (err) {
+      // Soft limit: this key takes every request of the day, so KV's
+      // 1-write/sec-per-key cap WILL trip under load. Don't record, don't 500.
+      console.warn(`[budget] KV put failed for ${key}, failing open:`, String(err));
+    }
     return { allowed: true, retryAfterSeconds: 0 };
   }
 }

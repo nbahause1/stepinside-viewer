@@ -7,16 +7,19 @@
  * local Node dev server.
  *
  * Order of operations:
- *   1. Rate-limit (per clientIp) -> 429 before any work.
+ *   1. Rate-limit (per clientIp) -> 429 before any work. (The Workers entry
+ *      runs the real check BEFORE parsing the body and injects a pass-through
+ *      limiter here, so the request is only counted once.)
  *   2. Validate input caps -> 400.
- *   3. Load knowledge for propertyId -> 400 if unknown.
+ *   3. Load knowledge for propertyId -> 400 if unknown; then consume the
+ *      optional daily budget -> 429 once the cap is hit.
  *   4. Build system blocks (rules + cached KB).
  *   5. Call claude-haiku-4-5 (non-streaming, max_tokens 400).
  *   6. Return { status, body }. Errors mapped: RateLimitError->429, APIError->502.
  */
 import Anthropic from '@anthropic-ai/sdk';
 import type { KnowledgeLoader } from './knowledge.js';
-import type { RateLimiter } from './ratelimit.js';
+import type { RateLimiter, RateLimitResult } from './ratelimit.js';
 import { validateRequest, ValidationError } from './validation.js';
 import { buildSystemBlocks, buildRoomContextLine } from './prompt.js';
 
@@ -30,6 +33,13 @@ export interface ConciergeDeps {
   rateLimiter: RateLimiter;
   /** Best-effort client IP for rate limiting; '' if unknown. */
   clientIp: string;
+  /**
+   * Optional global daily spend cap (see KvDailyBudget in ratelimit.ts). It is
+   * consumed AFTER the per-IP rate limit and input validation pass, immediately
+   * before the paid Anthropic call — so rejected/garbage requests never burn
+   * budget. When omitted (dev server, Vercel, no KV), no cap is enforced.
+   */
+  dailyBudget?: { consume(): Promise<RateLimitResult> };
 }
 
 /** A normalized result the entry points translate into their native response. */
@@ -86,6 +96,20 @@ export async function handleConcierge(
   const kb = await deps.loadKnowledge(request.propertyId);
   if (!kb) {
     return { status: 400, body: { error: 'Unknown property.' } };
+  }
+
+  // 3b. Global daily spend cap (kill-switch). Checked after rate limit +
+  //     validation so only requests that would actually reach the paid
+  //     Anthropic call consume budget. 429 keeps the client's existing handling.
+  if (deps.dailyBudget) {
+    const budget = await deps.dailyBudget.consume();
+    if (!budget.allowed) {
+      return {
+        status: 429,
+        body: { error: 'The daily concierge budget is exhausted. Please try again tomorrow.' },
+        retryAfterSeconds: budget.retryAfterSeconds,
+      };
+    }
   }
 
   // 4. Build system blocks (rules + focus targets + cached KB). Room context is

@@ -46,6 +46,7 @@ Responses:
 | 200    | `{ "image": "data:image/...", "style": "classic" }` | Furnished frame as a data URL       |
 | 400    | `{ "error": ... }`            | Malformed input (validation message)                           |
 | 401    | `{ "error": "Unauthorized." }`| `STAGE_AUTH_TOKEN` is set and `x-stage-token` missing/wrong    |
+| 413    | `{ "error": "Request body too large." }` | `Content-Length` exceeds the route's body ceiling (rejected before parsing) |
 | 429    | `{ "error": ... }` + `Retry-After` | Per-IP rate limit (6 / 5 min), upstream quota, **or** the daily spend cap |
 | 500    | `{ "error": "Server is not configured." }` | `GEMINI_API_KEY` missing                          |
 | 502    | `{ "error": ... }`            | Upstream failure, safety block, or the 75 s upstream timeout   |
@@ -67,7 +68,7 @@ at all:
 
 ## Hardening (server side)
 
-Defense layers on `/stage`, in request order:
+Defense layers, in request order (Workers entry):
 
 1. **CORS allowlist** (`ALLOWED_ORIGINS`) — browsers from other origins can't
    read responses. Not a security boundary against curl.
@@ -77,25 +78,48 @@ Defense layers on `/stage`, in request order:
    When unset, behavior is unchanged — the public demo stays frictionless.
    Note: the viewer does not currently send this header, so only enable it for
    curl/partner/backend integrations until the viewer wiring exists.
-3. **Per-IP rate limit** — 6 requests / 5 min (keyed on `cf-connecting-ip`).
-   With `RATE_LIMIT_KV` bound this is a KV-backed fixed-window counter shared
-   across all isolates/colos; without it, a per-isolate in-memory limiter that
-   is **weak on Workers** (isolates don't share memory) — the worker logs a
-   warning on first request.
-4. **Global daily spend cap** (kill-switch) — with `RATE_LIMIT_KV` bound, a
-   shared counter `spend:YYYY-MM-DD` (TTL 2 days) counts every request that
-   passes rate limiting + validation, i.e. every request that would hit the
-   paid Gemini API. Past `STAGE_DAILY_LIMIT` (default **200**/UTC day) all
-   further requests get 429 with `Retry-After` until UTC midnight. This bounds
-   the worst-case daily spend regardless of how distributed an abuser is.
-   **Disabled without KV.**
-5. **Upstream timeout** — every Gemini call aborts after 75 s
+3. **Body-size ceiling** — the `Content-Length` header is checked against a
+   per-route maximum (~13 MB for `/stage`, 256 KB for the concierge) and
+   oversized requests get 413 **before the body is read or parsed**.
+4. **Per-IP rate limit** — 6 requests / 5 min on `/stage`, 20 / 5 min on the
+   concierge (keyed on `cf-connecting-ip`), enforced **before `request.json()`**
+   so a limited client can't force multi-MB JSON parsing. With `RATE_LIMIT_KV`
+   bound, limiting is **layered**: the free per-isolate in-memory limiter runs
+   first (catches same-isolate bursts that slip through the racy KV
+   get-then-put), then the KV-backed fixed-window counter shared across all
+   isolates/colos — both must pass. Without KV only the in-memory limiter
+   remains, which is **weak on Workers** (isolates don't share memory) — the
+   worker logs a warning on first request.
+5. **Global daily spend caps** (kill-switch) — with `RATE_LIMIT_KV` bound,
+   each paid endpoint has its own shared daily counter (TTL 2 days) that counts
+   every request passing rate limiting + validation, i.e. every request that
+   would hit a paid API:
+   - `/stage` → `spend:YYYY-MM-DD`, capped by `STAGE_DAILY_LIMIT`
+     (default **200**/UTC day, paid Gemini call).
+   - concierge → `spend:concierge:YYYY-MM-DD`, capped by
+     `CONCIERGE_DAILY_LIMIT` (default **1000**/UTC day, paid Anthropic call).
+
+   Past the cap all further requests get 429 with `Retry-After` until UTC
+   midnight. This bounds the worst-case daily spend regardless of how
+   distributed an abuser is. **Disabled without KV.**
+6. **Upstream timeout** — every Gemini call aborts after 75 s
    (AbortController), surfacing the existing 502 path instead of hanging the
    Worker and the visitor.
 
-KV counters are eventually consistent, so bursts can overshoot limits by a few
-requests — fine for abuse/cost protection; use a Durable Object if you ever
-need strict counting.
+### Soft-limit semantics (fail open)
+
+All KV-backed limits — the rate limiters **and** both daily budgets — are
+**soft limits**:
+
+- KV `get`/`put` is not atomic and eventually consistent, so bursts can
+  overshoot a limit by a few requests.
+- Any KV I/O error (e.g. KV's 1-write/sec-per-key cap on the deliberately hot
+  `spend:*` keys) logs a `console.warn` and **fails open**: the request is
+  allowed instead of failing with a 500. Availability is deliberately favored
+  over strictness — a KV hiccup must not take the endpoints down.
+
+Fine for abuse/cost protection; use a Durable Object if you ever need strict
+counting.
 
 ## Configuration reference
 
@@ -112,10 +136,11 @@ For local dev put them in `.dev.vars` (gitignored, loaded by `npm run dev` and
 
 ### Vars (`[vars]` in `wrangler.toml`, or dashboard)
 
-| Var                 | Default | Purpose                                            |
-| ------------------- | ------- | -------------------------------------------------- |
-| `ALLOWED_ORIGINS`   | localhost dev list | Comma-separated CORS origin allowlist   |
-| `STAGE_DAILY_LIMIT` | `200`   | Max `/stage` generations per UTC day (needs KV)    |
+| Var                     | Default | Purpose                                              |
+| ----------------------- | ------- | ---------------------------------------------------- |
+| `ALLOWED_ORIGINS`       | localhost dev list | Comma-separated CORS origin allowlist     |
+| `STAGE_DAILY_LIMIT`     | `200`   | Max `/stage` generations per UTC day (needs KV)      |
+| `CONCIERGE_DAILY_LIMIT` | `1000`  | Max concierge chat turns per UTC day (needs KV)      |
 
 ### Bindings
 
@@ -148,7 +173,7 @@ npx wrangler kv namespace create RATE_LIMIT_KV   # then uncomment in wrangler.to
 wrangler secret put ANTHROPIC_API_KEY
 wrangler secret put GEMINI_API_KEY
 wrangler secret put STAGE_AUTH_TOKEN             # optional
-# set ALLOWED_ORIGINS (+ optionally STAGE_DAILY_LIMIT) under [vars]
+# set ALLOWED_ORIGINS (+ optionally STAGE_DAILY_LIMIT / CONCIERGE_DAILY_LIMIT) under [vars]
 
 npm run deploy                                   # = wrangler deploy
 ```
@@ -161,7 +186,7 @@ npm run dev:worker   # wrangler dev (Workers runtime, also reads .dev.vars)
 ```
 
 The Node dev server and the Vercel adapter always use the in-memory limiter
-(single process — that's fine there) and have no daily spend cap.
+(single process — that's fine there) and have no daily spend caps.
 
 ## Known gap: localhost vs. production wiring in `settings.json`
 
