@@ -15,9 +15,26 @@ compatibility_flags = ["nodejs_compat"]
 # localhost dev allowlist is used.
 #   ALLOWED_ORIGINS=https://viewer.example.com
 
-# Production rate limiting should use a KV namespace or Durable Object so that
-# limits are shared across isolates (see KvRateLimiter in src/ratelimit.ts).
-# Example once provisioned:
+# --- Rate limiting + daily spend cap (KV) ------------------------------------
+# Real (cross-isolate) rate limiting AND the /stage global daily spend cap
+# require a KV namespace bound as RATE_LIMIT_KV. Without it the worker falls
+# back to a weak per-isolate in-memory limiter and the spend cap is disabled
+# (it logs a warning on the first request).
+#
+# Provision once (needs account access), then uncomment with the printed id:
+#   npx wrangler kv namespace create RATE_LIMIT_KV
+#
 # [[kv_namespaces]]
-# binding = "RATE_LIMIT"
-# id = "<kv-namespace-id>"
+# binding = "RATE_LIMIT_KV"
+# id = "<id printed by the create command>"
+
+# Optional /stage hardening (details in README.md):
+#
+#   STAGE_DAILY_LIMIT — max staged images per UTC day across ALL visitors
+#   (kill-switch against cost abuse; default 200; requires RATE_LIMIT_KV):
+# [vars]
+# STAGE_DAILY_LIMIT = "200"
+#
+#   STAGE_AUTH_TOKEN — when set, /stage requires a matching `x-stage-token`
+#   header (401 otherwise). Leave unset for the frictionless public demo.
+#   wrangler secret put STAGE_AUTH_TOKEN

@@ -4,7 +4,8 @@
  * MemoryRateLimiter is a working sliding-window limiter suitable for the local
  * dev server and any single-instance deployment. On Cloudflare Workers, isolates
  * do NOT share memory, so a production deployment must back the limiter with KV
- * or a Durable Object — see the documented KvRateLimiter stub at the bottom.
+ * (KvRateLimiter below) or a Durable Object. KvDailyBudget adds a global daily
+ * spend cap on top — the kill-switch against cost abuse on the paid endpoints.
  */
 
 export interface RateLimitResult {
@@ -76,61 +77,115 @@ export class MemoryRateLimiter implements RateLimiter {
 }
 
 /**
- * Production stub for Cloudflare Workers.
- *
- * Workers isolates don't share memory, so a per-isolate Map under-counts under
- * load. Back the limiter with Workers KV (eventually consistent, fine for a soft
- * abuse limit) or a Durable Object (strongly consistent) instead.
- *
- * Wire-up sketch (KV):
- *   1. Add to wrangler.toml:
- *        [[kv_namespaces]]
- *        binding = "RATE_LIMIT"
- *        id = "<namespace-id>"
- *   2. Pass `env.RATE_LIMIT` into this limiter from worker.ts.
- *   3. Store a JSON array of hit timestamps per key with a TTL of `windowMs`,
- *      prune on read exactly like MemoryRateLimiter, and write it back.
- *
- * The implementation below is intentionally inert (it does not enforce limits)
- * and should not be used in production until the KV read/write is filled in.
- * It is provided so the wiring contract is explicit.
+ * Minimal structural slice of a Workers KV namespace binding. Declared locally
+ * so the limiter stays testable and the non-Workers entry points don't need
+ * `@cloudflare/workers-types` at their call sites.
  */
 export interface KvLike {
   get(key: string): Promise<string | null>;
   put(key: string, value: string, options?: { expirationTtl?: number }): Promise<void>;
 }
 
+/**
+ * KV-backed fixed-window limiter for Cloudflare Workers.
+ *
+ * Workers isolates don't share memory, so MemoryRateLimiter under-counts under
+ * load (each isolate keeps its own Map). This limiter stores one small counter
+ * per key per window in KV, so all isolates and colos see (eventually) the same
+ * count.
+ *
+ * Design notes:
+ *   - Fixed window: the counter key embeds the window index
+ *     (`<prefix>:<key>:<floor(now / windowMs)>`), so windows roll over without
+ *     any pruning logic and expired counters vanish via `expirationTtl`.
+ *   - KV `get`/`put` is not atomic and is eventually consistent, so concurrent
+ *     requests can slightly overshoot the limit. That is fine here: this is a
+ *     soft abuse/cost limit, not a billing meter. For strict counting use a
+ *     Durable Object instead.
+ *   - KV enforces a minimum `expirationTtl` of 60 seconds; we keep counters a
+ *     minute past the window end, which is harmless (old windows are never
+ *     read again).
+ */
 export class KvRateLimiter implements RateLimiter {
   private readonly kv: KvLike;
   private readonly limit: number;
   private readonly windowMs: number;
+  private readonly prefix: string;
 
-  constructor(kv: KvLike, limit: number = DEFAULT_LIMIT, windowMs: number = DEFAULT_WINDOW_MS) {
+  constructor(
+    kv: KvLike,
+    limit: number = DEFAULT_LIMIT,
+    windowMs: number = DEFAULT_WINDOW_MS,
+    prefix: string = 'rl',
+  ) {
     this.kv = kv;
     this.limit = limit;
     this.windowMs = windowMs;
+    this.prefix = prefix;
   }
 
   async check(key: string): Promise<RateLimitResult> {
     const now = Date.now();
-    const windowStart = now - this.windowMs;
+    const windowIndex = Math.floor(now / this.windowMs);
+    const kvKey = `${this.prefix}:${key}:${windowIndex}`;
 
-    const raw = await this.kv.get(key);
-    const parsed: unknown = raw ? JSON.parse(raw) : [];
-    const timestamps = Array.isArray(parsed)
-      ? parsed.filter((t): t is number => typeof t === 'number' && t > windowStart)
-      : [];
+    const raw = await this.kv.get(kvKey);
+    const count = raw ? Number.parseInt(raw, 10) || 0 : 0;
 
-    if (timestamps.length >= this.limit) {
-      const oldest = timestamps[0];
-      const retryAfterSeconds = Math.max(1, Math.ceil((oldest + this.windowMs - now) / 1000));
+    if (count >= this.limit) {
+      const windowEnd = (windowIndex + 1) * this.windowMs;
+      const retryAfterSeconds = Math.max(1, Math.ceil((windowEnd - now) / 1000));
       return { allowed: false, retryAfterSeconds };
     }
 
-    timestamps.push(now);
-    await this.kv.put(key, JSON.stringify(timestamps), {
-      expirationTtl: Math.ceil(this.windowMs / 1000),
+    await this.kv.put(kvKey, String(count + 1), {
+      // KV minimum TTL is 60s; keep the counter alive slightly past window end.
+      expirationTtl: Math.max(60, Math.ceil(this.windowMs / 1000) + 60),
     });
+    return { allowed: true, retryAfterSeconds: 0 };
+  }
+}
+
+/**
+ * Global daily spend cap ("kill-switch") backed by KV.
+ *
+ * Maintains one counter per UTC day (`spend:YYYY-MM-DD`, TTL 2 days) shared by
+ * ALL clients. Once `limit` generations have been consumed, every further
+ * request is rejected until UTC midnight — this bounds the worst-case daily
+ * cost of the paid /stage endpoint no matter how distributed an abuser is.
+ *
+ * Same softness caveat as KvRateLimiter (KV get/put races can overshoot by a
+ * few requests under a burst), which is acceptable for a cost ceiling.
+ */
+export class KvDailyBudget {
+  private readonly kv: KvLike;
+  private readonly limit: number;
+
+  constructor(kv: KvLike, limit: number) {
+    this.kv = kv;
+    this.limit = limit;
+  }
+
+  /** Consume one unit of today's budget; disallow once the cap is reached. */
+  async consume(): Promise<RateLimitResult> {
+    const now = new Date();
+    const day = now.toISOString().slice(0, 10); // YYYY-MM-DD (UTC)
+    const key = `spend:${day}`;
+
+    const raw = await this.kv.get(key);
+    const used = raw ? Number.parseInt(raw, 10) || 0 : 0;
+
+    if (used >= this.limit) {
+      const nextMidnightUtc = Date.UTC(
+        now.getUTCFullYear(),
+        now.getUTCMonth(),
+        now.getUTCDate() + 1,
+      );
+      const retryAfterSeconds = Math.max(1, Math.ceil((nextMidnightUtc - now.getTime()) / 1000));
+      return { allowed: false, retryAfterSeconds };
+    }
+
+    await this.kv.put(key, String(used + 1), { expirationTtl: 2 * 24 * 60 * 60 });
     return { allowed: true, retryAfterSeconds: 0 };
   }
 }

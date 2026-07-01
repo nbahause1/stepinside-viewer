@@ -22,7 +22,7 @@
 import { validateStagingRequest, StagingValidationError } from './staging-validation.js';
 import { buildStagingPrompt, resolveStyle } from './staging-prompt.js';
 import type { StagingStyle } from './staging-prompt.js';
-import type { RateLimiter } from './ratelimit.js';
+import type { RateLimiter, RateLimitResult } from './ratelimit.js';
 
 /** A reference furniture photo used to condition the generation. */
 export interface ReferenceImage {
@@ -44,6 +44,13 @@ export interface StagingDeps {
    * empty array, staging falls back to the named-pieces prompt alone.
    */
   loadStyleReferences?: (style: StagingStyle) => Promise<ReferenceImage[]>;
+  /**
+   * Optional global daily spend cap (see KvDailyBudget in ratelimit.ts). It is
+   * consumed AFTER the per-IP rate limit and input validation pass, immediately
+   * before the paid Gemini call — so rejected/garbage requests never burn
+   * budget. When omitted (dev server, Vercel, no KV), no cap is enforced.
+   */
+  dailyBudget?: { consume(): Promise<RateLimitResult> };
 }
 
 /** A normalized result the entry points translate into their native response. */
@@ -76,7 +83,29 @@ const GEMINI_RETRY_BACKOFF_MS = [2000, 5000];
 // 429 (quota) and 4xx (bad request/key) are not retried — they won't self-heal.
 const GEMINI_RETRYABLE_STATUS = new Set([503, 500]);
 
+// Hard ceiling on a single upstream generate call. Pro-model image generation
+// legitimately takes tens of seconds; anything past ~75s is a hung connection,
+// and without an abort the Worker (and the visitor) would wait indefinitely.
+// On abort we surface the existing 502 path — the viewer already shows a
+// friendly German message for it.
+const GEMINI_TIMEOUT_MS = 75_000;
+
 const delay = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
+
+/** `fetch` with an AbortController deadline; the timer is always cleared. */
+async function fetchWithTimeout(
+  url: string,
+  init: RequestInit,
+  timeoutMs: number,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 // Supported output aspect-ratio enums (Gemini 3 image). We pick the one closest
 // to the captured frame so the staged image lines up with the live scan.
@@ -133,6 +162,20 @@ export async function handleStaging(
       return { status: 400, body: { error: err.message } };
     }
     return { status: 400, body: { error: 'Invalid request.' } };
+  }
+
+  // 2b. Global daily spend cap (kill-switch). Checked after rate limit +
+  //     validation so only requests that would actually reach Gemini consume
+  //     budget. 429 keeps the viewer's existing friendly handling.
+  if (deps.dailyBudget) {
+    const budget = await deps.dailyBudget.consume();
+    if (!budget.allowed) {
+      return {
+        status: 429,
+        body: { error: 'The daily staging budget is exhausted. Please try again tomorrow.' },
+        retryAfterSeconds: budget.retryAfterSeconds,
+      };
+    }
   }
 
   // 3. Resolve the style id to a server-owned prompt (client never sends text)
@@ -220,14 +263,25 @@ async function generateWithGemini(
   // attempt re-issues the full request; non-retryable statuses throw immediately.
   let res: Response | undefined;
   for (let attempt = 0; ; attempt++) {
-    res = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'x-goog-api-key': apiKey,
-        'Content-Type': 'application/json',
-      },
-      body: requestBody,
-    });
+    try {
+      res = await fetchWithTimeout(url, {
+        method: 'POST',
+        headers: {
+          'x-goog-api-key': apiKey,
+          'Content-Type': 'application/json',
+        },
+        body: requestBody,
+      }, GEMINI_TIMEOUT_MS);
+    } catch (err) {
+      // A deadline hit means the upstream is hung/overloaded — don't retry
+      // (another 75s wait helps nobody); surface the 502 path immediately.
+      // Matched by name: abort surfaces as DOMException, which is not
+      // `instanceof Error` on every runtime this core targets.
+      if (typeof err === 'object' && err !== null && (err as { name?: unknown }).name === 'AbortError') {
+        throw new GeminiError(504, `upstream timeout after ${GEMINI_TIMEOUT_MS} ms`);
+      }
+      throw err;
+    }
 
     if (res.ok) break;
 

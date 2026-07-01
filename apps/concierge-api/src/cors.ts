@@ -43,7 +43,9 @@ export function resolveAllowOrigin(
 export function corsHeaders(allowOrigin: string | null): Record<string, string> {
   const headers: Record<string, string> = {
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
+    // x-stage-token: optional /stage auth header (STAGE_AUTH_TOKEN). Listing it
+    // unconditionally is harmless — it only matters when the client sends it.
+    'Access-Control-Allow-Headers': 'Content-Type, x-stage-token',
     'Access-Control-Max-Age': '86400',
     Vary: 'Origin',
   };
