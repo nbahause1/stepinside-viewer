@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  website:
+    name: website (typecheck)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/website
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/website/package-lock.json
+      - run: npm ci
+      - run: npx tsc --noEmit
+
+  concierge-api:
+    name: concierge-api (typecheck)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/concierge-api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/concierge-api/package-lock.json
+      - run: npm ci
+      - run: npm run type:check
+
+  viewer:
+    name: viewer (typecheck)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/viewer
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/viewer/package-lock.json
+      - run: npm ci
+      - run: npm run type:check
