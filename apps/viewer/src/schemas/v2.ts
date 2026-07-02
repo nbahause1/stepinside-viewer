@@ -89,6 +89,10 @@ type ExperienceSettings = {
     cameras: Camera[],
     annotations: Annotation[],
 
+    // 'hidden' keeps tooltips + the ‹ › navigator fully functional but never
+    // renders the in-scene number bubbles. Absent/'visible' = today's look.
+    annotationMarkers?: 'visible' | 'hidden',
+
     startMode: 'default' | 'animTrack' | 'annotation',
 
     // Concierge config (optional; ignored by validateV2 which only casts, so

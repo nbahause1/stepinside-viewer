@@ -81,6 +81,11 @@ export class Annotation extends Script {
 
     static opacity = 1.0;
 
+    // settings.annotationMarkers === 'hidden': tooltips + navigator stay fully
+    // functional but the in-scene number bubbles are never rendered (and their
+    // invisible hit zones never accept taps).
+    static markersHidden = false;
+
     /**
      * @attribute
      */
@@ -508,10 +513,11 @@ export class Annotation extends Script {
 
         // update material opacity and also directly on the uniform so we
         // can avoid a full material update
-        this.materials[0].opacity = Annotation.opacity;
-        this.materials[1].opacity = 0.25 * Annotation.opacity;
-        this.materials[0].setParameter('material_opacity', Annotation.opacity);
-        this.materials[1].setParameter('material_opacity', 0.25 * Annotation.opacity);
+        const markerOpacity = Annotation.markersHidden ? 0 : Annotation.opacity;
+        this.materials[0].opacity = markerOpacity;
+        this.materials[1].opacity = 0.25 * markerOpacity;
+        this.materials[0].setParameter('material_opacity', markerOpacity);
+        this.materials[1].setParameter('material_opacity', 0.25 * markerOpacity);
     }
 
     /**
@@ -577,8 +583,8 @@ export class Annotation extends Script {
      * @private
      */
     _updatePositions(screenPos: Vec3) {
-        // Show and position hotspot
-        this.hotspotDom.style.display = 'block';
+        // Show and position hotspot (hidden markers keep no hit zone either)
+        this.hotspotDom.style.display = Annotation.markersHidden ? 'none' : 'block';
         this.hotspotDom.style.left = `${screenPos.x}px`;
         this.hotspotDom.style.top = `${screenPos.y}px`;
 

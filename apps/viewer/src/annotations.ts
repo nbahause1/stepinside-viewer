@@ -19,6 +19,8 @@ class Annotations {
         this.annotations = global.settings.annotations;
         this.parentDom = parentDom;
 
+        Annotation.markersHidden = global.settings.annotationMarkers === 'hidden';
+
         const { state } = global;
 
         const updateVisibility = () => {
