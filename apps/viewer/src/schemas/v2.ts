@@ -157,6 +157,19 @@ type ExperienceSettings = {
         logoText?: string,
         logoUrl?: string,
         accentColor?: string
+    },
+
+    // In-viewer lead capture (optional; cast-through like `concierge`). When
+    // `email` or `url` is set the viewer shows a discreet glass CTA pill
+    // (top-right). Tapping it opens `url` in a new tab, or — url absent — a
+    // pre-addressed mailto to `email` with `subject` (default
+    // "Anfrage: {branding.title or document.title}"). `label` defaults to
+    // "Besichtigung anfragen". With neither target set the pill stays hidden.
+    inquiry?: {
+        label?: string,
+        email?: string,
+        url?: string,
+        subject?: string
     }
 };
 

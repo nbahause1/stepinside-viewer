@@ -470,6 +470,22 @@
                 </button>
             </div>
 
+            <!-- Lead capture ("Besichtigung anfragen"): a discreet glass CTA
+                 pill top-right. Tap opens the configured booking url in a new
+                 tab, or a pre-addressed e-mail. Wired in inquiry.ts; hidden
+                 unless settings.inquiry provides a target. -->
+            <div id="inquiryPill" class="hidden">
+                <button id="inquiryTrigger" type="button" aria-label="Besichtigung anfragen" title="Besichtigung anfragen">
+                    <svg width="20" height="20" viewBox="0 0 22 22" aria-hidden="true">
+                        <!-- calendar with a check: "book a viewing" -->
+                        <path d="M4.5 5.5 h13 a1.5 1.5 0 0 1 1.5 1.5 v9 a1.5 1.5 0 0 1 -1.5 1.5 h-13 a1.5 1.5 0 0 1 -1.5 -1.5 v-9 a1.5 1.5 0 0 1 1.5 -1.5 Z" />
+                        <path d="M3 9 H19 M7.5 3.5 V6.5 M14.5 3.5 V6.5" />
+                        <path d="M8.2 13.4 l1.9 1.9 3.7 -3.7" />
+                    </svg>
+                    <span id="inquiryLabel">Besichtigung anfragen</span>
+                </button>
+            </div>
+
             <!-- Staging overlay: the furnished image laid over the scan, with a
                  scan/furnished toggle, a press-and-hold peek, and a close that
                  returns to walking. `.is-scan` fades the image out to reveal the

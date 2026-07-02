@@ -79,6 +79,10 @@
       { "id": "scandi", "label": "Minimal", "image": "staged/scandi.jpg", "imagePortrait": "staged/scandi-portrait.jpg" }
     ]
   },
+  "inquiry": {
+    "label": "Besichtigung anfragen",
+    "email": "kurieronline6@gmail.com"
+  },
   "pois": [
     {
       "id": "window",

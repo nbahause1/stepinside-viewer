@@ -2045,12 +2045,76 @@ body.measure-active #controlDome {
     #stagePill #stageTrigger.attention { animation: none; }
 }
 
+// ------------------------------------------------------------- lead capture
+// "Besichtigung anfragen": a discreet glass CTA pill in the top-right corner —
+// the only free slot (brand top-centre, concierge bottom-left, dome bottom-
+// centre, sofa bottom-right), so it never crowds the other pills, even on
+// iPhone portrait. Same dark-glass recipe as the staging pill.
+#inquiryPill {
+    position: fixed;
+    top: max(14px, env(safe-area-inset-top));
+    right: max(14px, env(safe-area-inset-right));
+    z-index: 16;                 // above controlDome (15), below brandDome (20)
+    pointer-events: none;        // wrapper is inert; only the trigger is live
+
+    #inquiryTrigger {
+        pointer-events: auto;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        height: 44px;
+        padding: 0 17px 0 14px;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 22px;
+        cursor: pointer;
+        color: #fff;
+        font-family: 'Montserrat', sans-serif;
+        font-weight: 600;
+        font-size: 13.5px;
+        line-height: 1;
+        white-space: nowrap;
+        background: linear-gradient(180deg, rgba(30, 30, 32, 0.5), rgba(18, 18, 20, 0.42));
+        backdrop-filter: blur(20px) saturate(150%);
+        -webkit-backdrop-filter: blur(20px) saturate(150%);
+        box-shadow:
+            0 8px 24px -10px rgba(0, 0, 0, 0.4),
+            inset 0 1px 0 0 rgba(255, 255, 255, 0.14);
+        transition: background 160ms var(--ease-out), transform 160ms var(--ease-out);
+
+        * { pointer-events: none; }
+
+        > svg {
+            display: block;
+            flex-shrink: 0;
+            fill: none;
+            stroke: #fff;
+            stroke-width: 1.75;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+
+        #inquiryLabel {
+            display: inline-block;
+            margin-left: 9px;
+        }
+
+        @media (hover: hover) and (pointer: fine) {
+            &:hover {
+                background: linear-gradient(180deg, rgba(42, 42, 45, 0.56), rgba(26, 26, 28, 0.48));
+            }
+        }
+
+        &:active { transform: scale(0.96); }
+    }
+}
+
 // While the staging overlay is open, hide the normal viewer chrome so it never
 // shows through when the visitor peeks at the original scan ("Original zeigen").
 body.staging-open {
     #controlDome,
     #brandDome,
     #chatPill,
+    #inquiryPill,
     #stagePill {
         opacity: 0 !important;
         pointer-events: none !important;
@@ -2392,6 +2456,16 @@ body.staging-open {
     #chatPill #chatToggle { width: 40px; height: 40px; }
     #stagePill #stageTrigger { height: 40px; padding: 0 9px; }
 
+    // lead-capture pill (top-right) collapses to its calendar icon — the full
+    // label would run into the centred brand pill on a portrait phone. The
+    // accessible name/tooltip keep carrying the label (set in inquiry.ts).
+    #inquiryPill #inquiryTrigger {
+        height: 40px;
+        padding: 0 9px;
+
+        #inquiryLabel { display: none; }
+    }
+
     // never expand to the label on mobile — it would overlap the control dome;
     // the onboarding glow alone invites the tap there
     #stagePill #stageTrigger.attention,
@@ -2423,6 +2497,7 @@ body.staging-open {
 #chatPill #chatToggle,
 #chatPill #chatPanel,
 #stagePill #stageTrigger,
+#inquiryPill #inquiryTrigger,
 #stageOverlay #stageBar,
 #stageOverlay .stageArrow {
   background:
@@ -2453,6 +2528,7 @@ body.staging-open {
 @media (hover: hover) and (pointer: fine) {
   #chatPill #chatToggle:hover,
   #stagePill #stageTrigger:hover,
+  #inquiryPill #inquiryTrigger:hover,
   #stageOverlay .stageArrow:hover {
     background:
       radial-gradient(130% 120% at 50% -15%, rgba(255,255,255,0.32), rgba(255,255,255,0) 60%),
@@ -2485,6 +2561,7 @@ body.staging-open {
   #controlDome,
   #chatPill #chatToggle,
   #stagePill #stageTrigger,
+  #inquiryPill #inquiryTrigger,
   #stageOverlay .stageArrow {
     backdrop-filter: url('#liquidGlass') blur(7px) saturate(var(--lgd-sat)) brightness(var(--lgd-bright));
   }
