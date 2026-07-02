@@ -366,8 +366,18 @@
                  the primary controls, replacing the stock SuperSplat button bar.
                  Wired in controls.ts. -->
             <div id="controlDome">
-                <!-- walk mode: measure / home (centre) / enter bird's-eye -->
+                <!-- walk mode: tour / measure / home (centre) / enter bird's-eye -->
                 <div class="controlDome__row controlDome__row--walk">
+                    <button id="domeTour" class="domeBtn hidden" type="button" aria-label="Rundgang starten" title="Rundgang starten">
+                        <!-- play triangle by default; while the tour runs it swaps
+                             to a stop square, so the same button clearly ends it. -->
+                        <svg class="domeIcon domeIcon--tourStart" width="25" height="25" viewBox="0 0 22 22" aria-hidden="true">
+                            <path d="M8.2 5.4 L16.4 11 L8.2 16.6 Z" />
+                        </svg>
+                        <svg class="domeIcon domeIcon--tourStop" width="25" height="25" viewBox="0 0 22 22" aria-hidden="true">
+                            <rect x="6.7" y="6.7" width="8.6" height="8.6" rx="1.6" />
+                        </svg>
+                    </button>
                     <button id="domeMeasure" class="domeBtn" type="button" aria-label="Vermessung" title="Vermessung">
                         <!-- ruler by default; while measuring it swaps to the walk
                              figure so it's clear this button returns to walking. -->

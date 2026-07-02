@@ -490,8 +490,10 @@ body.tutorial-active #walkHint {
 
 /* control dome — replaces the stock SuperSplat button bar */
 
-// hide the stock bar entirely (kept in the DOM so its JS wiring stays intact)
-#controlsWrap {
+// hide the stock button bar (kept in the DOM so its JS wiring stays intact);
+// the timeline inside #controlsWrap is reused as the guided-tour ("Rundgang")
+// progress bar and restyled into a slim glass pill further below.
+#controlsWrap > #buttonsContainer {
     display: none !important;
 }
 
@@ -564,6 +566,22 @@ body.tutorial-active #walkHint {
     // button, so it's clear how to leave measure mode.
     #domeMeasure .domeIcon--walk {
         display: none;
+    }
+
+    // tour button shows a play triangle by default and a stop square while the
+    // tour ("Rundgang") is running — same swap affordance as the measure button.
+    #domeTour .domeIcon--tourStop {
+        display: none;
+    }
+
+    #domeTour.active {
+        .domeIcon--tourStart {
+            display: none;
+        }
+
+        .domeIcon--tourStop {
+            display: block;
+        }
     }
 
     // the bottom bar swaps its whole row with the mode: walk controls (measure /
@@ -1183,13 +1201,17 @@ body.measure-active #controlDome {
     }
 }
 
-/* controlsWrap */
+/* controlsWrap — only the timeline inside is ever visible (the stock button
+   bar is hidden; the control dome replaces it). It shows during the guided
+   tour ("Rundgang") as a slim frosted pill floating just above the dome. */
 
 #controlsWrap {
     position: absolute;
-    left: max(16px, env(safe-area-inset-left));
-    right: max(16px, env(safe-area-inset-right));
-    bottom: max(16px, env(safe-area-inset-bottom));
+    left: 50%;
+    bottom: 78px;                // floats just above the control dome pill
+    transform: translateX(-50%);
+    width: min(420px, calc(100% - 44px));
+    z-index: 15;
 
     display: flex;
     flex-direction: column;
@@ -1210,30 +1232,40 @@ body.measure-active #controlDome {
         height: 30px;
         cursor: pointer;
 
+        // dark frosted glass pill, matching the control dome
+        border-radius: 999px;
+        background: linear-gradient(180deg, rgba(30, 30, 32, 0.5), rgba(18, 18, 20, 0.42));
+        backdrop-filter: blur(20px) saturate(150%);
+        -webkit-backdrop-filter: blur(20px) saturate(150%);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        box-shadow:
+            0 8px 24px -10px rgba(0, 0, 0, 0.4),
+            inset 0 1px 0 0 rgba(255, 255, 255, 0.14);
+
         > #line {
             width: 100%;
             height: 50%;
-            border-bottom: 4px solid #d9d9d9;
+            border-bottom: 2px solid rgba(255, 255, 255, 0.3);
         }
 
         > #handle {
             position: absolute;
-            top: 16.5px;
+            top: 17px;
             width: 12px;
             height: 12px;
             transform: translate(-50%, -50%);
-            border: 2px solid #d9d9d9;
             border-radius: 50%;
-            background-color: $clr-grip;
+            background-color: #fff;
+            box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
         }
 
         > #time {
             position: absolute;
-            top: 0;
-            padding: 2px 4px;
+            top: -8px;
+            padding: 2px 10px;
             transform: translate(-50%, -100%);
             font-size: 12px;
-            border-radius: 4px;
+            border-radius: 999px;
 
             color: $clr-text-light;
             background-color: rgba($clr-bkg-dark, 0.5);
@@ -2240,6 +2272,7 @@ body.measure-active #controlDome {
 // shows through when the visitor peeks at the original scan ("Original zeigen").
 body.staging-open {
     #controlDome,
+    #controlsWrap,
     #brandDome,
     #chatPill,
     #inquiryPill,
@@ -2624,6 +2657,7 @@ body.staging-open {
 /* -- dunkles Glas: Pillen & Panels ueber der Szene (weisser Inhalt) -- */
 #brandDome .brandMark,
 #controlDome,
+#controlsWrap > #timelineContainer,
 #chatPill #chatToggle,
 #chatPill #chatPanel,
 #stagePill #stageTrigger,

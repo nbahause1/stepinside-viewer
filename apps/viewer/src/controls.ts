@@ -4,11 +4,12 @@ import type { Global } from './types';
 //   walk mode   : reset · measure · enter bird's-eye (drone)
 //   bird's-eye  : previous view (‹) · return to walking · next view (›)
 const initControls = (global: Global) => {
-    const { events } = global;
+    const { events, settings } = global;
 
     const dome = document.getElementById('controlDome');
     if (!dome) return;
 
+    const tour = document.getElementById('domeTour');
     const reset = document.getElementById('domeReset');
     const measure = document.getElementById('domeMeasure');
     const aerial = document.getElementById('domeAerial');
@@ -19,6 +20,22 @@ const initControls = (global: Global) => {
     reset?.addEventListener('click', (event) => {
         events.fire('inputEvent', 'reset', event);
     });
+
+    // Guided tour ("Rundgang"): only offered when the scene ships an authored
+    // camera track that doesn't already autoplay (startMode 'animTrack' keeps
+    // its own start experience). The button toggles anim mode in the camera
+    // manager; any camera input during the tour also stops it.
+    if (tour && settings.animTracks?.length > 0 && settings.startMode !== 'animTrack') {
+        tour.classList.remove('hidden');
+        tour.addEventListener('click', () => events.fire('inputEvent', 'tour'));
+        events.on('cameraMode:changed', (mode: string) => {
+            const touring = mode === 'anim';
+            tour.classList.toggle('active', touring);
+            const label = touring ? 'Rundgang beenden' : 'Rundgang starten';
+            tour.setAttribute('aria-label', label);
+            tour.title = label;
+        });
+    }
 
     // entering (drone button) and leaving (walk button) both toggle aerial mode
     aerial?.addEventListener('click', () => events.fire('inputEvent', 'aerial'));

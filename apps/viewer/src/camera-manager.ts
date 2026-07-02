@@ -104,12 +104,13 @@ class CameraManager {
             const { animTracks } = settings;
 
             // Only run a camera animation track when one is explicitly authored
-            // in the settings (startMode 'animTrack'). We deliberately drop the
-            // automatic rotate/figure-8 fallbacks: for our clean viewer the idle
-            // motion is the organic look-around handled in fly mode, not a
-            // mechanical orbit. A real guided tour can still be added later via
-            // settings.animTracks.
-            if (animTracks?.length > 0 && settings.startMode === 'animTrack') {
+            // in the settings. It powers two experiences: the autoplay start
+            // (startMode 'animTrack') and the on-demand guided tour ("Rundgang")
+            // started from the control dome. We deliberately drop the automatic
+            // rotate/figure-8 fallbacks: for our clean viewer the idle motion is
+            // the organic look-around handled in fly mode, not a mechanical
+            // orbit.
+            if (animTracks?.length > 0) {
                 return animTracks[0];
             }
             return null;
@@ -150,8 +151,11 @@ class CameraManager {
         state.hasAnimation = !!controllers.anim;
         state.animationDuration = controllers.anim ? controllers.anim.animState.cursor.duration : 0;
 
-        // initialize camera mode and initial camera position
-        state.cameraMode = state.hasAnimation ? 'anim' : (isObjectExperience ? 'orbit' : (walkAllowed ? 'walk' : 'fly'));
+        // initialize camera mode and initial camera position. A track only
+        // autoplays when the scene is authored to start with it (startMode
+        // 'animTrack'); an on-demand tour track must not hijack the start pose.
+        const autoplayAnim = state.hasAnimation && settings.startMode === 'animTrack';
+        state.cameraMode = autoplayAnim ? 'anim' : (isObjectExperience ? 'orbit' : (walkAllowed ? 'walk' : 'fly'));
         this.camera.copy(resetCamera);
 
         const target = new Camera(this.camera);             // the active controller updates this
@@ -319,6 +323,23 @@ class CameraManager {
                         state.cameraMode = 'orbit';
                         controllers.orbit.goto(resetCamera);
                         startTransition();
+                    }
+                    break;
+                case 'tour':
+                    // guided-tour toggle ("Rundgang"): start track 0 from the
+                    // top, or stop and hand back to the mode the visitor came
+                    // from — the same exit path 'cancel'/'interrupt' use.
+                    if (state.hasAnimation) {
+                        if (state.cameraMode === 'anim') {
+                            state.cameraMode = fromMode;
+                        } else {
+                            sourcesByMode[state.cameraMode]?.cancel();
+                            events.fire('navTarget:clear');
+                            controllers.anim.animState.cursor.value = 0;
+                            controllers.anim.animState.update(0);
+                            state.cameraMode = 'anim';
+                            state.animationPaused = false;
+                        }
                     }
                     break;
                 case 'playPause':
