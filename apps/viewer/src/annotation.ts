@@ -118,17 +118,33 @@ export class Annotation extends Script {
      */
     static _injectStyles(size: number) {
         const css = `
+            /* Light frosted-glass card, same recipe as the tutorial cards
+               (bright white veil over a saturated blur, glossy top edge, soft
+               float shadow) so annotation tooltips share the premium glass
+               language of the rest of the viewer chrome. */
             .pc-annotation {
                 display: block;
                 position: absolute;
-                background-color: rgba(0, 0, 0, 0.8);
-                color: white;
-                padding: 8px;
-                border-radius: 4px;
-                font-size: 14px;
-                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+                background:
+                    radial-gradient(135% 130% at 50% -14%, rgba(255, 255, 255, 0.96), rgba(255, 255, 255, 0) 62%),
+                    linear-gradient(180deg, rgba(255, 255, 255, 0.74), rgba(246, 247, 250, 0.56));
+                -webkit-backdrop-filter: blur(30px) saturate(180%) brightness(1.08);
+                backdrop-filter: blur(30px) saturate(180%) brightness(1.08);
+                border: 1px solid rgba(255, 255, 255, 0.68);
+                box-shadow:
+                    0 12px 30px -12px rgba(0, 0, 0, 0.26),
+                    0 30px 60px -28px rgba(0, 0, 0, 0.30),
+                    inset 0 1px 0 0 rgba(255, 255, 255, 0.95),
+                    inset 0 -1px 0 0 rgba(0, 0, 0, 0.05);
+                color: var(--ink-2, rgba(28, 28, 30, 0.62));
+                padding: 12px 15px;
+                border-radius: 16px;
+                font-size: 12.5px;
+                font-weight: 500;
+                line-height: 1.4;
+                font-family: 'Montserrat', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
                 pointer-events: none;
-                max-width: 200px;
+                max-width: min(240px, calc(100vw - 32px));
                 word-wrap: break-word;
                 overflow-x: visible;
                 white-space: normal;
@@ -139,8 +155,18 @@ export class Annotation extends Script {
             }
 
             .pc-annotation-title {
-                font-weight: bold;
-                margin-bottom: 4px;
+                font-size: 14px;
+                font-weight: 600;
+                letter-spacing: -0.005em;
+                color: var(--ink-1, rgba(24, 24, 26, 0.94));
+            }
+
+            .pc-annotation-text {
+                margin-top: 3px;
+            }
+
+            .pc-annotation-text:empty {
+                display: none;
             }
 
             /* Tooltip arrow */
@@ -156,12 +182,12 @@ export class Annotation extends Script {
 
             .pc-annotation.arrow-right::before {
                 left: -8px;
-                border-right: 8px solid rgba(0, 0, 0, 0.8);
+                border-right: 8px solid rgba(252, 252, 253, 0.92);
             }
 
             .pc-annotation.arrow-left::before {
                 right: -8px;
-                border-left: 8px solid rgba(0, 0, 0, 0.8);
+                border-left: 8px solid rgba(252, 252, 253, 0.92);
             }
 
             .pc-annotation-hotspot {
