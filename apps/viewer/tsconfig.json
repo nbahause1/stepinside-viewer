@@ -3,6 +3,9 @@
         "target": "es2022",
         "module": "es2020",
         "moduleResolution": "bundler",
+        // qrcode-generator ships CJS-style `export =` typings alongside a real
+        // ESM build (dist/qrcode.mjs with a default export, picked by rollup)
+        "allowSyntheticDefaultImports": true,
 
         "lib": ["es2022", "dom"],
         "sourceMap": true,

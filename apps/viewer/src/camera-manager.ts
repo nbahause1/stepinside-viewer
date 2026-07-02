@@ -16,9 +16,19 @@ import { WalkSource } from './cameras/walk-source';
 import type { Collision } from './collision';
 import { easeOut } from './core/math';
 import { Annotation } from './settings';
+import type { SharedView } from './share';
 import { CameraMode, Global } from './types';
 
 const tmpCamera = new Camera();
+const tmpFocus = new Vec3();
+
+// single-char camera mode codes used by the `?view=` share links
+const shareModeByChar: Record<string, CameraMode> = {
+    w: 'walk', f: 'fly', o: 'orbit', a: 'aerial'
+};
+const shareCharByMode: Partial<Record<CameraMode, string>> = {
+    walk: 'w', fly: 'f', orbit: 'o', aerial: 'a'
+};
 
 // Walk mode is only enabled when the scene's horizontal footprint is large
 // enough to walk around in. Vertical extent (Y) is irrelevant — a tall but
@@ -367,6 +377,40 @@ class CameraManager {
             events.fire('navTarget:clear');
             controllers.walk.goto(poiCam);
             startTransition();
+        });
+
+        // ---- Share / deep-link viewpoints (see share.ts) -------------------
+        // 'view:capture' fills the passed holder with the current pose so
+        // share.ts can build a `?view=` link synchronously.
+        events.on('view:capture', (out: { view?: SharedView }) => {
+            const cam = this.camera;
+            cam.calcFocusPoint(tmpFocus);
+            out.view = {
+                position: [cam.position.x, cam.position.y, cam.position.z],
+                target: [tmpFocus.x, tmpFocus.y, tmpFocus.z],
+                fov: cam.fov,
+                mode: shareCharByMode[state.cameraMode]
+            };
+        });
+
+        // 'view:apply' restores a deep-linked pose once the scene is ready.
+        // Mirrors the debug panel's restoreCameraState: set the pose, switch
+        // the mode (fires cameraMode:changed → controller onExit/onEnter),
+        // then snap() to re-seed the controller and cancel the transition
+        // lerp so the visitor lands exactly on the shared view.
+        events.on('view:apply', (view: SharedView) => {
+            let mode = shareModeByChar[view.mode ?? ''] ?? state.cameraMode;
+            if ((mode === 'walk' && !walkAllowed) || mode === 'anim') {
+                mode = defaultMode;
+            }
+            sourcesByMode[state.cameraMode]?.cancel();
+            events.fire('orbitTarget:clear');
+            events.fire('navTarget:clear');
+            this.camera.copy(createCamera(new Vec3(view.position), new Vec3(view.target), view.fov));
+            if (state.cameraMode !== mode) {
+                state.cameraMode = mode;
+            }
+            this.snap();
         });
 
         // Authoring helper: log the current camera as a ready-to-paste POI

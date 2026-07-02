@@ -26,6 +26,7 @@ import type { Config, Global } from './types';
 import { initControls } from './controls';
 import { initConcierge } from './concierge';
 import { initInquiry } from './inquiry';
+import { initShare } from './share';
 import { initStaging } from './staging';
 import { initTutorial } from './tutorial';
 import { initPoster, initUI } from './ui';
@@ -314,6 +315,9 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
     initLocalization();
     initUI(global);
     initBranding(global);
+    // share/deep-link before tutorial: on 'loaded'/'prewarming' a deep-linked
+    // pose must be applied before the onboarding samples its starting yaw
+    initShare(global);
     initTutorial(global);
     initControls(global);
     initConcierge(global);

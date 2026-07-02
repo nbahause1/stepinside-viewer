@@ -486,6 +486,26 @@
                 </button>
             </div>
 
+            <!-- Share ("Ansicht teilen"): a small glass icon-button top-left.
+                 Builds a ?view= deep link of the current camera; native share
+                 sheet where available (iOS/Android), otherwise copies the link
+                 ("Link kopiert") and offers a QR code ("Auf dem Handy öffnen")
+                 in a glass popover. Wired in share.ts. -->
+            <div id="sharePill" class="hidden">
+                <button id="shareTrigger" type="button" aria-label="Ansicht teilen" title="Ansicht teilen">
+                    <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true">
+                        <!-- iOS-style share: arrow rising out of a tray -->
+                        <path d="M11 13.5 V3.2 M11 3.2 L7.6 6.6 M11 3.2 L14.4 6.6" />
+                        <path d="M7 9.5 H5.8 a1.5 1.5 0 0 0 -1.5 1.5 v6 a1.5 1.5 0 0 0 1.5 1.5 h10.4 a1.5 1.5 0 0 0 1.5 -1.5 v-6 a1.5 1.5 0 0 0 -1.5 -1.5 H15" />
+                    </svg>
+                </button>
+                <div id="sharePopover" class="hidden" role="dialog" aria-label="Ansicht teilen">
+                    <div id="shareQrCard"><div id="shareQr" aria-hidden="true"></div></div>
+                    <div id="shareQrLabel">Auf dem Handy öffnen</div>
+                </div>
+                <div id="shareToast" aria-live="polite">Link kopiert</div>
+            </div>
+
             <!-- Staging overlay: the furnished image laid over the scan, with a
                  scan/furnished toggle, a press-and-hold peek, and a close that
                  returns to walking. `.is-scan` fades the image out to reveal the

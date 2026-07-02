@@ -2108,6 +2108,134 @@ body.measure-active #controlDome {
     }
 }
 
+// ---------------------------------------------------------------------- share
+// "Ansicht teilen": a small glass icon-button in the top-left corner (the last
+// free corner: brand top-centre, lead capture top-right, concierge bottom-left,
+// sofa bottom-right). iOS/Android hand the deep link to the native share
+// sheet; desktop copies it ("Link kopiert" toast beside the button) and opens
+// a glass popover below with a QR code ("Auf dem Handy öffnen").
+#sharePill {
+    position: fixed;
+    top: max(14px, env(safe-area-inset-top));
+    left: max(14px, env(safe-area-inset-left));
+    z-index: 16;                 // above controlDome (15), below brandDome (20)
+    pointer-events: none;        // wrapper is inert; only trigger/popover are live
+
+    #shareTrigger {
+        pointer-events: auto;
+        width: 44px;
+        height: 44px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 50%;
+        cursor: pointer;
+        color: rgba(255, 255, 255, 0.82);
+        background: linear-gradient(180deg, rgba(30, 30, 32, 0.5), rgba(18, 18, 20, 0.42));
+        backdrop-filter: blur(20px) saturate(150%);
+        -webkit-backdrop-filter: blur(20px) saturate(150%);
+        box-shadow:
+            0 8px 24px -10px rgba(0, 0, 0, 0.4),
+            inset 0 1px 0 0 rgba(255, 255, 255, 0.14);
+        transition: background 160ms var(--ease-out), transform 160ms var(--ease-out);
+
+        * { pointer-events: none; }
+
+        > svg {
+            display: block;
+            fill: none;
+            stroke: currentColor;
+            stroke-width: 1.6;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+
+        @media (hover: hover) and (pointer: fine) {
+            &:hover {
+                background: linear-gradient(180deg, rgba(42, 42, 45, 0.56), rgba(26, 26, 28, 0.48));
+            }
+        }
+
+        &:active { transform: scale(0.94); }
+    }
+
+    // QR popover: dark glass card below the button (recipe from the shared
+    // liquid-glass block at the bottom of this file).
+    #sharePopover {
+        pointer-events: auto;
+        position: absolute;
+        top: calc(100% + 10px);
+        left: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 10px;
+        padding: 14px 14px 12px;
+        border-radius: 20px;
+        animation: sharePopIn 240ms var(--ease-out) both;
+
+        &.hidden { display: none; }
+    }
+
+    // the QR itself sits on a small white card (contrast + quiet zone)
+    #shareQrCard {
+        padding: 10px;
+        background: #fff;
+        border-radius: 12px;
+        line-height: 0;
+
+        svg {
+            display: block;
+            width: 148px;
+            height: 148px;
+        }
+    }
+
+    #shareQrLabel {
+        color: rgba(255, 255, 255, 0.92);
+        font-family: 'Montserrat', sans-serif;
+        font-weight: 600;
+        font-size: 12.5px;
+        line-height: 1;
+        white-space: nowrap;
+    }
+
+    // brief confirmation beside the button after the link was copied
+    #shareToast {
+        position: absolute;
+        top: 50%;
+        left: calc(100% + 10px);
+        transform: translateY(-50%);
+        padding: 9px 14px;
+        border-radius: 16px;
+        color: #fff;
+        font-family: 'Montserrat', sans-serif;
+        font-weight: 600;
+        font-size: 12.5px;
+        line-height: 1;
+        white-space: nowrap;
+        background: linear-gradient(180deg, rgba(30, 30, 32, 0.6), rgba(18, 18, 20, 0.52));
+        backdrop-filter: blur(20px) saturate(150%);
+        -webkit-backdrop-filter: blur(20px) saturate(150%);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        opacity: 0;
+        transition: opacity 220ms var(--ease-out);
+        pointer-events: none;
+
+        &.visible { opacity: 1; }
+    }
+}
+
+@keyframes sharePopIn {
+    from { opacity: 0; transform: translateY(-4px) scale(0.97); }
+    to   { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+    #sharePill #sharePopover { animation: none; }
+}
+
 // While the staging overlay is open, hide the normal viewer chrome so it never
 // shows through when the visitor peeks at the original scan ("Original zeigen").
 body.staging-open {
@@ -2115,6 +2243,7 @@ body.staging-open {
     #brandDome,
     #chatPill,
     #inquiryPill,
+    #sharePill,
     #stagePill {
         opacity: 0 !important;
         pointer-events: none !important;
@@ -2455,6 +2584,7 @@ body.staging-open {
     // smaller pills on a narrow phone (concierge bottom-left, sofa bottom-right)
     #chatPill #chatToggle { width: 40px; height: 40px; }
     #stagePill #stageTrigger { height: 40px; padding: 0 9px; }
+    #sharePill #shareTrigger { width: 40px; height: 40px; }
 
     // lead-capture pill (top-right) collapses to its calendar icon — the full
     // label would run into the centred brand pill on a portrait phone. The
@@ -2498,6 +2628,8 @@ body.staging-open {
 #chatPill #chatPanel,
 #stagePill #stageTrigger,
 #inquiryPill #inquiryTrigger,
+#sharePill #shareTrigger,
+#sharePill #sharePopover,
 #stageOverlay #stageBar,
 #stageOverlay .stageArrow {
   background:
@@ -2529,6 +2661,7 @@ body.staging-open {
   #chatPill #chatToggle:hover,
   #stagePill #stageTrigger:hover,
   #inquiryPill #inquiryTrigger:hover,
+  #sharePill #shareTrigger:hover,
   #stageOverlay .stageArrow:hover {
     background:
       radial-gradient(130% 120% at 50% -15%, rgba(255,255,255,0.32), rgba(255,255,255,0) 60%),
@@ -2562,6 +2695,7 @@ body.staging-open {
   #chatPill #chatToggle,
   #stagePill #stageTrigger,
   #inquiryPill #inquiryTrigger,
+  #sharePill #shareTrigger,
   #stageOverlay .stageArrow {
     backdrop-filter: url('#liquidGlass') blur(7px) saturate(var(--lgd-sat)) brightness(var(--lgd-bright));
   }

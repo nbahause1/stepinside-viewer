@@ -80,5 +80,8 @@
     "defaults",
     "ios_saf >= 15",
     "safari >= 15"
-  ]
+  ],
+  "dependencies": {
+    "qrcode-generator": "2.0.4"
+  }
 }
