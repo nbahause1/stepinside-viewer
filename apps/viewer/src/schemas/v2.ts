@@ -144,6 +144,19 @@ type ExperienceSettings = {
         // pictures (URLs relative to the viewer) shown instead of a live result.
         // Omit styles for a single default style.
         styles?: { id: string, label: string, image?: string, imagePortrait?: string }[]
+    },
+
+    // Per-scan white-label branding (optional). Lets a customer's tour carry
+    // their own mark: `logoUrl` (image) beats `logoText` (wordmark text) beats
+    // the default StepInside wordmark in the top-centre pill. `title` sets the
+    // browser tab to "{title} — StepInside". `accentColor` overrides the viewer
+    // accent (the --accent custom property). Absent or invalid values fall back
+    // to stock StepInside branding — validation strips them instead of throwing.
+    branding?: {
+        title?: string,
+        logoText?: string,
+        logoUrl?: string,
+        accentColor?: string
     }
 };
 
@@ -222,6 +235,28 @@ const validatePostEffects = (data: unknown, path: string): PostEffectSettings =>
     return data as PostEffectSettings;
 };
 
+const BRANDING_KEYS = ['title', 'logoText', 'logoUrl', 'accentColor'] as const;
+
+// Branding is optional cosmetics: a malformed object or wrong-typed field must
+// never reject the whole settings file, so invalid values are stripped (falling
+// back to stock StepInside branding) instead of throwing like the assert*
+// helpers do.
+const sanitizeBranding = (obj: Record<string, unknown>) => {
+    const raw = obj.branding;
+    if (raw === undefined) return;
+    if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+        delete obj.branding;
+        return;
+    }
+    const branding = raw as Record<string, unknown>;
+    BRANDING_KEYS.forEach((key) => {
+        const value = branding[key];
+        if (value !== undefined && (typeof value !== 'string' || value.trim() === '')) {
+            delete branding[key];
+        }
+    });
+};
+
 const validateV2 = (data: unknown): ExperienceSettings => {
     const obj = assertObject(data, 'settings');
 
@@ -249,6 +284,8 @@ const validateV2 = (data: unknown): ExperienceSettings => {
     annotations.forEach((a: unknown, i: number) => validateAnnotation(a, `settings.annotations[${i}]`));
 
     assertEnum(obj.startMode, START_MODES, 'settings.startMode');
+
+    sanitizeBranding(obj);
 
     return data as ExperienceSettings;
 };

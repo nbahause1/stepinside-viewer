@@ -14,6 +14,10 @@ $clr-bkg-light: #444;
 :root {
     --canvas-opacity: 1;
 
+    // Viewer accent. Overridden per scan from JS at init via
+    // settings.branding.accentColor (white-label branding).
+    --accent: #{$clr-accent};
+
     // Liquid Glass design tokens (grounded in Apple HIG: clear glass for media
     // backgrounds + a 35% dim so foreground stays legible on any scene).
     --glass-blur: 24px;
@@ -250,6 +254,16 @@ button {
             letter-spacing: 0.01em;
             white-space: nowrap;
             color: #fff;
+        }
+
+        // customer logo (white-label): replaces the diamond + word when
+        // settings.branding.logoUrl is set; sized to sit like the wordmark
+        .brandMark__logo {
+            display: block;
+            height: 20px;
+            max-width: 160px;
+            object-fit: contain;
+            -webkit-user-drag: none;
         }
     }
 }
@@ -1280,7 +1294,7 @@ body.measure-active #controlDome {
 
             /* active highlight for simple toggle buttons (e.g. voxel overlay) */
             &.active:not(.toggle) {
-                color: $clr-accent;
+                color: var(--accent);
             }
 
             /* camera toggle styling */
@@ -1289,8 +1303,8 @@ body.measure-active #controlDome {
                     90deg,
                     transparent 0%,
                     transparent 50%,
-                    $clr-accent 50%,
-                    $clr-accent 100%
+                    var(--accent) 50%,
+                    var(--accent) 100%
                 );
                 background-size: 200% 100%;
                 background-position: 100% 0%;
@@ -1407,11 +1421,13 @@ body.measure-active #controlDome {
                 }
 
                 &.active .toggleTrack {
+                    // rgba() fallback for browsers without color-mix (old Safari)
                     background-color: rgba($clr-accent, 0.35);
+                    background-color: color-mix(in srgb, var(--accent) 35%, transparent);
 
                     .toggleThumb {
                         transform: translateX(16px);
-                        background-color: $clr-accent;
+                        background-color: var(--accent);
                     }
                 }
             }
@@ -1488,7 +1504,7 @@ body.measure-active #controlDome {
                     }
 
                     &.fill {
-                        fill: $clr-accent;
+                        fill: var(--accent);
                         stroke: none;
                     }
                 }
@@ -1541,7 +1557,7 @@ body.measure-active #controlDome {
                 text-transform: uppercase;
                 letter-spacing: 1px;
                 padding: 4px 0 8px 0;
-                color: $clr-accent;
+                color: var(--accent);
             }
 
             .control-item {
@@ -1598,7 +1614,7 @@ body.measure-active #controlDome {
 
             > .tab.active {
                 color: $clr-text-light;
-                border-bottom-color: $clr-accent;
+                border-bottom-color: var(--accent);
             }
         }
     }
@@ -1708,11 +1724,14 @@ body.measure-active #controlDome {
 
                 &#xrModalOk {
                     color: $clr-text-light;
+                    // rgba() fallbacks for browsers without color-mix (old Safari)
                     background-color: rgba($clr-accent, 0.7);
+                    background-color: color-mix(in srgb, var(--accent) 70%, transparent);
                     border-color: rgba($clr-accent, 0.8);
+                    border-color: color-mix(in srgb, var(--accent) 80%, transparent);
 
                     &:hover {
-                        background-color: $clr-accent;
+                        background-color: var(--accent);
                     }
                 }
             }

@@ -16,6 +16,7 @@ import {
 } from 'playcanvas';
 
 import { App } from './app';
+import { initBranding } from './branding';
 import { MeshCollision, loadVoxelCollision } from './collision';
 import type { Collision } from './collision';
 import { observe } from './core/observe';
@@ -311,6 +312,7 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
     // Initialize user interface
     initLocalization();
     initUI(global);
+    initBranding(global);
     initTutorial(global);
     initControls(global);
     initConcierge(global);
