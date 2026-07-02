@@ -1521,7 +1521,80 @@
       }
     }
   ],
-  "annotations": [],
+  "annotations": [
+    {
+      "position": [
+        5.205,
+        1.454,
+        2.615
+      ],
+      "title": "Bodentiefe Fenster",
+      "text": "Flügelfenster mit französischem Balkon, 2,72 m hoch und 1,25 m breit – Tageslicht über die volle Raumhöhe.",
+      "camera": {
+        "initial": {
+          "position": [
+            3.208,
+            1.55,
+            2.633
+          ],
+          "target": [
+            5.205,
+            1.454,
+            2.615
+          ],
+          "fov": 96
+        }
+      }
+    },
+    {
+      "position": [
+        6.02,
+        1.457,
+        8.178
+      ],
+      "title": "Flügeltür zum Salon",
+      "text": "Doppelflügelige Tür, 2,77 m hoch und 1,48 m breit – ein klassischer Altbau-Durchgang.",
+      "camera": {
+        "initial": {
+          "position": [
+            6.01,
+            1.55,
+            6.18
+          ],
+          "target": [
+            6.02,
+            1.457,
+            8.178
+          ],
+          "fov": 96
+        }
+      }
+    },
+    {
+      "position": [
+        4.4,
+        0.1,
+        3.6
+      ],
+      "title": "Eichenparkett im Fischgrät",
+      "text": "Eichenparkett, klassisch im Fischgrätmuster verlegt – durchgehend im ganzen Raum.",
+      "camera": {
+        "initial": {
+          "position": [
+            3.1,
+            1.7,
+            2.3
+          ],
+          "target": [
+            4.4,
+            0.1,
+            3.6
+          ],
+          "fov": 80
+        }
+      }
+    }
+  ],
   "startMode": "default",
   "concierge": {
     "mode": "scripted",
