@@ -86172,17 +86172,33 @@ class Annotation extends Script {
      */
     static _injectStyles(size) {
         const css = `
+            /* Light frosted-glass card, same recipe as the tutorial cards
+               (bright white veil over a saturated blur, glossy top edge, soft
+               float shadow) so annotation tooltips share the premium glass
+               language of the rest of the viewer chrome. */
             .pc-annotation {
                 display: block;
                 position: absolute;
-                background-color: rgba(0, 0, 0, 0.8);
-                color: white;
-                padding: 8px;
-                border-radius: 4px;
-                font-size: 14px;
-                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+                background:
+                    radial-gradient(135% 130% at 50% -14%, rgba(255, 255, 255, 0.96), rgba(255, 255, 255, 0) 62%),
+                    linear-gradient(180deg, rgba(255, 255, 255, 0.74), rgba(246, 247, 250, 0.56));
+                -webkit-backdrop-filter: blur(30px) saturate(180%) brightness(1.08);
+                backdrop-filter: blur(30px) saturate(180%) brightness(1.08);
+                border: 1px solid rgba(255, 255, 255, 0.68);
+                box-shadow:
+                    0 12px 30px -12px rgba(0, 0, 0, 0.26),
+                    0 30px 60px -28px rgba(0, 0, 0, 0.30),
+                    inset 0 1px 0 0 rgba(255, 255, 255, 0.95),
+                    inset 0 -1px 0 0 rgba(0, 0, 0, 0.05);
+                color: var(--ink-2, rgba(28, 28, 30, 0.62));
+                padding: 12px 15px;
+                border-radius: 16px;
+                font-size: 12.5px;
+                font-weight: 500;
+                line-height: 1.4;
+                font-family: 'Montserrat', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
                 pointer-events: none;
-                max-width: 200px;
+                max-width: min(240px, calc(100vw - 32px));
                 word-wrap: break-word;
                 overflow-x: visible;
                 white-space: normal;
@@ -86193,8 +86209,18 @@ class Annotation extends Script {
             }
 
             .pc-annotation-title {
-                font-weight: bold;
-                margin-bottom: 4px;
+                font-size: 14px;
+                font-weight: 600;
+                letter-spacing: -0.005em;
+                color: var(--ink-1, rgba(24, 24, 26, 0.94));
+            }
+
+            .pc-annotation-text {
+                margin-top: 3px;
+            }
+
+            .pc-annotation-text:empty {
+                display: none;
             }
 
             /* Tooltip arrow */
@@ -86210,12 +86236,12 @@ class Annotation extends Script {
 
             .pc-annotation.arrow-right::before {
                 left: -8px;
-                border-right: 8px solid rgba(0, 0, 0, 0.8);
+                border-right: 8px solid rgba(252, 252, 253, 0.92);
             }
 
             .pc-annotation.arrow-left::before {
                 right: -8px;
-                border-left: 8px solid rgba(0, 0, 0, 0.8);
+                border-left: 8px solid rgba(252, 252, 253, 0.92);
             }
 
             .pc-annotation-hotspot {
@@ -88698,7 +88724,14 @@ class CameraManager {
             }
             // update animation timeline
             if (state.cameraMode === 'anim') {
-                state.animationTime = controllers.anim.animState.cursor.value;
+                const { cursor } = controllers.anim.animState;
+                state.animationTime = cursor.value;
+                // A non-looping track (the guided Rundgang) has reached its
+                // end: hand control back to the mode the visitor came from —
+                // the same exit path 'cancel'/'interrupt' use.
+                if (cursor.loopMode === 'none' && cursor.duration > 0 && cursor.value >= cursor.duration) {
+                    state.cameraMode = fromMode;
+                }
             }
             if (clearOrbitTargetOnTransitionEnd && prevTransitionTimer < 1 && transitionTimer === 1) {
                 clearOrbitTargetOnTransitionEnd = false;
@@ -88781,10 +88814,22 @@ class CameraManager {
                         startTransition();
                         controllers.fly.resetToSpawn(target);
                     }
-                    else {
+                    else if (defaultMode === 'orbit') {
                         events.fire('orbitTarget:clear');
                         state.cameraMode = 'orbit';
                         controllers.orbit.goto(resetCamera);
+                        startTransition();
+                    }
+                    else {
+                        // From orbit/aerial/anim (including a running Rundgang),
+                        // home returns to the scene's default first-person mode
+                        // at the curated start pose — on touch there are no mode
+                        // buttons, so orbit must never become a trap.
+                        sourcesByMode[state.cameraMode]?.cancel();
+                        events.fire('orbitTarget:clear');
+                        events.fire('navTarget:clear');
+                        state.cameraMode = defaultMode;
+                        controllers[defaultMode]?.goto?.(homeCamera);
                         startTransition();
                     }
                     break;
@@ -88792,6 +88837,8 @@ class CameraManager {
                     // guided-tour toggle ("Rundgang"): start track 0 from the
                     // top, or stop and hand back to the mode the visitor came
                     // from — the same exit path 'cancel'/'interrupt' use.
+                    if (state.moveLocked)
+                        break; // don't hijack while the tutorial gate is up
                     if (state.hasAnimation) {
                         if (state.cameraMode === 'anim') {
                             state.cameraMode = fromMode;
@@ -88892,6 +88939,11 @@ class CameraManager {
             events.fire('orbitTarget:clear');
             events.fire('navTarget:clear');
             this.camera.copy(createCamera(new Vec3(view.position), new Vec3(view.target), view.fov));
+            if (mode === 'orbit') {
+                // snap() re-enters via onEnter, which (unlike goto) keeps the
+                // controller's stored fov — adopt the shared one explicitly
+                controllers.orbit.fov = view.fov;
+            }
             if (state.cameraMode !== mode) {
                 state.cameraMode = mode;
             }
@@ -88948,8 +89000,20 @@ class CameraManager {
             startTransition();
             clearOrbitTargetOnTransitionEnd = true;
         });
+        // Annotation taps frame the hotspot in orbit mode. Remember where the
+        // visitor came from and glide back when the tooltip closes — on touch
+        // there are no mode buttons, so orbit must never become a trap
+        // (mirrors the aerial enter/exit pattern).
+        let preAnnotationMode = null;
+        const preAnnotationCamera = new Camera();
         events.on('annotation.activate', (annotation) => {
             events.fire('orbitTarget:clear');
+            if (state.cameraMode !== 'orbit') {
+                preAnnotationMode = state.cameraMode;
+                preAnnotationCamera.copy(this.camera);
+                sourcesByMode[state.cameraMode]?.cancel();
+                events.fire('navTarget:clear');
+            }
             // switch to orbit camera on pick
             state.cameraMode = 'orbit';
             const { initial } = annotation.camera;
@@ -88958,6 +89022,16 @@ class CameraManager {
             tmpCamera.look(new Vec3(initial.position), new Vec3(initial.target));
             controllers.orbit.goto(tmpCamera);
             startTransition();
+        });
+        // tooltip closed: return to the mode (and pose) the visitor came from,
+        // unless they already moved on to another mode themselves
+        events.on('annotation.deactivate', () => {
+            if (preAnnotationMode !== null && state.cameraMode === 'orbit') {
+                state.cameraMode = preAnnotationMode;
+                controllers[preAnnotationMode]?.goto?.(preAnnotationCamera);
+                startTransition();
+            }
+            preAnnotationMode = null;
         });
         // tap-to-navigate: start auto-driving the active mode toward a picked position
         events.on('navigateTo', (position, normal, speedMul = 1) => {
