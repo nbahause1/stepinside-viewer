@@ -366,8 +366,18 @@
                  the primary controls, replacing the stock SuperSplat button bar.
                  Wired in controls.ts. -->
             <div id="controlDome">
-                <!-- walk mode: measure / home (centre) / enter bird's-eye -->
+                <!-- walk mode: tour / measure / home (centre) / enter bird's-eye -->
                 <div class="controlDome__row controlDome__row--walk">
+                    <button id="domeTour" class="domeBtn hidden" type="button" aria-label="Rundgang starten" title="Rundgang starten">
+                        <!-- play triangle by default; while the tour runs it swaps
+                             to a stop square, so the same button clearly ends it. -->
+                        <svg class="domeIcon domeIcon--tourStart" width="25" height="25" viewBox="0 0 22 22" aria-hidden="true">
+                            <path d="M8.2 5.4 L16.4 11 L8.2 16.6 Z" />
+                        </svg>
+                        <svg class="domeIcon domeIcon--tourStop" width="25" height="25" viewBox="0 0 22 22" aria-hidden="true">
+                            <rect x="6.7" y="6.7" width="8.6" height="8.6" rx="1.6" />
+                        </svg>
+                    </button>
                     <button id="domeMeasure" class="domeBtn" type="button" aria-label="Vermessung" title="Vermessung">
                         <!-- ruler by default; while measuring it swaps to the walk
                              figure so it's clear this button returns to walking. -->
@@ -468,6 +478,42 @@
                     </svg>
                     <span id="stageLabel">Möbliert sehen</span>
                 </button>
+            </div>
+
+            <!-- Lead capture ("Besichtigung anfragen"): a discreet glass CTA
+                 pill top-right. Tap opens the configured booking url in a new
+                 tab, or a pre-addressed e-mail. Wired in inquiry.ts; hidden
+                 unless settings.inquiry provides a target. -->
+            <div id="inquiryPill" class="hidden">
+                <button id="inquiryTrigger" type="button" aria-label="Besichtigung anfragen" title="Besichtigung anfragen">
+                    <svg width="20" height="20" viewBox="0 0 22 22" aria-hidden="true">
+                        <!-- calendar with a check: "book a viewing" -->
+                        <path d="M4.5 5.5 h13 a1.5 1.5 0 0 1 1.5 1.5 v9 a1.5 1.5 0 0 1 -1.5 1.5 h-13 a1.5 1.5 0 0 1 -1.5 -1.5 v-9 a1.5 1.5 0 0 1 1.5 -1.5 Z" />
+                        <path d="M3 9 H19 M7.5 3.5 V6.5 M14.5 3.5 V6.5" />
+                        <path d="M8.2 13.4 l1.9 1.9 3.7 -3.7" />
+                    </svg>
+                    <span id="inquiryLabel">Besichtigung anfragen</span>
+                </button>
+            </div>
+
+            <!-- Share ("Ansicht teilen"): a small glass icon-button top-left.
+                 Builds a ?view= deep link of the current camera; native share
+                 sheet where available (iOS/Android), otherwise copies the link
+                 ("Link kopiert") and offers a QR code ("Auf dem Handy öffnen")
+                 in a glass popover. Wired in share.ts. -->
+            <div id="sharePill" class="hidden">
+                <button id="shareTrigger" type="button" aria-label="Ansicht teilen" title="Ansicht teilen">
+                    <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true">
+                        <!-- iOS-style share: arrow rising out of a tray -->
+                        <path d="M11 13.5 V3.2 M11 3.2 L7.6 6.6 M11 3.2 L14.4 6.6" />
+                        <path d="M7 9.5 H5.8 a1.5 1.5 0 0 0 -1.5 1.5 v6 a1.5 1.5 0 0 0 1.5 1.5 h10.4 a1.5 1.5 0 0 0 1.5 -1.5 v-6 a1.5 1.5 0 0 0 -1.5 -1.5 H15" />
+                    </svg>
+                </button>
+                <div id="sharePopover" class="hidden" role="dialog" aria-label="Ansicht teilen">
+                    <div id="shareQrCard"><div id="shareQr" aria-hidden="true"></div></div>
+                    <div id="shareQrLabel">Auf dem Handy öffnen</div>
+                </div>
+                <div id="shareToast" aria-live="polite">Link kopiert</div>
             </div>
 
             <!-- Staging overlay: the furnished image laid over the scan, with a
@@ -906,7 +952,7 @@
         <div id="errorCard" style="display: none; position: fixed; inset: 0; z-index: 9999; align-items: center; justify-content: center; padding: 24px; background: rgba(0, 0, 0, 0.45);">
             <div style="max-width: 340px; width: 100%; padding: 28px 24px; border-radius: 24px; background: rgba(28, 28, 32, 0.55); backdrop-filter: blur(20px) saturate(150%); -webkit-backdrop-filter: blur(20px) saturate(150%); border: 1px solid rgba(255, 255, 255, 0.14); box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35); text-align: center; font-family: 'Montserrat', sans-serif; color: #fff;">
                 <div style="font-size: 16px; font-weight: 600; margin-bottom: 8px;">Der Rundgang konnte nicht geladen werden.</div>
-                <div style="font-size: 13px; font-weight: 500; line-height: 1.5; color: rgba(255, 255, 255, 0.7); margin-bottom: 20px;">Bitte versuchen Sie es in einem Augenblick erneut.</div>
+                <div style="font-size: 13px; font-weight: 500; line-height: 1.5; color: rgba(255, 255, 255, 0.7); margin-bottom: 20px;">Bitte versuch es gleich nochmal.</div>
                 <button id="errorRetry" type="button" style="appearance: none; border: 1px solid rgba(255, 255, 255, 0.25); background: rgba(255, 255, 255, 0.12); color: #fff; font-family: inherit; font-size: 14px; font-weight: 600; padding: 10px 24px; border-radius: 999px; cursor: pointer;">Erneut versuchen</button>
             </div>
         </div>
