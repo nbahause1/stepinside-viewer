@@ -204,6 +204,21 @@ export class Annotation extends Script {
                 cursor: pointer;
                 transform: translate(-50%, -50%);
             }
+
+            /* Mobile/touch: static glass (perf). backdrop-filter re-samples
+               the live 3D canvas behind the tooltip every frame, which costs
+               real GPU on phones. Kill the blur and compensate with a
+               mostly-opaque white so the ink text stays legible over dark
+               floors — mirrors the (pointer: coarse) override in index.scss. */
+            @media (pointer: coarse) {
+                .pc-annotation {
+                    -webkit-backdrop-filter: none;
+                    backdrop-filter: none;
+                    background:
+                        radial-gradient(135% 130% at 50% -14%, rgba(255, 255, 255, 0.98), rgba(255, 255, 255, 0) 62%),
+                        linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(247, 248, 250, 0.88));
+                }
+            }
         `;
 
         const style = document.createElement('style');
