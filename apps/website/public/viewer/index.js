@@ -1,7 +1,7 @@
 const TRACEID_GPU_TIMINGS = "GpuTimings";
 
-const version$1 = "2.19.7";
-const revision = "c25d1b7";
+const version$1 = "2.20.5";
+const revision = "4f9b5f7";
 function extend(target, ex) {
 	for (const prop in ex) {
 		const copy = ex[prop];
@@ -3557,6 +3557,26 @@ class Plane {
 	}
 }
 
+const _c23 = new Vec3();
+const _c31 = new Vec3();
+const _c12 = new Vec3();
+const _corner = new Vec3();
+function intersectPlanes(p1, p2, p3, out) {
+	_c23.cross(p2.normal, p3.normal);
+	const denom = p1.normal.dot(_c23);
+	if (Math.abs(denom) < 1e-6) {
+		return false;
+	}
+	_c31.cross(p3.normal, p1.normal);
+	_c12.cross(p1.normal, p2.normal);
+	const invDenom = -1 / denom;
+	out.set(
+		(p1.distance * _c23.x + p2.distance * _c31.x + p3.distance * _c12.x) * invDenom,
+		(p1.distance * _c23.y + p2.distance * _c31.y + p3.distance * _c12.y) * invDenom,
+		(p1.distance * _c23.z + p2.distance * _c31.z + p3.distance * _c12.z) * invDenom
+	);
+	return isFinite(out.x) && isFinite(out.y) && isFinite(out.z);
+}
 class Frustum {
 	planes = [];
 	constructor() {
@@ -3599,10 +3619,20 @@ class Frustum {
 	}
 	add(other) {
 		const planes = this.planes;
-		const otherPlanes = other.planes;
-		for (let p = 0; p < 6; p++) {
-			if (otherPlanes[p].distance > planes[p].distance) {
-				planes[p].copy(otherPlanes[p]);
+		const op = other.planes;
+		for (let zi = 4; zi <= 5; zi++) {
+			for (let xi = 0; xi <= 1; xi++) {
+				for (let yi = 2; yi <= 3; yi++) {
+					if (intersectPlanes(op[zi], op[xi], op[yi], _corner)) {
+						for (let p = 0; p < 6; p++) {
+							const plane = planes[p];
+							const d = plane.normal.dot(_corner) + plane.distance;
+							if (d < 0) {
+								plane.distance -= d;
+							}
+						}
+					}
+				}
 			}
 		}
 		return this;
@@ -4534,6 +4564,7 @@ class Texture {
 	_lockedLevel = -1;
 	_lockedMode = TEXTURELOCK_NONE;
 	renderVersionDirty = 0;
+	uploadVersion = 0;
 	_storage = false;
 	_numLevels = 0;
 	_numLevelsRequested;
@@ -4990,6 +5021,9 @@ class Texture {
 	}
 	markForUpload() {
 		this._needsUpload = true;
+		if (this.device) {
+			this.uploadVersion = this.device.renderVersion;
+		}
 		this.device?.texturesToUpload?.add(this);
 	}
 	upload() {
@@ -5053,6 +5087,9 @@ class BindGroup {
 	renderVersionUpdated = -1;
 	uniformBuffers;
 	uniformBufferOffsets = [];
+	_uniformBufferContainers = [];
+	_textureImpls = [];
+	_storageTextureImpls = [];
 	constructor(graphicsDevice, format, defaultUniformBuffer) {
 		this.id = id$a++;
 		this.device = graphicsDevice;
@@ -5096,7 +5133,10 @@ class BindGroup {
 			this.dirty = true;
 		} else if (this.renderVersionUpdated < texture.renderVersionDirty) {
 			this.dirty = true;
+		} else if (this._textureImpls[index] !== texture.impl) {
+			this.dirty = true;
 		}
+		this._textureImpls[index] = texture.impl;
 	}
 	setStorageTexture(name, value) {
 		const index = this.format.storageTextureFormatsMap.get(name);
@@ -5106,7 +5146,10 @@ class BindGroup {
 			this.dirty = true;
 		} else if (this.renderVersionUpdated < texture.renderVersionDirty) {
 			this.dirty = true;
+		} else if (this._storageTextureImpls[index] !== texture.impl) {
+			this.dirty = true;
 		}
+		this._storageTextureImpls[index] = texture.impl;
 	}
 	updateUniformBuffers() {
 		for (let i = 0; i < this.uniformBuffers.length; i++) {
@@ -5145,8 +5188,12 @@ class BindGroup {
 		for (let i = 0; i < this.uniformBuffers.length; i++) {
 			const uniformBuffer = this.uniformBuffers[i];
 			this.uniformBufferOffsets[i] = uniformBuffer.offset;
-			if (this.renderVersionUpdated < uniformBuffer.renderVersionDirty) {
-				this.dirty = true;
+			if (!uniformBuffer.persistent) {
+				const container = uniformBuffer.allocation.gpuBuffer;
+				if (this._uniformBufferContainers[i] !== container) {
+					this._uniformBufferContainers[i] = container;
+					this.dirty = true;
+				}
 			}
 		}
 		if (this.dirty) {
@@ -5894,6 +5941,7 @@ class GraphicsDevice extends EventHandler {
 	insideRenderPass = false;
 	supportsUniformBuffers = false;
 	supportsClipDistances = false;
+	supportsTransientAttachments = false;
 	supportsTextureFormatTier1 = false;
 	supportsTextureFormatTier2 = false;
 	supportsPrimitiveIndex = false;
@@ -5928,7 +5976,7 @@ class GraphicsDevice extends EventHandler {
 	mapsToClear = /* @__PURE__ */ new Set();
 	static EVENT_RESIZE = "resizecanvas";
 	constructor(canvas, options) {
-		var _a, _b, _c, _d, _e, _f, _g;
+		var _a, _b, _c, _d, _e, _f, _g, _h, _i;
 		super();
 		this.canvas = canvas;
 		if ("setAttribute" in canvas) {
@@ -5941,7 +5989,9 @@ class GraphicsDevice extends EventHandler {
 		(_d = this.initOptions).antialias ?? (_d.antialias = true);
 		(_e = this.initOptions).powerPreference ?? (_e.powerPreference = "high-performance");
 		(_f = this.initOptions).displayFormat ?? (_f.displayFormat = DISPLAYFORMAT_LDR);
-		(_g = this.initOptions).xrCompatible ?? (_g.xrCompatible = platform.browser && !!navigator.xr);
+		(_g = this.initOptions).transientColor ?? (_g.transientColor = false);
+		(_h = this.initOptions).transientDepth ?? (_h.transientDepth = false);
+		(_i = this.initOptions).xrCompatible ?? (_i.xrCompatible = platform.browser && !!navigator.xr);
 		this._maxPixelRatio = platform.browser ? Math.min(1, window.devicePixelRatio) : 1;
 		this.buffers = /* @__PURE__ */ new Set();
 		this._vram = {
@@ -5969,6 +6019,7 @@ class GraphicsDevice extends EventHandler {
 		this.scope = new ScopeSpace("Device");
 		this.textureBias = this.scope.resolve("textureBias");
 		this.textureBias.setValue(0);
+		this.updateClientRect();
 	}
 	postInit() {
 		const vertexFormat = new VertexFormat(this, [
@@ -6158,13 +6209,13 @@ class GraphicsDevice extends EventHandler {
 		this.updateClientRect();
 	}
 	updateClientRect() {
-		if (platform.worker) {
-			this.clientRect.width = this.canvas.width;
-			this.clientRect.height = this.canvas.height;
-		} else {
+		if (typeof this.canvas.getBoundingClientRect === "function") {
 			const rect = this.canvas.getBoundingClientRect();
 			this.clientRect.width = rect.width;
 			this.clientRect.height = rect.height;
+		} else {
+			this.clientRect.width = this.canvas.width ?? 0;
+			this.clientRect.height = this.canvas.height ?? 0;
 		}
 	}
 	get width() {
@@ -6246,6 +6297,8 @@ class RenderTarget {
 	_depth;
 	_stencil;
 	_samples;
+	_transientColor;
+	_transientDepth;
 	autoResolve;
 	_face;
 	_mipLevel;
@@ -6304,6 +6357,10 @@ class RenderTarget {
 		if (!this.name) {
 			this.name = "Untitled";
 		}
+		const transientSupported = !!this._device.supportsTransientAttachments;
+		this._transientColor = (options.transientColor ?? false) && transientSupported && this._samples > 1;
+		this._transientDepth = (options.transientDepth ?? false) && transientSupported && !this._depthBuffer;
+		if ((options.transientDepth ?? false) && this._depthBuffer) ;
 		this.flipY = options.flipY ?? false;
 		this._mipLevel = options.mipLevel ?? 0;
 		if (this._mipLevel > 0 && this._depth) {
@@ -6401,6 +6458,12 @@ class RenderTarget {
 	}
 	get samples() {
 		return this._samples;
+	}
+	get transientColor() {
+		return this._transientColor;
+	}
+	get transientDepth() {
+		return this._transientDepth;
 	}
 	get depth() {
 		return this._depth;
@@ -7180,12 +7243,14 @@ class CacheEntry {
 	hashes = null;
 }
 class WebgpuComputePipeline extends WebgpuPipeline {
-	lookupHashes = new Uint32Array(2);
+	// shader compute key + up to 2 bind group format keys (caller group 0 + reflected group)
+	lookupHashes = new Uint32Array(3);
 	cache = /* @__PURE__ */ new Map();
-	get(shader, bindGroupFormat) {
+	get(shader, bindGroupFormats) {
 		const lookupHashes = this.lookupHashes;
 		lookupHashes[0] = shader.impl.computeKey;
-		lookupHashes[1] = bindGroupFormat.impl.key;
+		lookupHashes[1] = bindGroupFormats[0] ? bindGroupFormats[0].impl.key : 0;
+		lookupHashes[2] = bindGroupFormats[1] ? bindGroupFormats[1].impl.key : 0;
 		const hash = hash32Fnv1a(lookupHashes);
 		let cacheEntries = this.cache.get(hash);
 		if (cacheEntries) {
@@ -7196,7 +7261,10 @@ class WebgpuComputePipeline extends WebgpuPipeline {
 				}
 			}
 		}
-		const pipelineLayout = this.getPipelineLayout([bindGroupFormat.impl]);
+		const impls = [];
+		if (bindGroupFormats[0]) impls.push(bindGroupFormats[0].impl);
+		if (bindGroupFormats[1]) impls.push(bindGroupFormats[1].impl);
+		const pipelineLayout = this.getPipelineLayout(impls);
 		const cacheEntry = new CacheEntry();
 		cacheEntry.hashes = new Uint32Array(lookupHashes);
 		cacheEntry.pipeline = this.create(shader, pipelineLayout);
@@ -7295,6 +7363,7 @@ const stringIds = new StringIds();
 class ColorAttachment {
 	format;
 	multisampledBuffer;
+	transient = false;
 	destroy(device) {
 		device.deferDestroy(this.multisampledBuffer);
 		this.multisampledBuffer = null;
@@ -7307,6 +7376,7 @@ class DepthAttachment {
 	depthTextureInternal = false;
 	multisampledDepthBuffer = null;
 	multisampledDepthBufferKey;
+	transient = false;
 	constructor(gpuFormat) {
 		this.format = gpuFormat;
 		this.hasStencil = gpuFormat === "depth24plus-stencil8";
@@ -7413,7 +7483,11 @@ class WebgpuRenderTarget {
 					format: this.depthAttachment.format,
 					usage: GPUTextureUsage.RENDER_ATTACHMENT
 				};
-				if (samples > 1) {
+				const transientDepth = renderTarget.transientDepth;
+				if (transientDepth) {
+					depthTextureDesc.usage |= GPUTextureUsage.TRANSIENT_ATTACHMENT;
+					this.depthAttachment.transient = true;
+				} else if (samples > 1) {
 					depthTextureDesc.usage |= GPUTextureUsage.TEXTURE_BINDING;
 				} else {
 					depthTextureDesc.usage |= GPUTextureUsage.COPY_SRC;
@@ -7481,15 +7555,17 @@ class WebgpuRenderTarget {
 		}
 		if (samples > 1) {
 			const format = this.isBackbuffer ? this.colorAttachments[index]?.format ?? device.backBufferViewFormat : colorBuffer.impl.format;
+			const transientColor = renderTarget.transientColor;
 			const multisampledTextureDesc = {
 				size: [width, height, 1],
 				dimension: "2d",
 				sampleCount: samples,
 				format,
-				usage: GPUTextureUsage.RENDER_ATTACHMENT
+				usage: transientColor ? GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TRANSIENT_ATTACHMENT : GPUTextureUsage.RENDER_ATTACHMENT
 			};
 			const multisampledColorBuffer = wgpu.createTexture(multisampledTextureDesc);
 			this.setColorAttachment(index, multisampledColorBuffer, multisampledTextureDesc.format);
+			this.colorAttachments[index].transient = transientColor;
 			colorAttachment.view = multisampledColorBuffer.createView();
 			colorAttachment.resolveTarget = colorView;
 		} else {
@@ -7506,6 +7582,10 @@ class WebgpuRenderTarget {
 			colorAttachment.clearValue = srgb ? colorOps.clearValueLinear : colorOps.clearValue;
 			colorAttachment.loadOp = colorOps.clear ? "clear" : "load";
 			colorAttachment.storeOp = colorOps.store ? "store" : "discard";
+			if (this.colorAttachments[i]?.transient && (colorAttachment.loadOp !== "clear" || colorAttachment.storeOp !== "discard")) {
+				colorAttachment.loadOp = "clear";
+				colorAttachment.storeOp = "discard";
+			}
 		}
 		const depthAttachment = this.renderPassDescriptor.depthStencilAttachment;
 		if (depthAttachment) {
@@ -7518,6 +7598,14 @@ class WebgpuRenderTarget {
 				depthAttachment.stencilLoadOp = renderPass.depthStencilOps.clearStencil ? "clear" : "load";
 				depthAttachment.stencilStoreOp = renderPass.depthStencilOps.storeStencil ? "store" : "discard";
 				depthAttachment.stencilReadOnly = false;
+			}
+			if (this.depthAttachment.transient && (depthAttachment.depthLoadOp !== "clear" || depthAttachment.depthStoreOp !== "discard" || this.depthAttachment.hasStencil && (depthAttachment.stencilLoadOp !== "clear" || depthAttachment.stencilStoreOp !== "discard"))) {
+				depthAttachment.depthLoadOp = "clear";
+				depthAttachment.depthStoreOp = "discard";
+				if (this.depthAttachment.hasStencil) {
+					depthAttachment.stencilLoadOp = "clear";
+					depthAttachment.stencilStoreOp = "discard";
+				}
 			}
 		}
 	}
@@ -8090,6 +8178,12 @@ const getTextureDeclarationType = (viewDimension, sampleType) => {
 	}
 	return `${baseTypeString}<${coreFormatString}>`;
 };
+const gpuFormatToPixelFormat = /* @__PURE__ */ new Map();
+gpuTextureFormats.forEach((str, pixelFormat) => {
+	if (str) {
+		gpuFormatToPixelFormat.set(str, pixelFormat);
+	}
+});
 const wrappedArrayTypes = {
 	"f32": "WrappedF32",
 	"i32": "WrappedI32",
@@ -8127,7 +8221,7 @@ class UniformLine {
 }
 const TEXTURE_REGEX = /^\s*var\s+(\w+)\s*:\s*(texture_\w+)(?:<(\w+)>)?;\s*$/;
 const STORAGE_TEXTURE_REGEX = /^\s*var\s+([\w\d_]+)\s*:\s*(texture_storage_2d|texture_storage_2d_array)<([\w\d_]+),\s*(\w+)>\s*;\s*$/;
-const STORAGE_BUFFER_REGEX = /^\s*var\s*<storage,\s*(read|write)?>\s*([\w\d_]+)\s*:\s*(.*)\s*;\s*$/;
+const STORAGE_BUFFER_REGEX = /^\s*var\s*<storage,\s*(read_write|read)?>\s*([\w\d_]+)\s*:\s*(.*)\s*;\s*$/;
 const EXTERNAL_TEXTURE_REGEX = /^\s*var\s+([\w\d_]+)\s*:\s*texture_external;\s*$/;
 const SAMPLER_REGEX = /^\s*var\s+([\w\d_]+)\s*:\s*(sampler|sampler_comparison)\s*;\s*$/;
 class ResourceLine {
@@ -8247,6 +8341,38 @@ ${resourcesData.code}
 			meshBindGroupFormat: resourcesData.meshBindGroupFormat
 		};
 	}
+	static runCompute(device, source, shaderDefinition, shader, reflectedGroupIndex) {
+		const extracted = WebgpuShaderProcessorWGSL.extract(source);
+		const parsedUniforms = extracted.uniforms.map((line) => new UniformLine(line, shader));
+		const meshUniforms = [];
+		parsedUniforms.forEach((uniform) => {
+			uniform.ubName = "ub_compute";
+			const uniformType = uniformTypeToNameMapWGSL.get(uniform.type);
+			meshUniforms.push(new UniformFormat(uniform.name, uniformType, uniform.arraySize));
+		});
+		const computeUniformBufferFormat = meshUniforms.length > 0 ? new UniformBufferFormat(device, meshUniforms) : null;
+		const parsedResources = WebgpuShaderProcessorWGSL.mergeResources(extracted.resources, [], shader);
+		const resourceFormats = WebgpuShaderProcessorWGSL.buildResourceFormats(parsedResources, SHADERSTAGE_COMPUTE, shader);
+		const ubBindFormat = computeUniformBufferFormat ? new BindUniformBufferFormat("ub_compute", SHADERSTAGE_COMPUTE) : null;
+		const allFormats = ubBindFormat ? [...resourceFormats, ubBindFormat] : resourceFormats;
+		let cshader = source;
+		let computeBindGroupFormat = null;
+		if (allFormats.length > 0) {
+			computeBindGroupFormat = new BindGroupFormat(device, allFormats);
+			let code = WebgpuShaderProcessorWGSL.getTextureShaderDeclaration(computeBindGroupFormat, reflectedGroupIndex);
+			if (computeUniformBufferFormat) {
+				code += WebgpuShaderProcessorWGSL.getUniformShaderDeclaration(computeUniformBufferFormat, reflectedGroupIndex, ubBindFormat.slot, "compute");
+			}
+			const src = WebgpuShaderProcessorWGSL.renameUniformAccess(extracted.src, parsedUniforms);
+			cshader = src.includes(MARKER) ? src.replace(MARKER, code) : `${code}
+${src}`;
+		}
+		return {
+			cshader,
+			computeBindGroupFormat,
+			computeUniformBufferFormat
+		};
+	}
 	// Extract required information from the shader source code.
 	static extract(src) {
 		const attributes = [];
@@ -8339,8 +8465,8 @@ ${resourcesData.code}
 		});
 		return resources;
 	}
-	static processResources(device, resources, processingOptions, shader) {
-		const textureFormats = [];
+	static buildResourceFormats(resources, visibility, shader) {
+		const formats = [];
 		for (let i = 0; i < resources.length; i++) {
 			const resource = resources[i];
 			if (resource.isTexture) {
@@ -8348,31 +8474,41 @@ ${resourcesData.code}
 				const hasSampler = sampler?.isSampler;
 				const sampleType = resource.sampleType;
 				const dimension = resource.textureDimension;
-				textureFormats.push(new BindTextureFormat(resource.name, SHADERSTAGE_VERTEX | SHADERSTAGE_FRAGMENT, dimension, sampleType, hasSampler, hasSampler ? sampler.name : null));
+				formats.push(new BindTextureFormat(resource.name, visibility, dimension, sampleType, hasSampler, hasSampler ? sampler.name : null));
 				if (hasSampler) i++;
 			}
 			if (resource.isStorageBuffer) {
 				const readOnly = resource.accessMode !== "read_write";
-				const bufferFormat = new BindStorageBufferFormat(resource.name, SHADERSTAGE_VERTEX | SHADERSTAGE_FRAGMENT, readOnly);
+				const bufferFormat = new BindStorageBufferFormat(resource.name, visibility, readOnly);
 				bufferFormat.format = resource.type;
-				textureFormats.push(bufferFormat);
+				formats.push(bufferFormat);
+			}
+			if (resource.isStorageTexture) {
+				const dimension = resource.textureType === "texture_storage_2d_array" ? TEXTUREDIMENSION_2D_ARRAY : TEXTUREDIMENSION_2D;
+				const pixelFormat = gpuFormatToPixelFormat.get(resource.format);
+				const write = resource.access === "write" || resource.access === "read_write";
+				const read = resource.access === "read" || resource.access === "read_write";
+				formats.push(new BindStorageTextureFormat(resource.name, pixelFormat, dimension, write, read));
 			}
 		}
+		return formats;
+	}
+	static processResources(device, resources, processingOptions, shader, visibility = SHADERSTAGE_VERTEX | SHADERSTAGE_FRAGMENT, bindGroupIndex = BINDGROUP_MESH) {
+		const textureFormats = WebgpuShaderProcessorWGSL.buildResourceFormats(resources, visibility, shader);
 		const meshBindGroupFormat = new BindGroupFormat(device, textureFormats);
 		let code = "";
-		processingOptions.bindGroupFormats.forEach((format, bindGroupIndex) => {
+		processingOptions?.bindGroupFormats?.forEach((format, index) => {
 			if (format) {
-				code += WebgpuShaderProcessorWGSL.getTextureShaderDeclaration(format, bindGroupIndex);
+				code += WebgpuShaderProcessorWGSL.getTextureShaderDeclaration(format, index);
 			}
 		});
-		code += WebgpuShaderProcessorWGSL.getTextureShaderDeclaration(meshBindGroupFormat, BINDGROUP_MESH);
+		code += WebgpuShaderProcessorWGSL.getTextureShaderDeclaration(meshBindGroupFormat, bindGroupIndex);
 		return {
 			code,
 			meshBindGroupFormat
 		};
 	}
-	static getUniformShaderDeclaration(ubFormat, bindGroup, bindIndex) {
-		const name = bindGroupNames[bindGroup];
+	static getUniformShaderDeclaration(ubFormat, bindGroup, bindIndex, name = bindGroupNames[bindGroup]) {
 		const structName = `struct_ub_${name}`;
 		let code = `struct ${structName} {
 `;
@@ -8410,6 +8546,13 @@ ${resourcesData.code}
 		format.storageBufferFormats.forEach((format2) => {
 			const access = format2.readOnly ? "read" : "read_write";
 			code += `@group(${bindGroup}) @binding(${format2.slot}) var<storage, ${access}> ${format2.name} : ${format2.format};
+`;
+		});
+		format.storageTextureFormats.forEach((format2) => {
+			const storageType = format2.textureDimension === TEXTUREDIMENSION_2D_ARRAY ? "texture_storage_2d_array" : "texture_storage_2d";
+			const fmtString = gpuTextureFormats[format2.format];
+			const access = format2.read ? format2.write ? "read_write" : "read" : "write";
+			code += `@group(${bindGroup}) @binding(${format2.slot}) var ${format2.name}: ${storageType}<${fmtString}, ${access}>;
 `;
 		});
 		return code;
@@ -8577,6 +8720,10 @@ class WebgpuShader {
 	_fragmentCode = null;
 	_computeCode = null;
 	_computeKey;
+	computeBindGroupFormat = null;
+	computeReflectedBindGroupFormat = null;
+	computeReflectedUniformBufferFormat = null;
+	computeReflectedGroupIndex = 0;
 	vertexEntryPoint = "main";
 	fragmentEntryPoint = "main";
 	computeEntryPoint = "main";
@@ -8585,12 +8732,10 @@ class WebgpuShader {
 		const definition = shader.definition;
 		if (definition.shaderLanguage === SHADERLANGUAGE_WGSL) {
 			if (definition.cshader) {
-				this._computeCode = definition.cshader ?? null;
-				this.computeUniformBufferFormats = definition.computeUniformBufferFormats;
-				this.computeBindGroupFormat = definition.computeBindGroupFormat;
 				if (definition.computeEntryPoint) {
 					this.computeEntryPoint = definition.computeEntryPoint;
 				}
+				this.processComputeWGSL();
 			} else {
 				this.vertexEntryPoint = "vertexMain";
 				this.fragmentEntryPoint = "fragmentMain";
@@ -8644,6 +8789,19 @@ class WebgpuShader {
 		shader.meshUniformBufferFormat = processed.meshUniformBufferFormat;
 		shader.meshBindGroupFormat = processed.meshBindGroupFormat;
 		shader.attributes = processed.attributes;
+	}
+	processComputeWGSL() {
+		const shader = this.shader;
+		const definition = shader.definition;
+		const callerBindGroupFormat = definition.computeBindGroupFormat ?? null;
+		const reflectedGroupIndex = callerBindGroupFormat ? 1 : 0;
+		const processed = WebgpuShaderProcessorWGSL.runCompute(shader.device, definition.cshader, definition, shader, reflectedGroupIndex);
+		this._computeCode = processed.cshader;
+		this.computeBindGroupFormat = callerBindGroupFormat;
+		this.computeUniformBufferFormats = definition.computeUniformBufferFormats;
+		this.computeReflectedGroupIndex = reflectedGroupIndex;
+		this.computeReflectedBindGroupFormat = processed.computeBindGroupFormat;
+		this.computeReflectedUniformBufferFormat = processed.computeUniformBufferFormat;
 	}
 	processWGSL() {
 		const shader = this.shader;
@@ -10236,7 +10394,6 @@ class UniformBuffer {
 	storageFloat32;
 	storageInt32;
 	storageUint32;
-	renderVersionDirty = 0;
 	constructor(graphicsDevice, format, persistent = true) {
 		this.device = graphicsDevice;
 		this.format = format;
@@ -10288,15 +10445,11 @@ class UniformBuffer {
 	startUpdate(dynamicBindGroup) {
 		if (!this.persistent) {
 			const allocation = this.allocation;
-			const oldGpuBuffer = allocation.gpuBuffer;
 			this.device.dynamicBuffers.alloc(allocation, this.format.byteSize);
 			this.assignStorage(allocation.storage);
 			if (dynamicBindGroup) {
 				dynamicBindGroup.bindGroup = allocation.gpuBuffer.getBindGroup(this);
 				dynamicBindGroup.offsets[0] = allocation.offset;
-			}
-			if (oldGpuBuffer !== allocation.gpuBuffer) {
-				this.renderVersionDirty = this.device.renderVersion;
 			}
 		}
 	}
@@ -10679,14 +10832,14 @@ class GpuProfiler {
 		}
 		return parsedName;
 	}
-	report(renderVersion, timings) {
+	report(renderVersion, timings, frameTime) {
 		if (timings) {
 			const allocations = this.pastFrameAllocations.get(renderVersion);
 			if (!allocations) {
 				return;
 			}
 			if (timings.length > 0) {
-				this._frameTime = timings.reduce((sum, t) => sum + t, 0);
+				this._frameTime = frameTime ?? timings.reduce((sum, t) => sum + t, 0);
 			}
 			this._passTimings.clear();
 			for (let i = 0; i < allocations.length; ++i) {
@@ -10772,14 +10925,24 @@ class WebgpuQuerySet {
 		return stagingBuffer.mapAsync(GPUMapMode.READ).then(() => {
 			const srcTimings = new BigInt64Array(stagingBuffer.getMappedRange());
 			const timings = [];
+			let minTime = null;
+			let maxTime = null;
 			for (let i = 0; i < count; i++) {
-				timings.push(Number(srcTimings[i * 2 + 1] - srcTimings[i * 2]) * 1e-6);
+				const begin = srcTimings[i * 2];
+				const end = srcTimings[i * 2 + 1];
+				timings.push(Math.max(0, Number(end - begin) * 1e-6));
+				if (minTime === null || begin < minTime) minTime = begin;
+				if (end < minTime) minTime = end;
+				if (maxTime === null || end > maxTime) maxTime = end;
+				if (begin > maxTime) maxTime = begin;
 			}
+			const frameTime = count > 0 ? Number(maxTime - minTime) * 1e-6 : 0;
 			stagingBuffer.unmap();
 			this.stagingBuffers?.push(stagingBuffer);
 			return {
 				renderVersion,
-				timings
+				timings,
+				frameTime
 			};
 		});
 	}
@@ -10810,7 +10973,7 @@ class WebgpuGpuProfiler extends GpuProfiler {
 		if (this._enabled) {
 			const renderVersion = this.device.renderVersion;
 			this.timestampQueriesSet?.request(this.slotCount, renderVersion).then((results) => {
-				this.report(results.renderVersion, results.timings);
+				this.report(results.renderVersion, results.timings, results.frameTime);
 			});
 			super.request(renderVersion);
 		}
@@ -10934,37 +11097,62 @@ class WebgpuResolver {
 const _indirectDispatchEntryByteSize$1 = 3 * 4;
 class WebgpuCompute {
 	uniformBuffers = [];
-	bindGroup = null;
+	bindGroups = [];
 	constructor(compute) {
 		this.compute = compute;
 		const { device, shader } = compute;
-		const { computeBindGroupFormat, computeUniformBufferFormats } = shader.impl;
-		this.bindGroup = new BindGroup(device, computeBindGroupFormat);
-		if (computeUniformBufferFormats) {
-			for (const name in computeUniformBufferFormats) {
-				if (computeUniformBufferFormats.hasOwnProperty(name)) {
-					const ub = new UniformBuffer(device, computeUniformBufferFormats[name], true);
-					this.uniformBuffers.push(ub);
-					this.bindGroup.setUniformBuffer(name, ub);
+		const {
+			computeBindGroupFormat,
+			computeUniformBufferFormats,
+			computeReflectedBindGroupFormat,
+			computeReflectedUniformBufferFormat,
+			computeReflectedGroupIndex
+		} = shader.impl;
+		const formats = [];
+		if (computeBindGroupFormat) {
+			const bindGroup = new BindGroup(device, computeBindGroupFormat);
+			if (computeUniformBufferFormats) {
+				for (const name in computeUniformBufferFormats) {
+					if (computeUniformBufferFormats.hasOwnProperty(name)) {
+						const ub = new UniformBuffer(device, computeUniformBufferFormats[name], true);
+						this.uniformBuffers.push(ub);
+						bindGroup.setUniformBuffer(name, ub);
+					}
 				}
 			}
+			formats[0] = computeBindGroupFormat;
+			this.bindGroups[0] = bindGroup;
 		}
-		this.pipeline = device.computePipeline.get(shader, computeBindGroupFormat);
+		if (computeReflectedBindGroupFormat) {
+			const reflectedBindGroup = new BindGroup(device, computeReflectedBindGroupFormat);
+			if (computeReflectedUniformBufferFormat) {
+				const ub = new UniformBuffer(device, computeReflectedUniformBufferFormat, true);
+				this.uniformBuffers.push(ub);
+				reflectedBindGroup.setUniformBuffer("ub_compute", ub);
+			}
+			formats[computeReflectedGroupIndex] = computeReflectedBindGroupFormat;
+			this.bindGroups[computeReflectedGroupIndex] = reflectedBindGroup;
+		}
+		this.pipeline = device.computePipeline.get(shader, formats);
 	}
 	destroy() {
 		this.uniformBuffers.forEach((ub) => ub.destroy());
 		this.uniformBuffers.length = 0;
-		this.bindGroup.destroy();
-		this.bindGroup = null;
+		this.bindGroups.forEach((bindGroup) => bindGroup.destroy());
+		this.bindGroups.length = 0;
 	}
 	updateBindGroup() {
-		const { bindGroup } = this;
-		bindGroup.updateUniformBuffers();
-		bindGroup.update();
+		for (let i = 0; i < this.bindGroups.length; i++) {
+			const bindGroup = this.bindGroups[i];
+			bindGroup.updateUniformBuffers();
+			bindGroup.update();
+		}
 	}
 	dispatch(x, y, z) {
 		const device = this.compute.device;
-		device.setBindGroup(0, this.bindGroup);
+		for (let i = 0; i < this.bindGroups.length; i++) {
+			device.setBindGroup(i, this.bindGroups[i]);
+		}
 		const passEncoder = device.passEncoder;
 		passEncoder.setPipeline(this.pipeline);
 		const { indirectSlotIndex, indirectBuffer, indirectFrameStamp } = this.compute;
@@ -11155,6 +11343,7 @@ class WebgpuXrBridge {
 		if (first) {
 			device.xrColorTexture = first.colorTexture;
 			device.xrColorTextureViewFormat = first.viewFormat;
+			device.setXrBackBufferFormat(first.viewFormat);
 			this._cachedFramebufferSize.set(first.colorTexture.width, first.colorTexture.height);
 		}
 	}
@@ -11306,6 +11495,13 @@ class WebgpuXrBridge {
 const _uniqueLocations = /* @__PURE__ */ new Map();
 const _indirectEntryByteSize = 5 * 4;
 const _indirectDispatchEntryByteSize = 3 * 4;
+const _gpuFormatToPixelFormat = {
+	"rgba8unorm": PIXELFORMAT_RGBA8,
+	"rgba8unorm-srgb": PIXELFORMAT_SRGBA8,
+	"bgra8unorm": PIXELFORMAT_BGRA8,
+	"bgra8unorm-srgb": PIXELFORMAT_SBGRA8,
+	"rgba16float": PIXELFORMAT_RGBA16F
+};
 class WebgpuGraphicsDevice extends GraphicsDevice {
 	_deferredDestroys = [];
 	renderPipeline = new WebgpuRenderPipeline(this);
@@ -11322,6 +11518,7 @@ class WebgpuGraphicsDevice extends GraphicsDevice {
 	bindGroupFormats = [];
 	emptyBindGroup;
 	submitVersion = 0;
+	_canvasBackBufferFormat;
 	xrColorTexture = null;
 	xrColorTextureViewFormat = null;
 	xrColorTextureViewDescriptor = null;
@@ -11360,6 +11557,15 @@ class WebgpuGraphicsDevice extends GraphicsDevice {
 		this.xrColorTextureViewDescriptor = null;
 		this.xrSubImages.length = 0;
 		this.xrCurrentViewIndex = -1;
+		if (this._canvasBackBufferFormat !== void 0) {
+			this.backBufferFormat = this._canvasBackBufferFormat;
+		}
+	}
+	setXrBackBufferFormat(viewFormat) {
+		const format = _gpuFormatToPixelFormat[viewFormat];
+		if (format !== void 0) {
+			this.backBufferFormat = format;
+		}
 	}
 	initDeviceCaps() {
 		const limits = this.wgpu?.limits;
@@ -11488,6 +11694,7 @@ class WebgpuGraphicsDevice extends GraphicsDevice {
 		};
 		this.wgpu = await this.gpuAdapter.requestDevice(deviceDescr);
 		this.supportsHtmlTextures = typeof this.wgpu.queue?.copyElementImageToTexture === "function";
+		this.supportsTransientAttachments = typeof GPUTextureUsage !== "undefined" && "TRANSIENT_ATTACHMENT" in GPUTextureUsage;
 		this.wgpu.lost?.then(this.handleDeviceLost.bind(this));
 		this.wgpu.addEventListener?.("uncapturederror", (ev) => {
 			ev.error;
@@ -11526,6 +11733,7 @@ class WebgpuGraphicsDevice extends GraphicsDevice {
 			viewFormats: displayFormat === DISPLAYFORMAT_LDR_SRGB ? [this.backBufferViewFormat] : []
 		};
 		this.gpuContext?.configure(this.canvasConfig);
+		this._canvasBackBufferFormat = this.backBufferFormat;
 		this.createBackbuffer();
 		this.clearRenderer = new WebgpuClearRenderer(this);
 		this.mipmapRenderer = new WebgpuMipmapRenderer(this);
@@ -11558,7 +11766,9 @@ class WebgpuGraphicsDevice extends GraphicsDevice {
 			graphicsDevice: this,
 			depth: this.initOptions.depth,
 			stencil: this.supportsStencil,
-			samples: this.samples
+			samples: this.samples,
+			transientColor: this.initOptions.transientColor,
+			transientDepth: this.initOptions.transientDepth
 		});
 		this.backBuffer.impl.isBackbuffer = true;
 	}
@@ -11874,7 +12084,7 @@ class WebgpuGraphicsDevice extends GraphicsDevice {
 				if (renderPass.samples > 1 && target.autoResolve) {
 					const depthAttachment = target.impl.depthAttachment;
 					const destTexture = target.depthBuffer.impl.gpuTexture;
-					if (depthAttachment && destTexture) {
+					if (depthAttachment?.transient) ; else if (depthAttachment && destTexture) {
 						this.resolver.resolveDepth(this.commandEncoder, depthAttachment.multisampledDepthBuffer, destTexture);
 					}
 				}
@@ -12053,9 +12263,12 @@ class WebgpuGraphicsDevice extends GraphicsDevice {
 		}
 		if (depth) {
 			const sourceRT = source ? source : this.renderTarget;
+			if (sourceRT.impl.depthAttachment?.transient) {
+				return false;
+			}
 			const sourceTexture = sourceRT.impl.depthAttachment.depthTexture;
 			const sourceMipLevel = sourceRT.mipLevel;
-			if (source.samples > 1) {
+			if (sourceRT.samples > 1) {
 				const destTexture = dest.colorBuffer.impl.gpuTexture;
 				this.resolver.resolveDepth(commandEncoder, sourceTexture, destTexture);
 			} else {
@@ -14010,7 +14223,6 @@ class WebglGraphicsDevice extends GraphicsDevice {
 	constructor(canvas, options = {}) {
 		super(canvas, options);
 		options = this.initOptions;
-		this.updateClientRect();
 		this.initTextureUnits();
 		this.contextLost = false;
 		this._contextLostHandler = (event) => {
@@ -14626,6 +14838,8 @@ class WebglGraphicsDevice extends GraphicsDevice {
 		gl.clearStencil(0);
 		gl.hint(gl.FRAGMENT_SHADER_DERIVATIVE_HINT, gl.NICEST);
 		gl.enable(gl.SCISSOR_TEST);
+		this.textureUnit = 0;
+		gl.activeTexture(gl.TEXTURE0);
 		gl.pixelStorei(gl.UNPACK_COLORSPACE_CONVERSION_WEBGL, gl.NONE);
 		this.unpackFlipY = false;
 		gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
@@ -16843,6 +17057,17 @@ class Http {
 		".opus"
 	];
 	static retryDelay = 100;
+	_maxConcurrentRequests = 128;
+	_activeRequests = 0;
+	_sendQueue = [];
+	_sendQueueHead = 0;
+	set maxConcurrentRequests(value) {
+		this._maxConcurrentRequests = value;
+		this._pump();
+	}
+	get maxConcurrentRequests() {
+		return this._maxConcurrentRequests;
+	}
 	get(url, options, callback) {
 		if (typeof options === "function") {
 			callback = options;
@@ -16984,13 +17209,17 @@ class Http {
 			this._onError(method, url, options, xhr);
 			errored = true;
 		};
-		try {
-			xhr.send(postdata);
-		} catch (e) {
-			if (!errored) {
-				options.error(xhr.status, xhr, e);
+		const send = () => {
+			try {
+				xhr.send(postdata);
+			} catch (e) {
+				this._releaseSlot(xhr);
+				if (!errored && typeof options.error === "function") {
+					options.error(xhr.status, xhr, e);
+				}
 			}
-		}
+		};
+		this._acquire(xhr, options, send);
 		return xhr;
 	}
 	_guessResponseType(url) {
@@ -17051,6 +17280,7 @@ class Http {
 		}
 	}
 	_onSuccess(method, url, options, xhr) {
+		this._releaseSlot(xhr);
 		let response;
 		let contentType;
 		const header = xhr.getResponseHeader("Content-Type");
@@ -17074,6 +17304,7 @@ class Http {
 		}
 	}
 	_onError(method, url, options, xhr) {
+		this._releaseSlot(xhr);
 		if (options.retrying) {
 			return;
 		}
@@ -17088,6 +17319,49 @@ class Http {
 			}, retryDelay);
 		} else {
 			options.callback(xhr.status === 0 ? "Network error" : xhr.status, null);
+		}
+	}
+	_acquire(xhr, options, send) {
+		const limit = this._maxConcurrentRequests;
+		const throttled = limit > 0 && Number.isFinite(limit) && options.async !== false;
+		if (!throttled || this._activeRequests < limit) {
+			if (throttled) {
+				this._activeRequests++;
+				xhr._slotHeld = true;
+			}
+			send();
+		} else {
+			this._sendQueue.push({ xhr, send });
+		}
+	}
+	_releaseSlot(xhr) {
+		if (xhr._slotHeld) {
+			xhr._slotHeld = false;
+			this._activeRequests--;
+			this._pump();
+		}
+	}
+	_pump() {
+		const limit = this._maxConcurrentRequests;
+		const throttled = limit > 0 && Number.isFinite(limit);
+		if (!throttled) {
+			while (this._sendQueueHead < this._sendQueue.length) {
+				this._sendQueue[this._sendQueueHead++].send();
+			}
+		} else {
+			while (this._sendQueueHead < this._sendQueue.length && this._activeRequests < limit) {
+				const { xhr, send } = this._sendQueue[this._sendQueueHead++];
+				this._activeRequests++;
+				xhr._slotHeld = true;
+				send();
+			}
+		}
+		if (this._sendQueueHead === this._sendQueue.length) {
+			this._sendQueue.length = 0;
+			this._sendQueueHead = 0;
+		} else if (this._sendQueueHead > 256) {
+			this._sendQueue = this._sendQueue.slice(this._sendQueueHead);
+			this._sendQueueHead = 0;
 		}
 	}
 }
@@ -19177,6 +19451,7 @@ class MeshInstance {
 	_drawBucket = 127;
 	node;
 	visible = true;
+	shaderPassMask = 4294967295;
 	visibleThisFrame = false;
 	flipFacesFactor = 1;
 	gsplatInstance = null;
@@ -19924,6 +20199,8 @@ const _deviceCoord = new Vec3();
 const _halfSize = new Vec3();
 const _point = new Vec3();
 const _invViewProjMat = new Mat4();
+const _xrViewProjMat = new Mat4();
+const _xrViewFrustum = new Frustum();
 const _frustumPoints = [new Vec3(), new Vec3(), new Vec3(), new Vec3(), new Vec3(), new Vec3(), new Vec3(), new Vec3()];
 let Camera$1 = class Camera {
 	static _flipYProjectionMatrix = new Mat4().setScale(1, -1, 1);
@@ -20017,7 +20294,7 @@ let Camera$1 = class Camera {
 		this._viewProjPrevious = new Mat4();
 		this._jitters = [0, 0, 0, 0];
 		this.frustum = new Frustum();
-		this._xr = null;
+		this._xrViews = null;
 		this._xrProperties = {
 			horizontalFov: this._horizontalFov,
 			fov: this._fov,
@@ -20057,7 +20334,7 @@ let Camera$1 = class Camera {
 		}
 	}
 	get aspectRatio() {
-		if (this.xr?.active) return this._xrProperties.aspectRatio;
+		if (this.xrActive) return this._xrProperties.aspectRatio;
 		if (this._aspectRatioMode === ASPECT_AUTO) {
 			const newValue = this.calculateAspectRatio();
 			if (this._aspectRatio !== newValue) {
@@ -20138,7 +20415,7 @@ let Camera$1 = class Camera {
 		}
 	}
 	get farClip() {
-		return this.xr?.active ? this._xrProperties.farClip : this._farClip;
+		return this.xrActive ? this._xrProperties.farClip : this._farClip;
 	}
 	set flipFaces(newValue) {
 		this._flipFaces = newValue;
@@ -20153,7 +20430,7 @@ let Camera$1 = class Camera {
 		}
 	}
 	get fov() {
-		return this.xr?.active ? this._xrProperties.fov : this._fov;
+		return this.xrActive ? this._xrProperties.fov : this._fov;
 	}
 	set frustumCulling(newValue) {
 		this._frustumCulling = newValue;
@@ -20168,7 +20445,7 @@ let Camera$1 = class Camera {
 		}
 	}
 	get horizontalFov() {
-		return this.xr?.active ? this._xrProperties.horizontalFov : this._horizontalFov;
+		return this.xrActive ? this._xrProperties.horizontalFov : this._horizontalFov;
 	}
 	set layers(newValue) {
 		this._layers = newValue.slice(0);
@@ -20187,7 +20464,7 @@ let Camera$1 = class Camera {
 		}
 	}
 	get nearClip() {
-		return this.xr?.active ? this._xrProperties.nearClip : this._nearClip;
+		return this.xrActive ? this._xrProperties.nearClip : this._nearClip;
 	}
 	set node(newValue) {
 		this._node = newValue;
@@ -20263,14 +20540,17 @@ let Camera$1 = class Camera {
 	get shutter() {
 		return this._shutter;
 	}
-	set xr(newValue) {
-		if (this._xr !== newValue) {
-			this._xr = newValue;
+	set xrViews(value) {
+		if (value !== null !== (this._xrViews !== null)) {
 			this._projMatDirty = true;
 		}
+		this._xrViews = value;
 	}
-	get xr() {
-		return this._xr;
+	get xrViews() {
+		return this._xrViews;
+	}
+	get xrActive() {
+		return this._xrViews !== null;
 	}
 	calculateAspectRatio(rt) {
 		const target = rt ?? this._renderTarget;
@@ -20343,6 +20623,30 @@ let Camera$1 = class Camera {
 			this._viewProjMat.mul2(this.projectionMatrix, this.viewMatrix);
 			this._viewProjMatDirty = false;
 		}
+	}
+	updateViewTransforms() {
+		const views = this.xrViews;
+		if (!views) {
+			return;
+		}
+		const parentWorldTransform = this._node?.parent?.getWorldTransform() ?? null;
+		for (let i = 0; i < views.length; i++) {
+			views[i].updateTransforms(parentWorldTransform);
+		}
+	}
+	updateXrFrustum() {
+		const views = this.xrViews;
+		if (!views?.length) {
+			return false;
+		}
+		_xrViewProjMat.mul2(views[0].projMat, views[0].viewOffMat);
+		this.frustum.setFromMat4(_xrViewProjMat);
+		for (let v = 1; v < views.length; v++) {
+			_xrViewProjMat.mul2(views[v].projMat, views[v].viewOffMat);
+			_xrViewFrustum.setFromMat4(_xrViewProjMat);
+			this.frustum.add(_xrViewFrustum);
+		}
+		return true;
 	}
 	worldToScreen(worldCoord, cw, ch, screenCoord = new Vec3()) {
 		this._updateViewProjMat();
@@ -20488,8 +20792,67 @@ let Camera$1 = class Camera {
 	}
 };
 
+class RenderView extends EventHandler {
+	_positionData = new Float32Array(3);
+	_viewport = new Vec4();
+	_projMat = new Mat4();
+	_projViewOffMat = new Mat4();
+	_viewMat = new Mat4();
+	_viewOffMat = new Mat4();
+	_viewMat3 = new Mat3();
+	_viewInvMat = new Mat4();
+	_viewInvOffMat = new Mat4();
+	get viewport() {
+		return this._viewport;
+	}
+	get projMat() {
+		return this._projMat;
+	}
+	get projViewOffMat() {
+		return this._projViewOffMat;
+	}
+	get viewOffMat() {
+		return this._viewOffMat;
+	}
+	get viewInvOffMat() {
+		return this._viewInvOffMat;
+	}
+	get viewMat3() {
+		return this._viewMat3;
+	}
+	get positionData() {
+		return this._positionData;
+	}
+	setView(projMat, viewInvMat, viewMat) {
+		this._projMat.set(projMat);
+		this._viewInvMat.set(viewInvMat);
+		if (viewMat) {
+			this._viewMat.set(viewMat);
+		} else {
+			this._viewMat.copy(this._viewInvMat).invert();
+		}
+	}
+	setViewport(x, y, width, height) {
+		this._viewport.set(x, y, width, height);
+	}
+	updateTransforms(parentWorldTransform) {
+		if (parentWorldTransform) {
+			this._viewInvOffMat.mul2(parentWorldTransform, this._viewInvMat);
+			this._viewOffMat.copy(this._viewInvOffMat).invert();
+		} else {
+			this._viewInvOffMat.copy(this._viewInvMat);
+			this._viewOffMat.copy(this._viewMat);
+		}
+		this._viewMat3.setFromMat4(this._viewOffMat);
+		this._projViewOffMat.mul2(this._projMat, this._viewOffMat);
+		this._positionData[0] = this._viewInvOffMat.data[12];
+		this._positionData[1] = this._viewInvOffMat.data[13];
+		this._positionData[2] = this._viewInvOffMat.data[14];
+	}
+}
+
 const _viewMat$1 = new Mat4();
-const _viewProjMat$3 = new Mat4();
+const _viewProjMat$2 = new Mat4();
 const _viewportMatrix = new Mat4();
 class LightCamera {
 	// camera rotation angles used when rendering cubemap faces
@@ -20537,11 +20900,11 @@ class LightCamera {
 		cookieNode.setRotation(light._node.getRotation());
 		cookieNode.rotateLocal(-90, 0, 0);
 		_viewMat$1.setTRS(cookieNode.getPosition(), cookieNode.getRotation(), Vec3.ONE).invert();
-		_viewProjMat$3.mul2(cookieCamera.projectionMatrix, _viewMat$1);
+		_viewProjMat$2.mul2(cookieCamera.projectionMatrix, _viewMat$1);
 		const cookieMatrix = light.cookieMatrix;
 		const rectViewport = light.atlasViewport;
 		_viewportMatrix.setViewport(rectViewport.x, rectViewport.y, rectViewport.z, rectViewport.w);
-		cookieMatrix.mul2(_viewportMatrix, _viewProjMat$3);
+		cookieMatrix.mul2(_viewportMatrix, _viewProjMat$2);
 		return cookieMatrix;
 	}
 }
@@ -21453,6 +21816,7 @@ class Material {
 	variants = /* @__PURE__ */ new Map();
 	defines = /* @__PURE__ */ new Map();
 	_definesDirty = false;
+	_definesKey = null;
 	parameters = {};
 	alphaTest = 0;
 	alphaToCoverage = false;
@@ -21617,6 +21981,7 @@ class Material {
 		}
 		this.defines.clear();
 		source.defines.forEach((value, key) => this.defines.set(key, value));
+		this._definesKey = null;
 		this._shaderChunks = source.hasShaderChunks ? new ShaderChunks() : null;
 		this._shaderChunks?.copy(source._shaderChunks);
 		return this;
@@ -21724,6 +22089,15 @@ class Material {
 			defines.delete(name);
 		}
 		this._definesDirty || (this._definesDirty = modified);
+		if (modified) {
+			this._definesKey = null;
+		}
+	}
+	get definesKey() {
+		if (this._definesKey === null) {
+			this._definesKey = Array.from(this.defines).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([k, v]) => `${k}=${v}`).join(",");
+		}
+		return this._definesKey;
 	}
 	getDefine(name) {
 		return this.defines.has(name);
@@ -21920,7 +22294,10 @@ class RenderPassShadowDirectional extends RenderPass {
 	}
 }
 
-const visibleSceneAabb = new BoundingBox();
+const _unionSceneAabb = new BoundingBox();
+const _cascadeAabbs = [new BoundingBox(), new BoundingBox(), new BoundingBox(), new BoundingBox()];
+const _cascadeAabbValid = [false, false, false, false];
+const _cascadeRadii = [0, 0, 0, 0];
 const center = new Vec3();
 const shadowCamView$1 = new Mat4();
 const aabbPoints = [
@@ -21971,6 +22348,7 @@ class ShadowRendererDirectional {
 		const nearDist = camera._nearClip;
 		this.generateSplitDistances(light, nearDist, Math.min(camera._farClip, light.shadowDistance));
 		const shadowUpdateOverrides = light.shadowUpdateOverrides;
+		let numActiveCascades = 0;
 		for (let cascade = 0; cascade < light.numCascades; cascade++) {
 			if (shadowUpdateOverrides?.[cascade] === SHADOWUPDATE_NONE) {
 				break;
@@ -22024,25 +22402,54 @@ class ShadowRendererDirectional {
 			const visibleCasters = lightRenderData.visibleCasters;
 			const origNumVisibleCasters = visibleCasters.length;
 			let numVisibleCasters = 0;
+			const cascadeAabb = _cascadeAabbs[cascade];
 			for (let i = 0; i < origNumVisibleCasters; i++) {
 				const meshInstance = visibleCasters[i];
 				if (meshInstance.shadowCascadeMask & cascadeFlag) {
 					visibleCasters[numVisibleCasters++] = meshInstance;
 					if (numVisibleCasters === 1) {
-						visibleSceneAabb.copy(meshInstance.aabb);
+						cascadeAabb.copy(meshInstance.aabb);
 					} else {
-						visibleSceneAabb.add(meshInstance.aabb);
+						cascadeAabb.add(meshInstance.aabb);
 					}
 				}
 			}
 			if (origNumVisibleCasters !== numVisibleCasters) {
 				visibleCasters.length = numVisibleCasters;
 			}
+			_cascadeAabbValid[cascade] = numVisibleCasters > 0;
+			_cascadeRadii[cascade] = radius;
+			numActiveCascades++;
+		}
+		let useUnion = false;
+		if (light._isPcss) {
+			for (let cascade = 0; cascade < numActiveCascades; cascade++) {
+				if (!_cascadeAabbValid[cascade]) continue;
+				if (!useUnion) {
+					_unionSceneAabb.copy(_cascadeAabbs[cascade]);
+					useUnion = true;
+				} else {
+					_unionSceneAabb.add(_cascadeAabbs[cascade]);
+				}
+			}
+		}
+		for (let cascade = 0; cascade < numActiveCascades; cascade++) {
+			let aabbSource;
+			if (useUnion) {
+				aabbSource = _unionSceneAabb;
+			} else if (_cascadeAabbValid[cascade]) {
+				aabbSource = _cascadeAabbs[cascade];
+			} else {
+				continue;
+			}
+			const lightRenderData = light.getRenderData(camera, cascade);
+			const shadowCam = lightRenderData.shadowCamera;
+			const shadowCamNode = shadowCam._node;
 			shadowCamView$1.copy(shadowCamNode.getWorldTransform()).invert();
-			const depthRange = getDepthRange(shadowCamView$1, visibleSceneAabb.getMin(), visibleSceneAabb.getMax());
+			const depthRange = getDepthRange(shadowCamView$1, aabbSource.getMin(), aabbSource.getMax());
 			shadowCamNode.translateLocal(0, 0, depthRange.max + 0.1);
 			shadowCam.farClip = depthRange.max - depthRange.min + 0.2;
-			lightRenderData.projectionCompensation = radius;
+			lightRenderData.projectionCompensation = _cascadeRadii[cascade];
 		}
 	}
 	// function to generate frustum split distances
@@ -22571,7 +22978,8 @@ class RenderPassCookieRenderer extends RenderPass {
 			if (!light.atlasViewportAllocated) {
 				continue;
 			}
-			if (!light.atlasSlotUpdated && !this._forceCopy) {
+			const cookieUpdated = light.cookie && light.cookie.uploadVersion !== light.cookieRenderVersion;
+			if (!light.atlasSlotUpdated && !cookieUpdated && !this._forceCopy) {
 				continue;
 			}
 			if (light.enabled && light.cookie && light.visibleThisFrame) {
@@ -22628,6 +23036,7 @@ class RenderPassCookieRenderer extends RenderPass {
 				this.initInvViewProjMatrices();
 			}
 			this.blitTextureId.setValue(light.cookie);
+			light.cookieRenderVersion = light.cookie.uploadVersion;
 			for (let face = 0; face < faceCount; face++) {
 				_viewport.copy(light.atlasViewport);
 				if (faceCount > 1) {
@@ -22714,7 +23123,6 @@ const viewInvMat = new Mat4();
 const viewMat = new Mat4();
 const viewMat3 = new Mat3();
 const tempSphere = new BoundingSphere();
-const tempFrustum = new Frustum();
 const _tempLightSet = /* @__PURE__ */ new Set();
 const _tempLayerSet = /* @__PURE__ */ new Set();
 const _dynamicBindGroup = new DynamicBindGroup();
@@ -22864,14 +23272,9 @@ class Renderer {
 	setCameraUniforms(camera, target) {
 		const flipY = target?.flipY;
 		let viewList = null;
-		if (camera.xr && camera.xr.session) {
-			const transform = camera._node?.parent?.getWorldTransform() || null;
-			const views = camera.xr.views;
-			viewList = views.list;
-			for (let v = 0; v < viewList.length; v++) {
-				const view = viewList[v];
-				view.updateTransforms(transform);
-			}
+		if (camera.xrActive) {
+			viewList = camera.xrViews;
+			camera.updateViewTransforms();
 		} else {
 			let projMat = camera.projectionMatrix;
 			if (camera.calculateProjection) {
@@ -22930,7 +23333,7 @@ class Renderer {
 		}
 		this.tbnBasis.setValue(flipY ? -1 : 1);
 		this.cameraParamsId.setValue(camera.fillShaderParams(this.cameraParams));
-		const xrView = camera.xr?.session ? camera.xr.views.list[0] : null;
+		const xrView = camera.xrActive ? camera.xrViews[0] ?? null : null;
 		let viewportWidth = xrView ? xrView.viewport.z : target ? target.width : this.device.width;
 		let viewportHeight = xrView ? xrView.viewport.w : target ? target.height : this.device.height;
 		viewportWidth *= camera.rect.z;
@@ -22972,15 +23375,7 @@ class Renderer {
 		this.setupCullModeAndFrontFace(cullFaces, flipFactor, drawCall);
 	}
 	updateCameraFrustum(camera) {
-		if (camera.xr && camera.xr.views.list.length) {
-			const views = camera.xr.views.list;
-			viewProjMat$1.mul2(views[0].projMat, views[0].viewOffMat);
-			camera.frustum.setFromMat4(viewProjMat$1);
-			for (let v = 1; v < views.length; v++) {
-				viewProjMat$1.mul2(views[v].projMat, views[v].viewOffMat);
-				tempFrustum.setFromMat4(viewProjMat$1);
-				camera.frustum.add(tempFrustum);
-			}
+		if (camera.updateXrFrustum()) {
 			return;
 		}
 		const projMat = camera.projectionMatrix;
@@ -23091,7 +23486,7 @@ class Renderer {
 				new UniformFormat("skyboxIntensity", UNIFORMTYPE_FLOAT),
 				new UniformFormat("exposure", UNIFORMTYPE_FLOAT),
 				new UniformFormat("textureBias", UNIFORMTYPE_FLOAT),
-				new UniformFormat("view_index", UNIFORMTYPE_FLOAT)
+				new UniformFormat("view_index", UNIFORMTYPE_UINT)
 			];
 			if (isClustered) {
 				uniforms.push(...[
@@ -23707,6 +24102,7 @@ class ForwardRenderer extends Renderer {
 		this.shadowCascadeDistancesId = [];
 		this.shadowCascadeCountId = [];
 		this.shadowCascadeBlendId = [];
+		this.shadowCascadeRadiiId = [];
 		this.screenSizeId = scope.resolve("uScreenSize");
 		this._screenSize = new Float32Array(4);
 		this.fogColor = new Float32Array(3);
@@ -23761,6 +24157,7 @@ class ForwardRenderer extends Renderer {
 		this.shadowCascadeDistancesId[i] = scope.resolve(`${light}_shadowCascadeDistances`);
 		this.shadowCascadeCountId[i] = scope.resolve(`${light}_shadowCascadeCount`);
 		this.shadowCascadeBlendId[i] = scope.resolve(`${light}_shadowCascadeBlend`);
+		this.shadowCascadeRadiiId[i] = scope.resolve(`${light}_shadowCascadeRadii`);
 	}
 	setLTCDirectionalLight(wtm, cnt, dir, campos, far) {
 		this.lightPos[cnt][0] = campos.x - dir.x * far;
@@ -23808,18 +24205,26 @@ class ForwardRenderer extends Renderer {
 				this.shadowCascadeCountId[cnt].setValue(directional.numCascades);
 				this.shadowCascadeBlendId[cnt].setValue(1 - directional.cascadeBlend);
 				this.lightShadowIntensity[cnt].setValue(directional.shadowIntensity);
-				this.lightSoftShadowParamsId[cnt].setValue(directional._softShadowParams);
-				const shadowRT = lightRenderData.shadowCamera.renderTarget;
-				if (shadowRT) {
-					this.lightShadowSearchAreaId[cnt].setValue(directional.penumbraSize / lightRenderData.shadowCamera.renderTarget.width * lightRenderData.projectionCompensation);
+				if (directional._isPcss) {
+					this.lightSoftShadowParamsId[cnt].setValue(directional._softShadowParams);
+					const shadowRT = lightRenderData.shadowCamera.renderTarget;
+					if (shadowRT) {
+						this.lightShadowSearchAreaId[cnt].setValue(directional.penumbraSize / lightRenderData.shadowCamera.renderTarget.width * lightRenderData.projectionCompensation);
+					}
+					const cameraParams = directional._shadowCameraParams;
+					cameraParams.length = 4;
+					cameraParams[0] = lightRenderData.projectionCompensation;
+					cameraParams[1] = lightRenderData.shadowCamera._farClip;
+					cameraParams[2] = lightRenderData.shadowCamera._nearClip;
+					cameraParams[3] = 1;
+					this.lightCameraParamsId[cnt].setValue(cameraParams);
+					const radii = directional._shadowCascadeRadii ?? (directional._shadowCascadeRadii = new Float32Array(4));
+					for (let c = 0; c < 4; c++) {
+						const r = c < directional.numCascades ? directional.getRenderData(camera, c).projectionCompensation : 0;
+						radii[c] = r > 0 ? r : lightRenderData.projectionCompensation;
+					}
+					this.shadowCascadeRadiiId[cnt].setValue(radii);
 				}
-				const cameraParams = directional._shadowCameraParams;
-				cameraParams.length = 4;
-				cameraParams[0] = 0;
-				cameraParams[1] = lightRenderData.shadowCamera._farClip;
-				cameraParams[2] = lightRenderData.shadowCamera._nearClip;
-				cameraParams[3] = 1;
-				this.lightCameraParamsId[cnt].setValue(cameraParams);
 				const params = directional._shadowRenderParams;
 				params.length = 4;
 				params[0] = directional._shadowResolution;
@@ -23995,6 +24400,9 @@ class ForwardRenderer extends Renderer {
 		const drawCallsCount = drawCalls.length;
 		for (let i = 0; i < drawCallsCount; i++) {
 			const drawCall = drawCalls[i];
+			if ((drawCall.shaderPassMask & 1 << pass) === 0) {
+				continue;
+			}
 			const instancingData = drawCall.instancingData;
 			if (instancingData && instancingData.count <= 0) {
 				continue;
@@ -24028,7 +24436,7 @@ class ForwardRenderer extends Renderer {
 		const passFlag = 1 << pass;
 		const flipFactor = flipFaces ? -1 : 1;
 		const clusteredLightingEnabled = scene.clusteredLightingEnabled;
-		const viewList = camera.xr?.session && camera.xr.views.list.length ? camera.xr.views.list : null;
+		const viewList = camera.xrActive && camera.xrViews.length ? camera.xrViews : null;
 		const activeView = device.xrCurrentViewIndex ?? -1;
 		const viewListStart = viewList && activeView >= 0 ? activeView : 0;
 		const viewListEnd = viewList && activeView >= 0 ? activeView + 1 : viewList ? viewList.length : 0;
@@ -24261,8 +24669,8 @@ class ForwardRenderer extends Renderer {
 		}
 	}
 	_isMultiview(camera) {
-		const xr = camera.camera?.xr;
-		return this.device.isWebGPU && !!xr?.session && xr.views.list.length >= 2;
+		const sceneCamera = camera.camera;
+		return this.device.isWebGPU && !!sceneCamera?.xrActive && sceneCamera.xrViews.length >= 2;
 	}
 	addMainRenderPass(frameGraph, layerComposition, renderTarget, startIndex, endIndex) {
 		const renderPass = new RenderPassForward(this.device, layerComposition, this.scene, this);
@@ -24283,6 +24691,7 @@ class ForwardRenderer extends Renderer {
 		this.setSceneConstants();
 		this.gsplatDirector?.update(comp);
 		this.cullComposition(comp);
+		this.gsplatDirector?.updateShadows();
 		this.gpuUpdate(this.processingMeshInstances);
 	}
 }
@@ -25218,6 +25627,7 @@ class Light {
 		this._shadowMap = null;
 		this._shadowRenderParams = [];
 		this._shadowCameraParams = [];
+		this._shadowCascadeRadii = null;
 		this.shadowDistance = 40;
 		this._shadowResolution = 1024;
 		this._shadowBias = -5e-4;
@@ -25227,6 +25637,7 @@ class Light {
 		this.shadowUpdateOverrides = null;
 		this._isVsm = false;
 		this._isPcf = true;
+		this._isPcss = false;
 		this._softShadowParams = new Float32Array(4);
 		this.shadowSamples = 16;
 		this.shadowBlockerSamples = 16;
@@ -25238,6 +25649,7 @@ class Light {
 		this.atlasVersion = 0;
 		this.atlasSlotIndex = 0;
 		this.atlasSlotUpdated = false;
+		this.cookieRenderVersion = -1;
 		this._node = null;
 		this._renderData = [];
 		this.visibleThisFrame = false;
@@ -25406,7 +25818,9 @@ class Light {
 		shadowInfo = shadowTypeInfo.get(value);
 		this._isVsm = shadowInfo?.vsm ?? false;
 		this._isPcf = shadowInfo?.pcf ?? false;
+		this._isPcss = shadowInfo?.pcss ?? false;
 		this._shadowType = value;
+		this._updateShadowBias();
 		this._destroyShadowMap();
 		this.updateKey();
 	}
@@ -25809,7 +26223,7 @@ class Light {
 		}
 	}
 	_updateShadowBias() {
-		if (this._type === LIGHTTYPE_OMNI && !this.clusteredLighting) {
+		if (this._type === LIGHTTYPE_OMNI && !this.clusteredLighting || this._isPcss) {
 			this.shadowDepthState.depthBias = 0;
 			this.shadowDepthState.depthBiasSlope = 0;
 		} else {
@@ -26488,11 +26902,7 @@ class ShaderGeneratorShader extends ShaderGenerator {
 		}
 		definitionOptions.attributes = attributes;
 	}
-	createVertexDefinition(definitionOptions, options, sharedIncludes, wgsl) {
-		const desc = options.shaderDesc;
-		const includes = new Map(sharedIncludes);
-		includes.set("transformInstancingVS", "");
-		const defines = new Map(options.defines);
+	addSharedDefines(defines, options) {
 		if (options.skin) defines.set("SKIN", true);
 		if (options.useInstancing) defines.set("INSTANCING", true);
 		if (options.useMorphPosition || options.useMorphNormal) {
@@ -26501,6 +26911,13 @@ class ShaderGeneratorShader extends ShaderGenerator {
 			if (options.useMorphPosition) defines.set("MORPHING_POSITION", true);
 			if (options.useMorphNormal) defines.set("MORPHING_NORMAL", true);
 		}
+	}
+	createVertexDefinition(definitionOptions, options, sharedIncludes, wgsl) {
+		const desc = options.shaderDesc;
+		const includes = new Map(sharedIncludes);
+		includes.set("transformInstancingVS", "");
+		const defines = new Map(options.defines);
+		this.addSharedDefines(defines, options);
 		definitionOptions.vertexCode = wgsl ? desc.vertexWGSL : desc.vertexGLSL;
 		definitionOptions.vertexIncludes = includes;
 		definitionOptions.vertexDefines = defines;
@@ -26509,6 +26926,7 @@ class ShaderGeneratorShader extends ShaderGenerator {
 		const desc = options.shaderDesc;
 		const includes = new Map(sharedIncludes);
 		const defines = new Map(options.defines);
+		this.addSharedDefines(defines, options);
 		definitionOptions.fragmentCode = wgsl ? desc.fragmentWGSL : desc.fragmentGLSL;
 		definitionOptions.fragmentIncludes = includes;
 		definitionOptions.fragmentDefines = defines;
@@ -26662,11 +27080,11 @@ var containerSimpleRead_default = `
 `;
 
 const serializeStreams = (streams) => streams.map((s) => `${s.name}:${s.format}:${s.storage}`).join(",");
-const RE_NAME = /\{name\}/g;
+const RE_NAME$1 = /\{name\}/g;
 const RE_SAMPLER = /\{sampler\}/g;
 const RE_TEXTURE_TYPE = /\{textureType\}/g;
 const RE_RETURN_TYPE = /\{returnType\}/g;
-const RE_FUNC_NAME = /\{funcName\}/g;
+const RE_FUNC_NAME$1 = /\{funcName\}/g;
 const RE_BINDING = /\{binding\}/g;
 const RE_INDEX = /\{index\}/g;
 const RE_COLOR_SLOT = /\{colorSlot\}/g;
@@ -26676,6 +27094,7 @@ class GSplatFormat {
 	streams;
 	_read;
 	allowStreamRemoval = false;
+	dataFormat = null;
 	_extraStreams = [];
 	_streamNames = /* @__PURE__ */ new Set();
 	_extraStreamsVersion = 0;
@@ -26774,7 +27193,7 @@ class GSplatFormat {
 			if (isWebGPU && stream.format === PIXELFORMAT_RGBA32F) {
 				textureType = "texture_2d<uff>";
 			}
-			const decl = template.replace(RE_NAME, stream.name).replace(RE_SAMPLER, info.sampler ?? "").replace(RE_TEXTURE_TYPE, textureType).replace(RE_RETURN_TYPE, info.returnType).replace(RE_FUNC_NAME, funcName);
+			const decl = template.replace(RE_NAME$1, stream.name).replace(RE_SAMPLER, info.sampler ?? "").replace(RE_TEXTURE_TYPE, textureType).replace(RE_RETURN_TYPE, info.returnType).replace(RE_FUNC_NAME$1, funcName);
 			lines.push(decl);
 		}
 		return lines.join("\n");
@@ -26796,7 +27215,7 @@ class GSplatFormat {
 			if (stream.format === PIXELFORMAT_RGBA32F) {
 				textureType = "texture_2d<uff>";
 			}
-			const decl = gsplatComputeStreamDecl_default.replace(RE_BINDING, String(startBinding + i)).replace(RE_NAME, stream.name).replace(RE_TEXTURE_TYPE, textureType).replace(RE_RETURN_TYPE, info.returnType).replace(RE_FUNC_NAME, funcName);
+			const decl = gsplatComputeStreamDecl_default.replace(RE_BINDING, String(startBinding + i)).replace(RE_NAME$1, stream.name).replace(RE_TEXTURE_TYPE, textureType).replace(RE_RETURN_TYPE, info.returnType).replace(RE_FUNC_NAME$1, funcName);
 			lines.push(decl);
 		}
 		return lines.join("\n");
@@ -26830,7 +27249,7 @@ class GSplatFormat {
 			const info = getShaderType(stream.format);
 			const funcName = stream.name.charAt(0).toUpperCase() + stream.name.slice(1);
 			const colorSlot = i === 0 ? "color" : `color${i}`;
-			const decl = template.replace(RE_FUNC_NAME, funcName).replace(RE_RETURN_TYPE, info.returnType).replace(RE_INDEX, String(i)).replace(RE_COLOR_SLOT, colorSlot).replace(RE_DEFINE_GUARD, "1");
+			const decl = template.replace(RE_FUNC_NAME$1, funcName).replace(RE_RETURN_TYPE, info.returnType).replace(RE_INDEX, String(i)).replace(RE_COLOR_SLOT, colorSlot).replace(RE_DEFINE_GUARD, "1");
 			lines.push(decl);
 		}
 		return lines.join("\n");
@@ -26843,7 +27262,7 @@ class GSplatFormat {
 		for (const stream of streams) {
 			const info = getShaderType(stream.format);
 			const funcName = stream.name.charAt(0).toUpperCase() + stream.name.slice(1);
-			const stub = template.replace(RE_FUNC_NAME, funcName).replace(RE_RETURN_TYPE, info.returnType).replace(RE_DEFINE_GUARD, "0");
+			const stub = template.replace(RE_FUNC_NAME$1, funcName).replace(RE_RETURN_TYPE, info.returnType).replace(RE_DEFINE_GUARD, "0");
 			lines.push(stub);
 		}
 		return lines.join("\n");
@@ -26879,6 +27298,174 @@ class GSplatFormat {
 			readGLSL: containerSimpleRead_default$1,
 			readWGSL: containerSimpleRead_default
 		});
+	}
+}
+
+const CACHE_STRIDE = 8;
+
+var gsplatVaryingDeclVS_default$1 = `
+flat varying {type} user_{name};
+void set{funcName}({type} value) { user_{name} = value; }
+`;
+
+var gsplatVaryingDeclPS_default$1 = `
+flat varying {type} user_{name};
+{type} get{funcName}() { return user_{name}; }
+`;
+
+var gsplatVaryingDeclVS_default = `
+varying @interpolate(flat) user_{name}: {type};
+var<private> _user_{name}: {type};
+fn set{funcName}(value: {type}) { _user_{name} = value; }
+`;
+
+var gsplatVaryingFlushVS_default = `
+output.user_{name} = _user_{name};
+`;
+
+var gsplatVaryingDeclCS_default = `
+var<private> _user_{name}: {type};
+fn set{funcName}(value: {type}) { _user_{name} = value; }
+`;
+
+var gsplatVaryingDeclPS_default = `
+varying @interpolate(flat) user_{name}: {type};
+fn get{funcName}() -> {type} { return user_{name}; }
+`;
+
+var gsplatVaryingCacheWriteCS_default = `
+projCache[base + {word}u] = {value};
+`;
+
+var gsplatVaryingCacheReadVS_default = `
+output.user_{name} = {value};
+`;
+
+const GLSL_TYPES = {
+	[TYPE_FLOAT32]: ["float", "vec2", "vec3", "vec4"],
+	[TYPE_INT32]: ["int", "ivec2", "ivec3", "ivec4"],
+	[TYPE_UINT32]: ["uint", "uvec2", "uvec3", "uvec4"]
+};
+const WGSL_TYPES = {
+	[TYPE_FLOAT32]: ["f32", "vec2f", "vec3f", "vec4f"],
+	[TYPE_INT32]: ["i32", "vec2i", "vec3i", "vec4i"],
+	[TYPE_UINT32]: ["u32", "vec2u", "vec3u", "vec4u"]
+};
+const COMPONENT_SWIZZLE = ["x", "y", "z", "w"];
+const RE_NAME = /\{name\}/g;
+const RE_TYPE = /\{type\}/g;
+const RE_FUNC_NAME = /\{funcName\}/g;
+const RE_WORD = /\{word\}/g;
+const RE_VALUE = /\{value\}/g;
+const GLSL_CHUNK_NAMES = ["gsplatUserVaryingsVS", "gsplatUserVaryingsPS"];
+const WGSL_CHUNK_NAMES = [
+	"gsplatUserVaryingsVS",
+	"gsplatUserVaryingsFlushVS",
+	"gsplatUserVaryingsCS",
+	"gsplatUserVaryingsPS",
+	"gsplatUserCacheWriteCS",
+	"gsplatUserCacheReadVS"
+];
+const pascal = (name) => name.charAt(0).toUpperCase() + name.slice(1);
+const encodeWord = (type, expr) => {
+	return type === TYPE_UINT32 ? expr : `bitcast<u32>(${expr})`;
+};
+const decodeWord = (type, expr) => {
+	if (type === TYPE_UINT32) return expr;
+	return type === TYPE_INT32 ? `bitcast<i32>(${expr})` : `bitcast<f32>(${expr})`;
+};
+class GSplatVaryings {
+	_device;
+	_streams = [];
+	_words = 0;
+	_version = 0;
+	constructor(device) {
+		this._device = device;
+	}
+	get streams() {
+		return this._streams;
+	}
+	get words() {
+		return this._words;
+	}
+	get version() {
+		return this._version;
+	}
+	add(streams) {
+		for (const s of streams) {
+			this._streams.push({ name: s.name, type: s.type, components: s.components });
+		}
+		this._changed();
+	}
+	remove(names) {
+		const count = this._streams.length;
+		this._streams = this._streams.filter((v) => !names.includes(v.name));
+		if (this._streams.length !== count) {
+			this._changed();
+		}
+	}
+	_changed() {
+		this._words = this._streams.reduce((sum, s) => sum + s.components, 0);
+		this._version++;
+	}
+	_generateChunks() {
+		const isWebGPU = this._device.isWebGPU;
+		const types = isWebGPU ? WGSL_TYPES : GLSL_TYPES;
+		const declVSTemplate = isWebGPU ? gsplatVaryingDeclVS_default : gsplatVaryingDeclVS_default$1;
+		const declPSTemplate = isWebGPU ? gsplatVaryingDeclPS_default : gsplatVaryingDeclPS_default$1;
+		const vs = [];
+		const ps = [];
+		const flush = [];
+		const cs = [];
+		const cacheWrite = [];
+		const cacheRead = [];
+		let wordOffset = 0;
+		for (const s of this._streams) {
+			const { name, type, components } = s;
+			const shaderType = types[type][components - 1];
+			const funcName = pascal(name);
+			const sub = (template) => template.replace(RE_NAME, name).replace(RE_TYPE, shaderType).replace(RE_FUNC_NAME, funcName);
+			vs.push(sub(declVSTemplate));
+			ps.push(sub(declPSTemplate));
+			if (isWebGPU) {
+				flush.push(sub(gsplatVaryingFlushVS_default));
+				cs.push(sub(gsplatVaryingDeclCS_default));
+				const words = [];
+				for (let c = 0; c < components; c++) {
+					const component = components === 1 ? `_user_${name}` : `_user_${name}.${COMPONENT_SWIZZLE[c]}`;
+					cacheWrite.push(gsplatVaryingCacheWriteCS_default.replace(RE_WORD, String(CACHE_STRIDE + wordOffset + c)).replace(RE_VALUE, encodeWord(type, component)));
+					words.push(decodeWord(type, `projCache[base + ${CACHE_STRIDE + wordOffset + c}u]`));
+				}
+				cacheRead.push(gsplatVaryingCacheReadVS_default.replace(RE_NAME, name).replace(RE_VALUE, components === 1 ? words[0] : `${shaderType}(${words.join(", ")})`));
+			}
+			wordOffset += components;
+		}
+		const chunks = {
+			gsplatUserVaryingsVS: vs.join(""),
+			gsplatUserVaryingsPS: ps.join("")
+		};
+		if (isWebGPU) {
+			chunks.gsplatUserVaryingsFlushVS = flush.join("");
+			chunks.gsplatUserVaryingsCS = cs.join("");
+			chunks.gsplatUserCacheWriteCS = cacheWrite.join("");
+			chunks.gsplatUserCacheReadVS = cacheRead.join("");
+		}
+		return chunks;
+	}
+	apply(material) {
+		const isWebGPU = this._device.isWebGPU;
+		const chunks = material.getShaderChunks(isWebGPU ? SHADERLANGUAGE_WGSL : SHADERLANGUAGE_GLSL);
+		material.setDefine("GSPLAT_USER_VARYINGS", this._streams.length > 0);
+		if (this._streams.length > 0) {
+			const sources = this._generateChunks();
+			for (const name in sources) {
+				chunks.set(name, sources[name]);
+			}
+		} else {
+			const names = isWebGPU ? WGSL_CHUNK_NAMES : GLSL_CHUNK_NAMES;
+			names.forEach((name) => chunks.delete(name));
+		}
+		material.update();
 	}
 }
 
@@ -27130,11 +27717,15 @@ class GSplatParams {
 	_dataFormat = GSPLATDATA_COMPACT;
 	constructor(device) {
 		this._device = device;
+		this._currentRenderer = this._resolveRenderer(this._renderer);
 		this._format = this._createFormat(GSPLATDATA_COMPACT);
+		this._varyings = new GSplatVaryings(device);
 		this._material.setParameter("alphaClip", 0.3);
 		this._material.setParameter("alphaClipForward", 1 / 255);
 		this._material.setParameter("minPixelSize", 2);
 		this._material.setParameter("minContribution", 3);
+		this._material.setParameter("foveationStrength", 0);
+		this._material.setParameter("foveationCenter", 0.3);
 	}
 	_createFormat(dataFormat) {
 		let format;
@@ -27161,21 +27752,28 @@ class GSplatParams {
 			format.setWriteCode(containerPackedWrite_default$1, containerPackedWrite_default);
 		}
 		format.allowStreamRemoval = true;
+		format.dataFormat = dataFormat;
 		return format;
 	}
 	radialSorting = false;
 	_renderer = GSPLAT_RENDERER_AUTO;
 	_currentRenderer = GSPLAT_RENDERER_RASTER_CPU_SORT;
+	_resolveRenderer(value) {
+		if (value === GSPLAT_RENDERER_AUTO) {
+			return this._device.isWebGPU ? GSPLAT_RENDERER_RASTER_GPU_SORT : GSPLAT_RENDERER_RASTER_CPU_SORT;
+		}
+		if (value === GSPLAT_RENDERER_RASTER_GPU_SORT && !this._device.isWebGPU) {
+			return GSPLAT_RENDERER_RASTER_CPU_SORT;
+		}
+		return value;
+	}
 	set renderer(value) {
+		if (value === GSPLAT_RENDERER_COMPUTE) {
+			value = GSPLAT_RENDERER_AUTO;
+		}
 		if (this._renderer !== value) {
 			this._renderer = value;
-			if (value === GSPLAT_RENDERER_AUTO) {
-				this._currentRenderer = GSPLAT_RENDERER_RASTER_CPU_SORT;
-			} else if ((value === GSPLAT_RENDERER_COMPUTE || value === GSPLAT_RENDERER_RASTER_GPU_SORT) && !this._device.isWebGPU) {
-				this._currentRenderer = GSPLAT_RENDERER_RASTER_CPU_SORT;
-			} else {
-				this._currentRenderer = value;
-			}
+			this._currentRenderer = this._resolveRenderer(value);
 		}
 	}
 	get renderer() {
@@ -27187,10 +27785,13 @@ class GSplatParams {
 	dirty = false;
 	_debug = GSPLAT_DEBUG_NONE;
 	set debug(value) {
+		if (value === GSPLAT_DEBUG_HEATMAP) {
+			return;
+		}
 		if (this._debug !== value) {
 			const prev = this._debug;
 			this._debug = value;
-			if (value === GSPLAT_DEBUG_LOD || prev === GSPLAT_DEBUG_LOD || value === GSPLAT_DEBUG_HEATMAP || prev === GSPLAT_DEBUG_HEATMAP) {
+			if (value === GSPLAT_DEBUG_LOD || prev === GSPLAT_DEBUG_LOD) {
 				this.dirty = true;
 			}
 		}
@@ -27245,25 +27846,15 @@ class GSplatParams {
 	get lodBehindPenalty() {
 		return this._lodBehindPenalty;
 	}
-	_lodRangeMin = 0;
 	set lodRangeMin(value) {
-		if (this._lodRangeMin !== value) {
-			this._lodRangeMin = value;
-			this.dirty = true;
-		}
 	}
 	get lodRangeMin() {
-		return this._lodRangeMin;
+		return 0;
 	}
-	_lodRangeMax = 10;
 	set lodRangeMax(value) {
-		if (this._lodRangeMax !== value) {
-			this._lodRangeMax = value;
-			this.dirty = true;
-		}
 	}
 	get lodRangeMax() {
-		return this._lodRangeMax;
+		return 99;
 	}
 	_lodUnderfillLimit = 0;
 	set lodUnderfillLimit(value) {
@@ -27347,6 +27938,20 @@ class GSplatParams {
 	get minContribution() {
 		return this._material.getParameter("minContribution")?.data ?? 3;
 	}
+	set foveationStrength(value) {
+		this._material.setParameter("foveationStrength", value);
+		this._material.update();
+	}
+	get foveationStrength() {
+		return this._material.getParameter("foveationStrength")?.data ?? 0;
+	}
+	set foveationCenter(value) {
+		this._material.setParameter("foveationCenter", value);
+		this._material.update();
+	}
+	get foveationCenter() {
+		return this._material.getParameter("foveationCenter")?.data ?? 0.3;
+	}
 	set antiAlias(value) {
 		this._material.setDefine("GSPLAT_AA", value);
 		this._material.update();
@@ -27401,9 +28006,40 @@ class GSplatParams {
 	get format() {
 		return this._format;
 	}
+	_varyings;
+	_appliedVaryingsVersion = 0;
+	get varyings() {
+		return this._varyings;
+	}
+	applySettings(render) {
+		this.radialSorting = render.gsplatRadialSorting ?? this.radialSorting;
+		this.lodUpdateDistance = render.gsplatLodUpdateDistance ?? this.lodUpdateDistance;
+		this.lodUpdateAngle = render.gsplatLodUpdateAngle ?? this.lodUpdateAngle;
+		this.lodBehindPenalty = render.gsplatLodBehindPenalty ?? this.lodBehindPenalty;
+		this.lodUnderfillLimit = render.gsplatLodUnderfillLimit ?? this.lodUnderfillLimit;
+		this.splatBudget = render.gsplatSplatBudget ?? this.splatBudget;
+		this.alphaClip = render.gsplatAlphaClip ?? this.alphaClip;
+		this.alphaClipForward = render.gsplatAlphaClipForward ?? this.alphaClipForward;
+		this.minPixelSize = render.gsplatMinPixelSize ?? this.minPixelSize;
+		this.minContribution = render.gsplatMinContribution ?? this.minContribution;
+		this.foveationStrength = render.gsplatFoveationStrength ?? this.foveationStrength;
+		this.foveationCenter = render.gsplatFoveationCenter ?? this.foveationCenter;
+		this.antiAlias = render.gsplatAntiAlias ?? this.antiAlias;
+		this.useFog = render.gsplatUseFog ?? this.useFog;
+		this.colorUpdateAngle = render.gsplatColorUpdateAngle ?? this.colorUpdateAngle;
+		this.cooldownTicks = render.gsplatCooldownTicks ?? this.cooldownTicks;
+		this.dataFormat = render.gsplatDataFormat ?? this.dataFormat;
+		this.enableIds = render.gsplatEnableIds ?? this.enableIds;
+	}
 	frameEnd() {
 		this._material.dirty = false;
 		this.dirty = false;
+	}
+	frameUpdate() {
+		if (this._appliedVaryingsVersion !== this._varyings.version) {
+			this._appliedVaryingsVersion = this._varyings.version;
+			this._varyings.apply(this._material);
+		}
 	}
 }
 
@@ -29284,6 +29920,7 @@ class Scene extends EventHandler {
 		this.sky.applySettings(render);
 		this.clusteredLightingEnabled = render.clusteredLightingEnabled ?? false;
 		this.lighting.applySettings(render);
+		this.gsplat.applySettings(render);
 		[
 			"lightmapFilterEnabled",
 			"lightmapFilterRange",
@@ -31076,6 +31713,12 @@ class LitShader {
 			this.fDefines.set(name, value);
 		}
 	}
+	sharedDefineSet(condition, name, value = "") {
+		if (condition) {
+			this.vDefines.set(name, value);
+			this.fDefines.set(name, value);
+		}
+	}
 	generateVertexShader(useUv, useUnmodifiedUv, mapTransforms) {
 		const { options, vDefines, attributes } = this;
 		const varyings = /* @__PURE__ */ new Map();
@@ -31151,23 +31794,23 @@ class LitShader {
 			vDefines.set("MSDF", true);
 		}
 		if (options.useMorphPosition || options.useMorphNormal) {
-			vDefines.set("MORPHING", true);
-			if (options.useMorphTextureBasedInt) vDefines.set("MORPHING_INT", true);
-			if (options.useMorphPosition) vDefines.set("MORPHING_POSITION", true);
-			if (options.useMorphNormal) vDefines.set("MORPHING_NORMAL", true);
+			this.sharedDefineSet(true, "MORPHING", true);
+			this.sharedDefineSet(options.useMorphTextureBasedInt, "MORPHING_INT", true);
+			this.sharedDefineSet(options.useMorphPosition, "MORPHING_POSITION", true);
+			this.sharedDefineSet(options.useMorphNormal, "MORPHING_NORMAL", true);
 			attributes.morph_vertex_id = SEMANTIC_ATTR15;
 		}
 		if (options.skin) {
 			attributes.vertex_boneIndices = SEMANTIC_BLENDINDICES;
 			if (options.batch) {
-				vDefines.set("BATCH", true);
+				this.sharedDefineSet(true, "BATCH", true);
 			} else {
 				attributes.vertex_boneWeights = SEMANTIC_BLENDWEIGHT;
-				vDefines.set("SKIN", true);
+				this.sharedDefineSet(true, "SKIN", true);
 			}
 		}
-		if (options.useInstancing) vDefines.set("INSTANCING", true);
-		if (options.screenSpace) vDefines.set("SCREENSPACE", true);
+		this.sharedDefineSet(options.useInstancing, "INSTANCING", true);
+		this.sharedDefineSet(options.screenSpace, "SCREENSPACE", true);
 		if (options.pixelSnap) vDefines.set("PIXELSNAP", true);
 		varyings.forEach((type, name) => {
 			this.varyingsCode += `#define VARYING_${name.toUpperCase()}
@@ -33210,6 +33853,8 @@ class UploadStream {
 
 var gsplatCopyToWorkbuffer_default$1 = `
 #define GSPLAT_CENTER_NOPROJ
+uniform vec3 model_scale;
+uniform vec4 model_rotation;
 #include "gsplatHelpersVS"
 #include "gsplatFormatVS"
 #include "gsplatStructsVS"
@@ -33218,13 +33863,12 @@ var gsplatCopyToWorkbuffer_default$1 = `
 #include "gsplatEvalSHVS"
 #include "gsplatQuatToMat3VS"
 #include "gsplatReadVS"
+#include "gsplatWorkBufferGeometryPS"
 #include "gsplatWorkBufferOutputVS"
 #include "gsplatWriteVS"
 #include "gsplatModifyVS"
 flat varying ivec4 vSubDraw;
 uniform vec3 uColorMultiply;
-uniform vec3 model_scale;
-uniform vec4 model_rotation;
 #ifdef GSPLAT_ID
 	uniform uint uId;
 #endif
@@ -33233,23 +33877,39 @@ void main(void) {
 	int localCol = int(gl_FragCoord.x) - vSubDraw.y;
 	uint originalIndex = uint(vSubDraw.x + localRow * vSubDraw.z + localCol);
 	setSplat(originalIndex);
-	vec3 modelCenter = getCenter();
-	vec3 worldCenter = (matrix_model * vec4(modelCenter, 1.0)).xyz;
-	SplatCenter center;
-	initCenter(modelCenter, center);
-	vec4 srcRotation = getRotation().yzwx;
-	vec3 srcScale = getScale();
-	vec4 worldRotation = quatMul(model_rotation, srcRotation);
-	if (worldRotation.w < 0.0) {
-		worldRotation = -worldRotation;
-	}
-	vec3 worldScale = model_scale * srcScale;
-	vec3 originalCenter = worldCenter;
-	modifySplatCenter(worldCenter);
-	modifySplatRotationScale(originalCenter, worldCenter, worldRotation, worldScale);
+	vec3 worldCenter;
+	vec4 worldRotation = vec4(0.0, 0.0, 0.0, 1.0);
+	vec3 worldScale = vec3(1.0);
+	#if SH_BANDS > 0
+		vec3 dir;
+	#endif
+	#ifdef GSPLAT_WORKBUFFER_GEOMETRY
+		initWorkBufferGeometry(ivec2(gl_FragCoord.xy));
+		worldCenter = workBufferWorldCenter();
+		#if SH_BANDS > 0
+			dir = normalize(quatRotateInv(model_rotation, worldCenter - uCameraPosition));
+		#endif
+	#else
+		vec3 modelCenter = getCenter();
+		worldCenter = (matrix_model * vec4(modelCenter, 1.0)).xyz;
+		SplatCenter center;
+		initCenter(modelCenter, center);
+		vec4 srcRotation = getRotation().yzwx;
+		vec3 srcScale = getScale();
+		worldRotation = quatMul(model_rotation, srcRotation);
+		if (worldRotation.w < 0.0) {
+			worldRotation = -worldRotation;
+		}
+		worldScale = model_scale * srcScale;
+		vec3 originalCenter = worldCenter;
+		modifySplatCenter(worldCenter);
+		modifySplatRotationScale(originalCenter, worldCenter, worldRotation, worldScale);
+		#if SH_BANDS > 0
+			dir = normalize(center.view * mat3(center.modelView));
+		#endif
+	#endif
 	vec4 color = getColor();
 	#if SH_BANDS > 0
-		vec3 dir = normalize(center.view * mat3(center.modelView));
 		vec3 sh[SH_COEFFS];
 		float scale;
 		readSHData(sh, scale);
@@ -33266,6 +33926,8 @@ void main(void) {
 
 var gsplatCopyToWorkbuffer_default = `
 #define GSPLAT_CENTER_NOPROJ
+uniform model_scale: vec3f;
+uniform model_rotation: vec4f;
 #include "gsplatHelpersVS"
 #include "gsplatFormatVS"
 #include "gsplatStructsVS"
@@ -33274,14 +33936,13 @@ var gsplatCopyToWorkbuffer_default = `
 #include "gsplatEvalSHVS"
 #include "gsplatQuatToMat3VS"
 #include "gsplatReadVS"
+#include "gsplatWorkBufferGeometryPS"
 var<private> processOutput: FragmentOutput;
 #include "gsplatWorkBufferOutputVS"
 #include "gsplatWriteVS"
 #include "gsplatModifyVS"
 varying @interpolate(flat) vSubDraw: vec4i;
 uniform uColorMultiply: vec3f;
-uniform model_scale: vec3f;
-uniform model_rotation: vec4f;
 #ifdef GSPLAT_ID
 	uniform uId: u32;
 #endif
@@ -33291,23 +33952,39 @@ fn fragmentMain(input: FragmentInput) -> FragmentOutput {
 	let localCol = i32(input.position.x) - input.vSubDraw.y;
 	let originalIndex = u32(input.vSubDraw.x + localRow * input.vSubDraw.z + localCol);
 	setSplat(originalIndex);
-	var modelCenter = getCenter();
-	var worldCenter = (uniform.matrix_model * vec4f(modelCenter, 1.0)).xyz;
-	var center: SplatCenter;
-	initCenter(modelCenter, &center);
-	let srcRotation = getRotation().yzwx;
-	let srcScale = getScale();
-	var worldRotation = vec4f(quatMul(half4(uniform.model_rotation), half4(srcRotation)));
-	if (worldRotation.w < 0.0) {
-		worldRotation = -worldRotation;
-	}
-	var worldScale = uniform.model_scale * srcScale;
-	let originalCenter = worldCenter;
-	modifySplatCenter(&worldCenter);
-	modifySplatRotationScale(originalCenter, worldCenter, &worldRotation, &worldScale);
+	var worldCenter: vec3f;
+	var worldRotation = vec4f(0.0, 0.0, 0.0, 1.0);
+	var worldScale = vec3f(1.0);
+	#if SH_BANDS > 0
+		var dir: vec3f;
+	#endif
+	#ifdef GSPLAT_WORKBUFFER_GEOMETRY
+		initWorkBufferGeometry(vec2i(input.position.xy));
+		worldCenter = workBufferWorldCenter();
+		#if SH_BANDS > 0
+			dir = normalize(quatRotateInv(uniform.model_rotation, worldCenter - uniform.uCameraPosition));
+		#endif
+	#else
+		var modelCenter = getCenter();
+		worldCenter = (uniform.matrix_model * vec4f(modelCenter, 1.0)).xyz;
+		var center: SplatCenter;
+		initCenter(modelCenter, &center);
+		let srcRotation = getRotation().yzwx;
+		let srcScale = getScale();
+		worldRotation = vec4f(quatMul(half4(uniform.model_rotation), half4(srcRotation)));
+		if (worldRotation.w < 0.0) {
+			worldRotation = -worldRotation;
+		}
+		worldScale = uniform.model_scale * srcScale;
+		let originalCenter = worldCenter;
+		modifySplatCenter(&worldCenter);
+		modifySplatRotationScale(originalCenter, worldCenter, &worldRotation, &worldScale);
+		#if SH_BANDS > 0
+			dir = normalize(center.view * mat3x3f(center.modelView[0].xyz, center.modelView[1].xyz, center.modelView[2].xyz));
+		#endif
+	#endif
 	var color = getColor();
 	#if SH_BANDS > 0
-		let dir = normalize(center.view * mat3x3f(center.modelView[0].xyz, center.modelView[1].xyz, center.modelView[2].xyz));
 		var sh: array<half3, SH_COEFFS>;
 		var scale: f32;
 		readSHData(&sh, &scale);
@@ -33373,7 +34050,7 @@ fn vertexMain(input: VertexInput) -> VertexOutput {
 }
 `;
 
-const _viewProjMat$2 = new Mat4();
+const _viewProjMat$1 = new Mat4();
 const _frustum = new Frustum();
 const BOUNDS_ENTRY_FLOATS = 8;
 class GSplatFrustumCuller {
@@ -33462,17 +34139,20 @@ class GSplatFrustumCuller {
 		}
 		this.transformsBuffer.write(0, data);
 	}
-	computeFrustumPlanes(projectionMatrix, viewMatrix) {
-		_viewProjMat$2.mul2(projectionMatrix, viewMatrix);
-		_frustum.setFromMat4(_viewProjMat$2);
+	setFrustumPlanes(frustum) {
 		const planes = this.frustumPlanes;
 		for (let p = 0; p < 6; p++) {
-			const plane = _frustum.planes[p];
+			const plane = frustum.planes[p];
 			planes[p * 4 + 0] = plane.normal.x;
 			planes[p * 4 + 1] = plane.normal.y;
 			planes[p * 4 + 2] = plane.normal.z;
 			planes[p * 4 + 3] = plane.distance;
 		}
+	}
+	computeFrustumPlanes(projectionMatrix, viewMatrix) {
+		_viewProjMat$1.mul2(projectionMatrix, viewMatrix);
+		_frustum.setFromMat4(_viewProjMat$1);
+		this.setFrustumPlanes(_frustum);
 	}
 	setFisheyeData(cameraPos, cameraForward, maxTheta) {
 		this.fisheyeCameraPos[0] = cameraPos.x;
@@ -33486,6 +34166,7 @@ class GSplatFrustumCuller {
 }
 
 const _viewMat = new Mat4();
+const _invModelMat = new Mat4();
 const _modelScale = new Vec3();
 const _modelRotation = new Quat();
 const _tmpSize = new Vec2();
@@ -33496,8 +34177,10 @@ class GSplatWorkBufferRenderPass extends RenderPass {
 	cameraNode = null;
 	workBuffer;
 	colorOnly;
+	_usesWorkBufferGeometry = false;
 	_modelScaleData = new Float32Array(3);
 	_modelRotationData = new Float32Array(4);
+	_cameraPositionData = new Float32Array(3);
 	_textureSize = new Int32Array(2);
 	_subDrawTexture;
 	_partialData = [];
@@ -33572,11 +34255,14 @@ class GSplatWorkBufferRenderPass extends RenderPass {
 				}
 			}
 		}
+		let usesWorkBufferGeometry = false;
 		for (let i = 0; i < this.splats.length; i++) {
 			if (this._partialData[i * 2 + 1] === 0) {
 				this.splats[i].ensureSubDrawTexture(textureWidth);
 			}
+			usesWorkBufferGeometry || (usesWorkBufferGeometry = this.splats[i].resource.supportsWorkBufferGeometry);
 		}
+		this._usesWorkBufferGeometry = usesWorkBufferGeometry;
 		this.cameraNode = cameraNode;
 		return this.splats.length > 0;
 	}
@@ -33586,6 +34272,15 @@ class GSplatWorkBufferRenderPass extends RenderPass {
 		const viewInvMat = cameraNode.getWorldTransform();
 		const viewMat = _viewMat.copy(viewInvMat).invert();
 		device.scope.resolve("matrix_view").setValue(viewMat.data);
+		if (this.colorOnly && this._usesWorkBufferGeometry) {
+			device.scope.resolve("uWorkBufferTransformA").setValue(this.workBuffer.getTexture("dataTransformA"));
+			device.scope.resolve("uWorkBufferTransformB").setValue(this.workBuffer.getTexture("dataTransformB"));
+			const cameraPos = cameraNode.getPosition();
+			this._cameraPositionData[0] = cameraPos.x;
+			this._cameraPositionData[1] = cameraPos.y;
+			this._cameraPositionData[2] = cameraPos.z;
+			device.scope.resolve("uCameraPosition").setValue(this._cameraPositionData);
+		}
 		for (let i = 0; i < splats.length; i++) {
 			const count = _partialData[i * 2 + 1];
 			if (count > 0) {
@@ -33629,6 +34324,10 @@ class GSplatWorkBufferRenderPass extends RenderPass {
 		scope.resolve("matrix_model").setValue(worldTransform.data);
 		scope.resolve("model_scale").setValue(this._modelScaleData);
 		scope.resolve("model_rotation").setValue(this._modelRotationData);
+		if (this.colorOnly && resource.supportsWorkBufferGeometry) {
+			_invModelMat.copy(worldTransform).invert();
+			scope.resolve("matrix_model_inverse").setValue(_invModelMat.data);
+		}
 		scope.resolve("uId").setValue(splatInfo.placementId);
 		if (splatInfo.parameters) {
 			for (const param of splatInfo.parameters.values()) {
@@ -33984,10 +34683,21 @@ class GSplatResourceBase {
 			this.mesh = null;
 		}
 	}
+	get supportsWorkBufferGeometry() {
+		return false;
+	}
 	getWorkBufferRenderInfo(colorOnly, workBufferModifier, formatHash, formatDeclarations, workBufferFormat) {
 		this.configureMaterialDefines(tempMap);
 		tempMap.set("GSPLAT_LOD", "");
-		if (colorOnly) tempMap.set("GSPLAT_COLOR_ONLY", "");
+		if (colorOnly) {
+			tempMap.set("GSPLAT_COLOR_ONLY", "");
+			if (this.supportsWorkBufferGeometry) {
+				tempMap.set("GSPLAT_WORKBUFFER_GEOMETRY", "");
+				if (workBufferFormat.dataFormat === GSPLATDATA_COMPACT) {
+					tempMap.set("GSPLAT_WORKBUFFER_COMPACT", "");
+				}
+			}
+		}
 		let definesKey = "";
 		for (const [k, v] of tempMap) {
 			if (definesKey) definesKey += ";";
@@ -34415,205 +35125,6 @@ class GSplatData {
 	}
 }
 
-const vertexGLSL = `
-	attribute vec2 vertex_position;
-	void main(void) {
-		gl_Position = vec4(vertex_position, 0.0, 1.0);
-	}
-`;
-const fragmentGLSL = `
-	#include "gsplatEvalSHVS"
-	vec4 packRgb(vec3 v) {
-		uvec3 vb = uvec3(clamp(v, vec3(0.0), vec3(1.0)) * vec3(2047.0, 2047.0, 1023.0));
-		uint bits = (vb.x << 21) | (vb.y << 10) | vb.z;
-		return vec4((uvec4(bits) >> uvec4(24, 16, 8, 0)) & uvec4(0xff)) / vec4(255.0);
-	}
-	uniform mediump vec3 dir;
-	uniform mediump sampler2D centroids;
-	uniform mediump float shN_mins;
-	uniform mediump float shN_maxs;
-	void main(void) {
-		ivec2 uv = ivec2(gl_FragCoord.xy) * ivec2(SH_COEFFS, 1);
-		mediump vec3 coefficients[SH_COEFFS];
-		for (int i = 0; i < SH_COEFFS; i++) {
-			vec3 s = texelFetch(centroids, ivec2(uv.x + i, uv.y), 0).xyz;
-			coefficients[i] = mix(vec3(shN_mins), vec3(shN_maxs), s);
-		}
-		gl_FragColor = packRgb(evalSH(coefficients, dir) * 0.25 + 0.5);
-	}
-`;
-const vertexWGSL = `
-	attribute vertex_position: vec2f;
-	@vertex
-	fn vertexMain(input: VertexInput) -> VertexOutput {
-		var output: VertexOutput;
-		output.position = vec4f(vertex_position, 0.0, 1.0);
-		return output;
-	}
-`;
-const fragmentWGSL = `
-	#include "gsplatEvalSHVS"
-	fn packRgb(v: vec3f) -> vec4f {
-		let vb = vec3u(clamp(v, vec3f(0.0), vec3f(1.0)) * vec3f(2047.0, 2047.0, 1023.0));
-		let bits = dot(vb, vec3u(1 << 21, 1 << 10, 1));
-		return vec4f((vec4u(bits) >> vec4u(24, 16, 8, 0)) & vec4u(0xff)) / vec4f(255.0);
-	}
-	uniform dir: vec3f;
-	uniform shN_mins: f32;
-	uniform shN_maxs: f32;
-	var centroids: texture_2d<f32>;
-	@fragment
-	fn fragmentMain(input: FragmentInput) -> FragmentOutput {
-		var output: FragmentOutput;
-		var uv = vec2i(input.position.xy) * vec2i(SH_COEFFS, 1);
-		var coefficients: array<vec3f, SH_COEFFS>;
-		for (var i: i32 = 0; i < SH_COEFFS; i++) {
-			let s: vec3f = textureLoad(centroids, vec2i(uv.x + i, uv.y), 0).xyz;
-			coefficients[i] = mix(vec3f(uniform.shN_mins), vec3f(uniform.shN_maxs), s);
-		}
-		output.color = packRgb(evalSH(&coefficients, uniform.dir) * 0.25 + 0.5);
-		return output;
-	}
-`;
-const gsplatSogColorGLSL = `
-	uniform mediump sampler2D sh0;
-	uniform highp sampler2D sh_labels;
-	uniform mediump sampler2D sh_result;
-	uniform vec4 sh0_mins;
-	uniform vec4 sh0_maxs;
-	float SH_C0 = 0.28209479177387814;
-	vec3 unpackRgb(vec4 v) {
-		uvec4 uv = uvec4(v * 255.0);
-		uint bits = (uv.x << 24) | (uv.y << 16) | (uv.z << 8) | uv.w;
-		uvec3 vb = (uvec3(bits) >> uvec3(21, 10, 0)) & uvec3(0x7ffu, 0x7ffu, 0x3ffu);
-		return vec3(vb) / vec3(2047.0, 2047.0, 1023.0);
-	}
-	vec4 getColor(in SplatSource source) {
-		vec4 baseSample = mix(sh0_mins, sh0_maxs, texelFetch(sh0, source.uv, 0));
-		vec4 base = vec4(vec3(0.5) + baseSample.xyz * SH_C0, 1.0 / (1.0 + exp(-baseSample.w)));
-		ivec2 labelSample = ivec2(texelFetch(sh_labels, source.uv, 0).xy * 255.0);
-		int n = labelSample.x + labelSample.y * 256;
-		vec4 shSample = texelFetch(sh_result, ivec2(n % 64, n / 64), 0);
-		vec3 sh = (unpackRgb(shSample) - vec3(0.5)) * 4.0;
-		return vec4(base.xyz + sh, base.w);
-	}
-`;
-const gsplatSogColorWGSL = `
-	var sh0: texture_2d<f32>;
-	var sh_labels: texture_2d<f32>;
-	var sh_result: texture_2d<f32>;
-	uniform sh0_mins: vec4f;
-	uniform sh0_maxs: vec4f;
-	const SH_C0: f32 = 0.28209479177387814;
-	fn unpackRgb(v: vec4f) -> vec3f {
-		let bits = dot(vec4u(v * 255.0), vec4u(1u << 24, 1u << 16, 1u << 8, 1u));
-		let vb = (vec3u(bits) >> vec3u(21, 10, 0)) & vec3u(0x7ffu, 0x7ffu, 0x3ffu);
-		return vec3f(vb) / vec3f(2047.0, 2047.0, 1023.0);
-	}
-	fn getColor(source: ptr<function, SplatSource>) -> vec4f {
-		let baseSample: vec4f = mix(uniform.sh0_mins, uniform.sh0_maxs, textureLoad(sh0, source.uv, 0));
-		let base = vec4f(vec3f(0.5) + baseSample.xyz * SH_C0, 1.0 / (1.0 + exp(-baseSample.w)));
-		let labelSample: vec2i = vec2i(textureLoad(sh_labels, source.uv, 0).xy * 255.0);
-		let n = labelSample.x + labelSample.y * 256;
-		let shSample: vec4f = textureLoad(sh_result, vec2i(n % 64, n / 64), 0);
-		let sh: vec3f = (unpackRgb(shSample) - vec3f(0.5)) * 4.0;
-		return vec4f(base.xyz + sh, base.w);
-	}
-`;
-const resolve$1 = (scope, values) => {
-	for (const key in values) {
-		scope.resolve(key).setValue(values[key]);
-	}
-};
-class CustomRenderPass extends RenderPass {
-	executeCallback = null;
-	execute() {
-		this.executeCallback?.();
-	}
-}
-const invModelMat$1 = new Mat4();
-const dir$1 = new Vec3();
-class GSplatResolveSH {
-	prevDir = new Vec3();
-	updateMode = "enable";
-	// 'enable', 'disable', 'always'
-	constructor(device, gsplatInstance) {
-		this.device = device;
-		this.gsplatInstance = gsplatInstance;
-		const { resource } = gsplatInstance;
-		this.shader = ShaderUtils.createShader(device, {
-			uniqueName: "gsplatResolveSH",
-			vertexGLSL,
-			fragmentGLSL,
-			vertexWGSL,
-			fragmentWGSL,
-			fragmentDefines: /* @__PURE__ */ new Map([
-				["SH_BANDS", resource.gsplatData.shBands.toString()]
-			]),
-			attributes: {
-				vertex_position: SEMANTIC_POSITION
-			}
-		});
-		this.texture = resource.streams.createTexture("centroids", PIXELFORMAT_RGBA8, new Vec2(64, 1024));
-		this.renderTarget = new RenderTarget({
-			colorBuffer: this.texture,
-			depth: false
-		});
-		this.renderPass = new CustomRenderPass(device);
-		this.renderPass.init(this.renderTarget, {});
-		this.renderPass.colorOps.clear = true;
-		this.quadRender = new QuadRender(this.shader);
-		const { material } = gsplatInstance;
-		material.setDefine("SH_BANDS", "0");
-		const { shaderChunks } = material;
-		shaderChunks.glsl.set("gsplatSogColorVS", gsplatSogColorGLSL);
-		shaderChunks.wgsl.set("gsplatSogColorVS", gsplatSogColorWGSL);
-		material.update();
-		device.scope.resolve("sh_result").setValue(this.texture);
-	}
-	destroy() {
-		const { gsplatInstance } = this;
-		const { material } = gsplatInstance;
-		material.setDefine("SH_BANDS", gsplatInstance.resource.gsplatData.shBands.toString());
-		const { shaderChunks } = material;
-		shaderChunks.glsl.delete("gsplatSogColorVS");
-		shaderChunks.wgsl.delete("gsplatSogColorVS");
-		material.update();
-		this.quadRender.destroy();
-		this.renderPass.destroy();
-		this.renderTarget.destroy();
-		this.texture.destroy();
-		this.shader.destroy();
-	}
-	render(camera, modelMat) {
-		const { prevDir, updateMode } = this;
-		if (updateMode === "disable") {
-			return;
-		}
-		invModelMat$1.invert(modelMat);
-		invModelMat$1.transformVector(camera.forward, dir$1);
-		dir$1.normalize();
-		if (updateMode === "enable" && dir$1.equalsApprox(prevDir, 1e-3)) {
-			return;
-		}
-		prevDir.copy(dir$1);
-		const execute = () => {
-			const { device } = this;
-			const { sh_centroids, meta } = this.gsplatInstance.resource.gsplatData;
-			resolve$1(device.scope, {
-				dir: dir$1.toArray(),
-				centroids: sh_centroids,
-				shN_mins: meta.shN.mins,
-				shN_maxs: meta.shN.maxs
-			});
-			device.setDrawStates();
-			this.quadRender.render();
-		};
-		this.renderPass.executeCallback = execute;
-		this.renderPass.render();
-	}
-}
-
 function SortWorker() {
 	const myself = typeof self !== "undefined" && self || require("node:worker_threads").parentPort;
 	let order;
@@ -34953,6 +35464,308 @@ class GSplatSorter extends EventHandler {
 			cameraPosition: { x: pos.x, y: pos.y, z: pos.z },
 			cameraDirection: { x: dir.x, y: dir.y, z: dir.z }
 		});
+	}
+}
+
+const mat = new Mat4();
+const cameraPosition$2 = new Vec3();
+const cameraDirection$1 = new Vec3();
+class GSplatInstance {
+	resource;
+	orderTexture;
+	orderBuffer;
+	_material;
+	meshInstance;
+	options = {};
+	sorter = null;
+	lastCameraPosition = new Vec3();
+	lastCameraDirection = new Vec3();
+	cameras = [];
+	constructor(resource, options = {}) {
+		this.resource = resource;
+		const device = resource.device;
+		const dims = resource.streams.textureDimensions;
+		const numSplats = dims.x * dims.y;
+		if (device.isWebGPU) {
+			this.orderBuffer = new StorageBuffer(device, numSplats * 4, BUFFERUSAGE_COPY_DST);
+		} else {
+			this.orderTexture = resource.streams.createTexture(
+				"splatOrder",
+				PIXELFORMAT_R32U,
+				dims
+			);
+		}
+		if (options.material) {
+			this._material = options.material;
+			this._material.setDefine("{GSPLAT_INSTANCE_SIZE}", String(GSplatResourceBase.instanceSize));
+			this.setMaterialOrderData(this._material);
+			this._material.setParameter("alphaClipForward", 1 / 255);
+		} else {
+			this._material = new ShaderMaterial({
+				uniqueName: "SplatMaterial",
+				vertexGLSL: '#include "gsplatVS"',
+				fragmentGLSL: '#include "gsplatPS"',
+				vertexWGSL: '#include "gsplatVS"',
+				fragmentWGSL: '#include "gsplatPS"',
+				attributes: {
+					vertex_position: SEMANTIC_POSITION
+				}
+			});
+			this.configureMaterial(this._material);
+			this._material.update();
+		}
+		resource.ensureMesh();
+		this.meshInstance = new MeshInstance(resource.mesh, this._material);
+		this.meshInstance.setInstancing(true, true);
+		this.meshInstance.gsplatInstance = this;
+		this.meshInstance.instancingCount = 0;
+		if (resource.hasCenters) {
+			const centers = resource.centers.slice();
+			const chunks = resource.chunks?.slice();
+			const orderTarget = this.orderBuffer ?? this.orderTexture;
+			this.sorter = new GSplatSorter(device, options.scene);
+			this.sorter.init(orderTarget, numSplats, centers, chunks);
+		}
+	}
+	destroy() {
+		this.resource?.releaseMesh();
+		this.orderTexture?.destroy();
+		this.orderBuffer?.destroy();
+		this.material?.destroy();
+		this.meshInstance?.destroy();
+		this.sorter?.destroy();
+	}
+	setMaterialOrderData(material) {
+		if (this.orderBuffer) {
+			material.setParameter("splatOrder", this.orderBuffer);
+		} else {
+			material.setParameter("splatOrder", this.orderTexture);
+			material.setParameter("splatTextureSize", this.orderTexture.width);
+		}
+	}
+	set material(value) {
+		if (this._material !== value) {
+			this._material = value;
+			this._material.setDefine("{GSPLAT_INSTANCE_SIZE}", String(GSplatResourceBase.instanceSize));
+			this.setMaterialOrderData(this._material);
+			this._material.setParameter("alphaClipForward", 1 / 255);
+			if (this.meshInstance) {
+				this.meshInstance.material = value;
+			}
+		}
+	}
+	get material() {
+		return this._material;
+	}
+	configureMaterial(material, options = {}) {
+		this.resource.configureMaterial(material, null, this.resource.format.getInputDeclarations());
+		material.setDefine("{GSPLAT_INSTANCE_SIZE}", GSplatResourceBase.instanceSize);
+		material.setParameter("numSplats", 0);
+		this.setMaterialOrderData(material);
+		material.setParameter("alphaClip", 0.3);
+		material.setParameter("alphaClipForward", 1 / 255);
+		material.setParameter("minPixelSize", 2);
+		material.setDefine(`DITHER_${options.dither ? "BLUENOISE" : "NONE"}`, "");
+		material.cull = CULLFACE_NONE;
+		material.blendType = options.dither ? BLEND_NONE : BLEND_PREMULTIPLIED;
+		material.depthWrite = !!options.dither;
+	}
+	sort(cameraNode) {
+		if (this.sorter) {
+			const cameraMat = cameraNode.getWorldTransform();
+			cameraMat.getTranslation(cameraPosition$2);
+			cameraMat.getZ(cameraDirection$1);
+			const modelMat = this.meshInstance.node.getWorldTransform();
+			const invModelMat = mat.invert(modelMat);
+			invModelMat.transformPoint(cameraPosition$2, cameraPosition$2);
+			invModelMat.transformVector(cameraDirection$1, cameraDirection$1);
+			if (!cameraPosition$2.equalsApprox(this.lastCameraPosition) || !cameraDirection$1.equalsApprox(this.lastCameraDirection)) {
+				this.lastCameraPosition.copy(cameraPosition$2);
+				this.lastCameraDirection.copy(cameraDirection$1);
+				this.sorter.setCamera(cameraPosition$2, cameraDirection$1);
+			}
+		}
+	}
+	update() {
+		const count = this.sorter?.applyPendingSorted() ?? -1;
+		if (count >= 0) {
+			this.meshInstance.instancingCount = Math.ceil(count / GSplatResourceBase.instanceSize);
+			this.material.setParameter("numSplats", count);
+		}
+		if (this.cameras.length > 0) {
+			const camera = this.cameras[0];
+			this.sort(camera._node);
+			this.cameras.length = 0;
+		}
+	}
+}
+
+const getSHData = (gsplatData, numCoeffs) => {
+	const result = [];
+	for (let i = 0; i < numCoeffs; ++i) {
+		result.push(gsplatData.getProp(`f_rest_${i}`));
+	}
+	return result;
+};
+class GSplatResource extends GSplatResourceBase {
+	shBands;
+	constructor(device, gsplatData, options = {}) {
+		super(device, gsplatData, options);
+		const numSplats = gsplatData.numSplats;
+		this.shBands = gsplatData.shBands;
+		const streams = [
+			{ name: "splatColor", format: PIXELFORMAT_RGBA16F },
+			{ name: "transformA", format: PIXELFORMAT_RGBA32U },
+			{ name: "transformB", format: PIXELFORMAT_RGBA16F }
+		];
+		if (this.shBands > 0) {
+			streams.push({ name: "splatSH_1to3", format: PIXELFORMAT_RGBA32U });
+			if (this.shBands > 1) {
+				streams.push({ name: "splatSH_4to7", format: PIXELFORMAT_RGBA32U });
+				if (this.shBands > 2) {
+					streams.push({ name: "splatSH_8to11", format: PIXELFORMAT_RGBA32U });
+					streams.push({ name: "splatSH_12to15", format: PIXELFORMAT_RGBA32U });
+				} else {
+					streams.push({ name: "splatSH_8to11", format: PIXELFORMAT_R32U });
+				}
+			}
+		}
+		this._format = new GSplatFormat(device, streams, {
+			readGLSL: '#include "gsplatUncompressedVS"',
+			readWGSL: '#include "gsplatUncompressedVS"'
+		});
+		this.streams.init(this.format, numSplats);
+		this.updateColorData(gsplatData);
+		this.updateTransformData(gsplatData);
+		if (this.shBands > 0) {
+			this.updateSHData(gsplatData);
+		}
+	}
+	configureMaterialDefines(defines) {
+		defines.set("SH_BANDS", this.shBands);
+	}
+	updateColorData(gsplatData) {
+		const texture = this.streams.getTexture("splatColor");
+		if (!texture) {
+			return;
+		}
+		const float2Half = FloatPacking.float2Half;
+		const data = texture.lock();
+		const cr = gsplatData.getProp("f_dc_0");
+		const cg = gsplatData.getProp("f_dc_1");
+		const cb = gsplatData.getProp("f_dc_2");
+		const ca = gsplatData.getProp("opacity");
+		const SH_C0 = 0.28209479177387814;
+		for (let i = 0; i < this.numSplats; ++i) {
+			const r = cr[i] * SH_C0 + 0.5;
+			const g = cg[i] * SH_C0 + 0.5;
+			const b = cb[i] * SH_C0 + 0.5;
+			const a = 1 / (1 + Math.exp(-ca[i]));
+			data[i * 4 + 0] = float2Half(r);
+			data[i * 4 + 1] = float2Half(g);
+			data[i * 4 + 2] = float2Half(b);
+			data[i * 4 + 3] = float2Half(a);
+		}
+		texture.unlock();
+	}
+	updateTransformData(gsplatData) {
+		const float2Half = FloatPacking.float2Half;
+		const transformA = this.streams.getTexture("transformA");
+		const transformB = this.streams.getTexture("transformB");
+		if (!transformA) {
+			return;
+		}
+		const dataA = transformA.lock();
+		const dataAFloat32 = new Float32Array(dataA.buffer);
+		const dataB = transformB.lock();
+		const p = new Vec3();
+		const r = new Quat();
+		const s = new Vec3();
+		const iter = gsplatData.createIter(p, r, s);
+		for (let i = 0; i < this.numSplats; i++) {
+			iter.read(i);
+			r.normalize();
+			if (r.w < 0) {
+				r.mulScalar(-1);
+			}
+			dataAFloat32[i * 4 + 0] = p.x;
+			dataAFloat32[i * 4 + 1] = p.y;
+			dataAFloat32[i * 4 + 2] = p.z;
+			dataA[i * 4 + 3] = float2Half(r.x) | float2Half(r.y) << 16;
+			dataB[i * 4 + 0] = float2Half(s.x);
+			dataB[i * 4 + 1] = float2Half(s.y);
+			dataB[i * 4 + 2] = float2Half(s.z);
+			dataB[i * 4 + 3] = float2Half(r.z);
+		}
+		transformA.unlock();
+		transformB.unlock();
+	}
+	updateSHData(gsplatData) {
+		const sh1to3Texture = this.streams.getTexture("splatSH_1to3");
+		const sh4to7Texture = this.streams.getTexture("splatSH_4to7");
+		const sh8to11Texture = this.streams.getTexture("splatSH_8to11");
+		const sh12to15Texture = this.streams.getTexture("splatSH_12to15");
+		const sh1to3Data = sh1to3Texture.lock();
+		const sh4to7Data = sh4to7Texture?.lock();
+		const sh8to11Data = sh8to11Texture?.lock();
+		const sh12to15Data = sh12to15Texture?.lock();
+		const numCoeffs = {
+			1: 3,
+			2: 8,
+			3: 15
+		}[this.shBands];
+		const src = getSHData(gsplatData, numCoeffs * 3);
+		const t11 = (1 << 11) - 1;
+		const t10 = (1 << 10) - 1;
+		const float32 = new Float32Array(1);
+		const uint32 = new Uint32Array(float32.buffer);
+		const c = new Array(numCoeffs * 3).fill(0);
+		for (let i = 0; i < gsplatData.numSplats; ++i) {
+			for (let j = 0; j < numCoeffs; ++j) {
+				c[j * 3] = src[j][i];
+				c[j * 3 + 1] = src[j + numCoeffs][i];
+				c[j * 3 + 2] = src[j + numCoeffs * 2][i];
+			}
+			let max = c[0];
+			for (let j = 1; j < numCoeffs * 3; ++j) {
+				max = Math.max(max, Math.abs(c[j]));
+			}
+			if (max === 0) {
+				continue;
+			}
+			for (let j = 0; j < numCoeffs; ++j) {
+				c[j * 3 + 0] = Math.max(0, Math.min(t11, Math.floor((c[j * 3 + 0] / max * 0.5 + 0.5) * t11 + 0.5)));
+				c[j * 3 + 1] = Math.max(0, Math.min(t10, Math.floor((c[j * 3 + 1] / max * 0.5 + 0.5) * t10 + 0.5)));
+				c[j * 3 + 2] = Math.max(0, Math.min(t11, Math.floor((c[j * 3 + 2] / max * 0.5 + 0.5) * t11 + 0.5)));
+			}
+			float32[0] = max;
+			sh1to3Data[i * 4 + 0] = uint32[0];
+			sh1to3Data[i * 4 + 1] = c[0] << 21 | c[1] << 11 | c[2];
+			sh1to3Data[i * 4 + 2] = c[3] << 21 | c[4] << 11 | c[5];
+			sh1to3Data[i * 4 + 3] = c[6] << 21 | c[7] << 11 | c[8];
+			if (this.shBands > 1) {
+				sh4to7Data[i * 4 + 0] = c[9] << 21 | c[10] << 11 | c[11];
+				sh4to7Data[i * 4 + 1] = c[12] << 21 | c[13] << 11 | c[14];
+				sh4to7Data[i * 4 + 2] = c[15] << 21 | c[16] << 11 | c[17];
+				sh4to7Data[i * 4 + 3] = c[18] << 21 | c[19] << 11 | c[20];
+				if (this.shBands > 2) {
+					sh8to11Data[i * 4 + 0] = c[21] << 21 | c[22] << 11 | c[23];
+					sh8to11Data[i * 4 + 1] = c[24] << 21 | c[25] << 11 | c[26];
+					sh8to11Data[i * 4 + 2] = c[27] << 21 | c[28] << 11 | c[29];
+					sh8to11Data[i * 4 + 3] = c[30] << 21 | c[31] << 11 | c[32];
+					sh12to15Data[i * 4 + 0] = c[33] << 21 | c[34] << 11 | c[35];
+					sh12to15Data[i * 4 + 1] = c[36] << 21 | c[37] << 11 | c[38];
+					sh12to15Data[i * 4 + 2] = c[39] << 21 | c[40] << 11 | c[41];
+					sh12to15Data[i * 4 + 3] = c[42] << 21 | c[43] << 11 | c[44];
+				} else {
+					sh8to11Data[i] = c[21] << 21 | c[22] << 11 | c[23];
+				}
+			}
+		}
+		sh1to3Texture.unlock();
+		sh4to7Texture?.unlock();
+		sh8to11Texture?.unlock();
+		sh12to15Texture?.unlock();
 	}
 }
 
@@ -35379,324 +36192,6 @@ class GSplatSogData {
 	}
 }
 
-const mat = new Mat4();
-const cameraPosition$1 = new Vec3();
-const cameraDirection$1 = new Vec3();
-class GSplatInstance {
-	resource;
-	orderTexture;
-	orderBuffer;
-	_material;
-	meshInstance;
-	options = {};
-	sorter = null;
-	lastCameraPosition = new Vec3();
-	lastCameraDirection = new Vec3();
-	resolveSH = null;
-	cameras = [];
-	constructor(resource, options = {}) {
-		this.resource = resource;
-		const device = resource.device;
-		const dims = resource.streams.textureDimensions;
-		const numSplats = dims.x * dims.y;
-		if (device.isWebGPU) {
-			this.orderBuffer = new StorageBuffer(device, numSplats * 4, BUFFERUSAGE_COPY_DST);
-		} else {
-			this.orderTexture = resource.streams.createTexture(
-				"splatOrder",
-				PIXELFORMAT_R32U,
-				dims
-			);
-		}
-		if (options.material) {
-			this._material = options.material;
-			this._material.setDefine("{GSPLAT_INSTANCE_SIZE}", String(GSplatResourceBase.instanceSize));
-			this.setMaterialOrderData(this._material);
-			this._material.setParameter("alphaClipForward", 1 / 255);
-		} else {
-			this._material = new ShaderMaterial({
-				uniqueName: "SplatMaterial",
-				vertexGLSL: '#include "gsplatVS"',
-				fragmentGLSL: '#include "gsplatPS"',
-				vertexWGSL: '#include "gsplatVS"',
-				fragmentWGSL: '#include "gsplatPS"',
-				attributes: {
-					vertex_position: SEMANTIC_POSITION
-				}
-			});
-			this.configureMaterial(this._material);
-			this._material.update();
-		}
-		resource.ensureMesh();
-		this.meshInstance = new MeshInstance(resource.mesh, this._material);
-		this.meshInstance.setInstancing(true, true);
-		this.meshInstance.gsplatInstance = this;
-		this.meshInstance.instancingCount = 0;
-		if (resource.hasCenters) {
-			const centers = resource.centers.slice();
-			const chunks = resource.chunks?.slice();
-			const orderTarget = this.orderBuffer ?? this.orderTexture;
-			this.sorter = new GSplatSorter(device, options.scene);
-			this.sorter.init(orderTarget, numSplats, centers, chunks);
-		}
-		this.setHighQualitySH(options.highQualitySH ?? false);
-	}
-	destroy() {
-		this.resource?.releaseMesh();
-		this.orderTexture?.destroy();
-		this.orderBuffer?.destroy();
-		this.resolveSH?.destroy();
-		this.material?.destroy();
-		this.meshInstance?.destroy();
-		this.sorter?.destroy();
-	}
-	setMaterialOrderData(material) {
-		if (this.orderBuffer) {
-			material.setParameter("splatOrder", this.orderBuffer);
-		} else {
-			material.setParameter("splatOrder", this.orderTexture);
-			material.setParameter("splatTextureSize", this.orderTexture.width);
-		}
-	}
-	set material(value) {
-		if (this._material !== value) {
-			this._material = value;
-			this._material.setDefine("{GSPLAT_INSTANCE_SIZE}", String(GSplatResourceBase.instanceSize));
-			this.setMaterialOrderData(this._material);
-			this._material.setParameter("alphaClipForward", 1 / 255);
-			if (this.meshInstance) {
-				this.meshInstance.material = value;
-			}
-		}
-	}
-	get material() {
-		return this._material;
-	}
-	configureMaterial(material, options = {}) {
-		this.resource.configureMaterial(material, null, this.resource.format.getInputDeclarations());
-		material.setDefine("{GSPLAT_INSTANCE_SIZE}", GSplatResourceBase.instanceSize);
-		material.setParameter("numSplats", 0);
-		this.setMaterialOrderData(material);
-		material.setParameter("alphaClip", 0.3);
-		material.setParameter("alphaClipForward", 1 / 255);
-		material.setParameter("minPixelSize", 2);
-		material.setDefine(`DITHER_${options.dither ? "BLUENOISE" : "NONE"}`, "");
-		material.cull = CULLFACE_NONE;
-		material.blendType = options.dither ? BLEND_NONE : BLEND_PREMULTIPLIED;
-		material.depthWrite = !!options.dither;
-	}
-	sort(cameraNode) {
-		if (this.sorter) {
-			const cameraMat = cameraNode.getWorldTransform();
-			cameraMat.getTranslation(cameraPosition$1);
-			cameraMat.getZ(cameraDirection$1);
-			const modelMat = this.meshInstance.node.getWorldTransform();
-			const invModelMat = mat.invert(modelMat);
-			invModelMat.transformPoint(cameraPosition$1, cameraPosition$1);
-			invModelMat.transformVector(cameraDirection$1, cameraDirection$1);
-			if (!cameraPosition$1.equalsApprox(this.lastCameraPosition) || !cameraDirection$1.equalsApprox(this.lastCameraDirection)) {
-				this.lastCameraPosition.copy(cameraPosition$1);
-				this.lastCameraDirection.copy(cameraDirection$1);
-				this.sorter.setCamera(cameraPosition$1, cameraDirection$1);
-			}
-		}
-	}
-	update() {
-		const count = this.sorter?.applyPendingSorted() ?? -1;
-		if (count >= 0) {
-			this.meshInstance.instancingCount = Math.ceil(count / GSplatResourceBase.instanceSize);
-			this.material.setParameter("numSplats", count);
-		}
-		if (this.cameras.length > 0) {
-			const camera = this.cameras[0];
-			this.sort(camera._node);
-			this.resolveSH?.render(camera._node, this.meshInstance.node.getWorldTransform());
-			this.cameras.length = 0;
-		}
-	}
-	setHighQualitySH(value) {
-		const { resource } = this;
-		const { gsplatData } = resource;
-		if (gsplatData instanceof GSplatSogData && gsplatData.shBands > 0 && value === !!this.resolveSH) {
-			if (this.resolveSH) {
-				this.resolveSH.destroy();
-				this.resolveSH = null;
-			} else {
-				this.resolveSH = new GSplatResolveSH(resource.device, this);
-			}
-		}
-	}
-}
-
-const getSHData = (gsplatData, numCoeffs) => {
-	const result = [];
-	for (let i = 0; i < numCoeffs; ++i) {
-		result.push(gsplatData.getProp(`f_rest_${i}`));
-	}
-	return result;
-};
-class GSplatResource extends GSplatResourceBase {
-	shBands;
-	constructor(device, gsplatData, options = {}) {
-		super(device, gsplatData, options);
-		const numSplats = gsplatData.numSplats;
-		this.shBands = gsplatData.shBands;
-		const streams = [
-			{ name: "splatColor", format: PIXELFORMAT_RGBA16F },
-			{ name: "transformA", format: PIXELFORMAT_RGBA32U },
-			{ name: "transformB", format: PIXELFORMAT_RGBA16F }
-		];
-		if (this.shBands > 0) {
-			streams.push({ name: "splatSH_1to3", format: PIXELFORMAT_RGBA32U });
-			if (this.shBands > 1) {
-				streams.push({ name: "splatSH_4to7", format: PIXELFORMAT_RGBA32U });
-				if (this.shBands > 2) {
-					streams.push({ name: "splatSH_8to11", format: PIXELFORMAT_RGBA32U });
-					streams.push({ name: "splatSH_12to15", format: PIXELFORMAT_RGBA32U });
-				} else {
-					streams.push({ name: "splatSH_8to11", format: PIXELFORMAT_R32U });
-				}
-			}
-		}
-		this._format = new GSplatFormat(device, streams, {
-			readGLSL: '#include "gsplatUncompressedVS"',
-			readWGSL: '#include "gsplatUncompressedVS"'
-		});
-		this.streams.init(this.format, numSplats);
-		this.updateColorData(gsplatData);
-		this.updateTransformData(gsplatData);
-		if (this.shBands > 0) {
-			this.updateSHData(gsplatData);
-		}
-	}
-	configureMaterialDefines(defines) {
-		defines.set("SH_BANDS", this.shBands);
-	}
-	updateColorData(gsplatData) {
-		const texture = this.streams.getTexture("splatColor");
-		if (!texture) {
-			return;
-		}
-		const float2Half = FloatPacking.float2Half;
-		const data = texture.lock();
-		const cr = gsplatData.getProp("f_dc_0");
-		const cg = gsplatData.getProp("f_dc_1");
-		const cb = gsplatData.getProp("f_dc_2");
-		const ca = gsplatData.getProp("opacity");
-		const SH_C0 = 0.28209479177387814;
-		for (let i = 0; i < this.numSplats; ++i) {
-			const r = cr[i] * SH_C0 + 0.5;
-			const g = cg[i] * SH_C0 + 0.5;
-			const b = cb[i] * SH_C0 + 0.5;
-			const a = 1 / (1 + Math.exp(-ca[i]));
-			data[i * 4 + 0] = float2Half(r);
-			data[i * 4 + 1] = float2Half(g);
-			data[i * 4 + 2] = float2Half(b);
-			data[i * 4 + 3] = float2Half(a);
-		}
-		texture.unlock();
-	}
-	updateTransformData(gsplatData) {
-		const float2Half = FloatPacking.float2Half;
-		const transformA = this.streams.getTexture("transformA");
-		const transformB = this.streams.getTexture("transformB");
-		if (!transformA) {
-			return;
-		}
-		const dataA = transformA.lock();
-		const dataAFloat32 = new Float32Array(dataA.buffer);
-		const dataB = transformB.lock();
-		const p = new Vec3();
-		const r = new Quat();
-		const s = new Vec3();
-		const iter = gsplatData.createIter(p, r, s);
-		for (let i = 0; i < this.numSplats; i++) {
-			iter.read(i);
-			r.normalize();
-			if (r.w < 0) {
-				r.mulScalar(-1);
-			}
-			dataAFloat32[i * 4 + 0] = p.x;
-			dataAFloat32[i * 4 + 1] = p.y;
-			dataAFloat32[i * 4 + 2] = p.z;
-			dataA[i * 4 + 3] = float2Half(r.x) | float2Half(r.y) << 16;
-			dataB[i * 4 + 0] = float2Half(s.x);
-			dataB[i * 4 + 1] = float2Half(s.y);
-			dataB[i * 4 + 2] = float2Half(s.z);
-			dataB[i * 4 + 3] = float2Half(r.z);
-		}
-		transformA.unlock();
-		transformB.unlock();
-	}
-	updateSHData(gsplatData) {
-		const sh1to3Texture = this.streams.getTexture("splatSH_1to3");
-		const sh4to7Texture = this.streams.getTexture("splatSH_4to7");
-		const sh8to11Texture = this.streams.getTexture("splatSH_8to11");
-		const sh12to15Texture = this.streams.getTexture("splatSH_12to15");
-		const sh1to3Data = sh1to3Texture.lock();
-		const sh4to7Data = sh4to7Texture?.lock();
-		const sh8to11Data = sh8to11Texture?.lock();
-		const sh12to15Data = sh12to15Texture?.lock();
-		const numCoeffs = {
-			1: 3,
-			2: 8,
-			3: 15
-		}[this.shBands];
-		const src = getSHData(gsplatData, numCoeffs * 3);
-		const t11 = (1 << 11) - 1;
-		const t10 = (1 << 10) - 1;
-		const float32 = new Float32Array(1);
-		const uint32 = new Uint32Array(float32.buffer);
-		const c = new Array(numCoeffs * 3).fill(0);
-		for (let i = 0; i < gsplatData.numSplats; ++i) {
-			for (let j = 0; j < numCoeffs; ++j) {
-				c[j * 3] = src[j][i];
-				c[j * 3 + 1] = src[j + numCoeffs][i];
-				c[j * 3 + 2] = src[j + numCoeffs * 2][i];
-			}
-			let max = c[0];
-			for (let j = 1; j < numCoeffs * 3; ++j) {
-				max = Math.max(max, Math.abs(c[j]));
-			}
-			if (max === 0) {
-				continue;
-			}
-			for (let j = 0; j < numCoeffs; ++j) {
-				c[j * 3 + 0] = Math.max(0, Math.min(t11, Math.floor((c[j * 3 + 0] / max * 0.5 + 0.5) * t11 + 0.5)));
-				c[j * 3 + 1] = Math.max(0, Math.min(t10, Math.floor((c[j * 3 + 1] / max * 0.5 + 0.5) * t10 + 0.5)));
-				c[j * 3 + 2] = Math.max(0, Math.min(t11, Math.floor((c[j * 3 + 2] / max * 0.5 + 0.5) * t11 + 0.5)));
-			}
-			float32[0] = max;
-			sh1to3Data[i * 4 + 0] = uint32[0];
-			sh1to3Data[i * 4 + 1] = c[0] << 21 | c[1] << 11 | c[2];
-			sh1to3Data[i * 4 + 2] = c[3] << 21 | c[4] << 11 | c[5];
-			sh1to3Data[i * 4 + 3] = c[6] << 21 | c[7] << 11 | c[8];
-			if (this.shBands > 1) {
-				sh4to7Data[i * 4 + 0] = c[9] << 21 | c[10] << 11 | c[11];
-				sh4to7Data[i * 4 + 1] = c[12] << 21 | c[13] << 11 | c[14];
-				sh4to7Data[i * 4 + 2] = c[15] << 21 | c[16] << 11 | c[17];
-				sh4to7Data[i * 4 + 3] = c[18] << 21 | c[19] << 11 | c[20];
-				if (this.shBands > 2) {
-					sh8to11Data[i * 4 + 0] = c[21] << 21 | c[22] << 11 | c[23];
-					sh8to11Data[i * 4 + 1] = c[24] << 21 | c[25] << 11 | c[26];
-					sh8to11Data[i * 4 + 2] = c[27] << 21 | c[28] << 11 | c[29];
-					sh8to11Data[i * 4 + 3] = c[30] << 21 | c[31] << 11 | c[32];
-					sh12to15Data[i * 4 + 0] = c[33] << 21 | c[34] << 11 | c[35];
-					sh12to15Data[i * 4 + 1] = c[36] << 21 | c[37] << 11 | c[38];
-					sh12to15Data[i * 4 + 2] = c[39] << 21 | c[40] << 11 | c[41];
-					sh12to15Data[i * 4 + 3] = c[42] << 21 | c[43] << 11 | c[44];
-				} else {
-					sh8to11Data[i] = c[21] << 21 | c[22] << 11 | c[23];
-				}
-			}
-		}
-		sh1to3Texture.unlock();
-		sh4to7Texture?.unlock();
-		sh8to11Texture?.unlock();
-		sh12to15Texture?.unlock();
-	}
-}
-
 class GSplatSogResource extends GSplatResourceBase {
 	constructor(device, gsplatData, options = {}) {
 		super(device, gsplatData, options);
@@ -35787,6 +36282,11 @@ class GSplatSogResource extends GSplatResourceBase {
 		if (gsplatData.meta.version === 2) {
 			defines.set("SOG_V2", "");
 		}
+	}
+	// SOG geometry getters compile out under GSPLAT_WORKBUFFER_GEOMETRY (see sog.js chunk),
+	// letting color-only (SH) updates skip the means/quats/scales source reads
+	get supportsWorkBufferGeometry() {
+		return true;
 	}
 }
 
@@ -37277,6 +37777,9 @@ class ResourceHandler {
 		this._app = app;
 		this.handlerType = handlerType;
 	}
+	get app() {
+		return this._app;
+	}
 	set maxRetries(value) {
 		this._maxRetries = value;
 	}
@@ -37527,6 +38030,12 @@ class ResourceLoader {
 		for (const key in this._handlers) {
 			this._handlers[key].maxRetries = 0;
 		}
+	}
+	set maxConcurrentRequests(value) {
+		http.maxConcurrentRequests = Math.max(0, Math.floor(value)) || 0;
+	}
+	get maxConcurrentRequests() {
+		return http.maxConcurrentRequests;
 	}
 	destroy() {
 		this._handlers = {};
@@ -38304,6 +38813,9 @@ function resolveDuplicatedEntityReferenceProperties(oldSubtreeRoot, oldEntity, n
 		}
 		if (components.button) {
 			newEntity.button.resolveDuplicatedEntityReferenceProperties(components.button, duplicatedIdsMap);
+		}
+		if (components.joint) {
+			newEntity.joint.resolveDuplicatedEntityReferenceProperties(components.joint, duplicatedIdsMap);
 		}
 		if (components.scrollview) {
 			newEntity.scrollview.resolveDuplicatedEntityReferenceProperties(components.scrollview, duplicatedIdsMap);
@@ -40275,6 +40787,7 @@ var lightDeclaration_default$1 = `
 			uniform vec4 light{i}_cameraParams;
 			#if LIGHT{i}TYPE == DIRECTIONAL
 				uniform vec4 light{i}_softShadowParams;
+				uniform vec4 light{i}_shadowCascadeRadii;
 			#endif
 		#endif
 		#if LIGHT{i}TYPE == DIRECTIONAL
@@ -40583,7 +41096,11 @@ var lightFunctionShadow_default$1 = `
 					vec2 shadowSearchArea = vec2(length(light{i}_halfWidth), length(light{i}_halfHeight)) * light{i}_shadowSearchArea;
 					return getShadowPCSS(SHADOWMAP_PASS(light{i}_shadowMap), shadowCoord, light{i}_shadowParams, light{i}_cameraParams, shadowSearchArea, lightDirW);
 				#else
-					return getShadowPCSS(SHADOWMAP_PASS(light{i}_shadowMap), shadowCoord, light{i}_shadowParams, light{i}_cameraParams, light{i}_softShadowParams, lightDirW);
+					vec4 pcssCameraParams = light{i}_cameraParams;
+					#ifdef LIGHT{i}_SHADOW_CASCADES
+						pcssCameraParams.x = light{i}_shadowCascadeRadii[cascadeIndex];
+					#endif
+					return getShadowPCSS(SHADOWMAP_PASS(light{i}_shadowMap), shadowCoord, light{i}_shadowParams, pcssCameraParams, light{i}_softShadowParams, lightDirW);
 				#endif
 			#endif
 			#if LIGHT{i}SHADOWTYPE == PCF1_16F || LIGHT{i}SHADOWTYPE == PCF1_32F
@@ -41801,12 +42318,8 @@ uniform sampler2D texture_msdfMap;
 float median(float r, float g, float b) {
 	return max(min(r, g), min(max(r, g), b));
 }
-float map (float min, float max, float v) {
-	return (v - min) / (max - min);
-}
 uniform float font_sdfIntensity;
 uniform float font_pxrange;
-uniform float font_textureWidth;
 #ifndef LIT_MSDF_TEXT_ATTRIBUTE
 	uniform vec4 outline_color;
 	uniform float outline_thickness;
@@ -41825,18 +42338,12 @@ vec4 applyMsdf(vec4 color) {
 	vec3 ssample = texture2D(texture_msdfMap, uvShdw).rgb;
 	float sigDist = median(tsample.r, tsample.g, tsample.b);
 	float sigDistShdw = median(ssample.r, ssample.g, ssample.b);
-	float smoothingMax = 0.2;
-	vec2 w = fwidth(vUv0);
-	float smoothing = clamp(w.x * font_textureWidth / font_pxrange, 0.0, smoothingMax);
-	float mapMin = 0.05;
-	float mapMax = clamp(1.0 - font_sdfIntensity, mapMin, 1.0);
-	float sigDistInner = map(mapMin, mapMax, sigDist);
-	float sigDistOutline = map(mapMin, mapMax, sigDist + outline_thickness);
-	sigDistShdw = map(mapMin, mapMax, sigDistShdw + outline_thickness);
-	float center = 0.5;
-	float inside = smoothstep(center-smoothing, center+smoothing, sigDistInner);
-	float outline = smoothstep(center-smoothing, center+smoothing, sigDistOutline);
-	float shadow = smoothstep(center-smoothing, center+smoothing, sigDistShdw);
+	float edge = 0.5 - 0.5 * font_sdfIntensity;
+	vec2 unitRange = vec2(font_pxrange) / vec2(textureSize(texture_msdfMap, 0));
+	float screenPxRange = max(0.5 * dot(unitRange, 1.0 / max(fwidth(vUv0), vec2(1e-6))), 1.0);
+	float inside = clamp(screenPxRange * (sigDist - edge) + 0.5, 0.0, 1.0);
+	float outline = clamp(screenPxRange * (sigDist + outline_thickness - edge) + 0.5, 0.0, 1.0);
+	float shadow = clamp(screenPxRange * (sigDistShdw + outline_thickness - edge) + 0.5, 0.0, 1.0);
 	vec4 tcolor = (outline > inside) ? outline * vec4(outline_color.a * outline_color.rgb, outline_color.a) : vec4(0.0);
 	tcolor = mix(tcolor, color, inside);
 	vec4 scolor = (shadow > outline) ? shadow * vec4(shadow_color.a * shadow_color.rgb, shadow_color.a) : tcolor;
@@ -43006,15 +43513,14 @@ vec2 generateDiskSample(inout VogelDiskData data) {
 	return offset;
 }
 void PCSSFindBlocker(TEXTURE_ACCEPT(shadowMap), out float avgBlockerDepth, out int numBlockers,
-	vec2 shadowCoords, float z, int shadowBlockerSamples, float penumbraSize, float invShadowMapSize, float randomSeed) {
+	vec2 shadowCoords, float z, int shadowBlockerSamples, float searchWidthUv, float randomSeed) {
 	VogelDiskData diskData;
 	prepareDiskConstants(diskData, shadowBlockerSamples, randomSeed);
-	float searchWidth = penumbraSize * invShadowMapSize;
 	float blockerSum = 0.0;
 	numBlockers = 0;
 	for( int i = 0; i < shadowBlockerSamples; ++i ) {
 		vec2 diskUV = generateDiskSample(diskData);
-		vec2 sampleUV = shadowCoords + diskUV * searchWidth;
+		vec2 sampleUV = shadowCoords + diskUV * searchWidthUv;
 		float shadowMapDepth = texture2DLod(shadowMap, sampleUV, 0.0).r;
 		if ( shadowMapDepth < z ) {
 			blockerSum += shadowMapDepth;
@@ -43034,34 +43540,34 @@ float PCSSFilter(TEXTURE_ACCEPT(shadowMap), vec2 uv, float receiverDepth, int sh
 	}
 	return sum / float(shadowSamples);
 }
-float getPenumbra(float dblocker, float dreceiver, float penumbraSize, float penumbraFalloff) {
-	float dist = dreceiver - dblocker;
-	float penumbra = 1.0 - pow(1.0 - dist, penumbraFalloff);
-	return penumbra * penumbraSize;
-}
 float PCSSDirectional(TEXTURE_ACCEPT(shadowMap), vec3 shadowCoords, vec4 cameraParams, vec4 softShadowParams) {
 	float receiverDepth = shadowCoords.z;
+	float receiverDepthClamped = min(receiverDepth, 0.9999);
 	float randomSeed = fractSinRand(gl_FragCoord.xy);
 	int shadowSamples = int(softShadowParams.x);
 	int shadowBlockerSamples = int(softShadowParams.y);
 	float penumbraSize = softShadowParams.z;
 	float penumbraFalloff = softShadowParams.w;
-	int shadowMapSize = textureSize(shadowMap, 0).x;
-	float invShadowMapSize = 1.0 / float(shadowMapSize);
-	invShadowMapSize *= float(shadowMapSize) / 2048.0;
-	float penumbra;
+	float orthoRadius = cameraParams.x;
+	float depthRange = cameraParams.y - cameraParams.z;
+	float worldPerUv = 2.0 * orthoRadius;
+	float filterRadius;
 	if (shadowBlockerSamples > 0) {
+		float searchWidthUv = (penumbraSize * depthRange) / worldPerUv;
 		float avgBlockerDepth = 0.0;
 		int numBlockers = 0;
-		PCSSFindBlocker(TEXTURE_PASS(shadowMap), avgBlockerDepth, numBlockers, shadowCoords.xy, receiverDepth, shadowBlockerSamples, penumbraSize, invShadowMapSize, randomSeed);
+		PCSSFindBlocker(TEXTURE_PASS(shadowMap), avgBlockerDepth, numBlockers, shadowCoords.xy, receiverDepthClamped, shadowBlockerSamples, searchWidthUv, randomSeed);
 		if (numBlockers < 1)
 			return 1.0f;
-		penumbra = getPenumbra(avgBlockerDepth, shadowCoords.z, penumbraSize, penumbraFalloff);
+		float worldDist = max((receiverDepth - avgBlockerDepth) * depthRange, 0.0);
+		float t = clamp(worldDist / depthRange, 0.0, 1.0);
+		float shape = 1.0 - pow(1.0 - t, penumbraFalloff);
+		float penumbraWorld = shape * penumbraSize * depthRange;
+		filterRadius = penumbraWorld / worldPerUv;
 	} else {
-		penumbra = penumbraSize;
+		filterRadius = penumbraSize / worldPerUv;
 	}
-	float filterRadius = penumbra * invShadowMapSize;
-	return PCSSFilter(TEXTURE_PASS(shadowMap), shadowCoords.xy, receiverDepth, shadowSamples, filterRadius, randomSeed);
+	return PCSSFilter(TEXTURE_PASS(shadowMap), shadowCoords.xy, receiverDepthClamped, shadowSamples, filterRadius, randomSeed);
 }
 float getShadowPCSS(TEXTURE_ACCEPT(shadowMap), vec3 shadowCoord, vec4 shadowParams, vec4 cameraParams, vec4 softShadowParams, vec3 lightDir) {
 	return PCSSDirectional(TEXTURE_PASS(shadowMap), shadowCoord, cameraParams, softShadowParams);
@@ -45757,6 +46263,7 @@ var lightDeclaration_default = `
 			uniform light{i}_cameraParams: vec4f;
 			#if LIGHT{i}TYPE == DIRECTIONAL
 				uniform light{i}_softShadowParams: vec4f;
+				uniform light{i}_shadowCascadeRadii: vec4f;
 			#endif
 		#endif
 		#if LIGHT{i}TYPE == DIRECTIONAL
@@ -46053,7 +46560,12 @@ var lightFunctionShadow_default = `
 					let shadowSearchArea = vec2f(length(uniform.light{i}_halfWidth), length(uniform.light{i}_halfHeight)) * uniform.light{i}_shadowSearchArea;
 					return getShadowPCSS(light{i}_shadowMap, light{i}_shadowMapSampler, shadowCoord, uniform.light{i}_shadowParams, uniform.light{i}_cameraParams, shadowSearchArea, lightDirW_in);
 				#else
-					return getShadowPCSS(light{i}_shadowMap, light{i}_shadowMapSampler, shadowCoord, uniform.light{i}_shadowParams, uniform.light{i}_cameraParams, uniform.light{i}_softShadowParams, lightDirW_in);
+					var pcssCameraParams: vec4f = uniform.light{i}_cameraParams;
+					#ifdef LIGHT{i}_SHADOW_CASCADES
+						var cascadeRadii: vec4f = uniform.light{i}_shadowCascadeRadii;
+						pcssCameraParams.x = cascadeRadii[cascadeIndex];
+					#endif
+					return getShadowPCSS(light{i}_shadowMap, light{i}_shadowMapSampler, shadowCoord, uniform.light{i}_shadowParams, pcssCameraParams, uniform.light{i}_softShadowParams, lightDirW_in);
 				#endif
 			#endif
 			#if LIGHT{i}SHADOWTYPE == PCF1_16F || LIGHT{i}SHADOWTYPE == PCF1_32F
@@ -47281,12 +47793,8 @@ var texture_msdfMapSampler: sampler;
 fn median(r: f32, g: f32, b: f32) -> f32 {
 	return max(min(r, g), min(max(r, g), b));
 }
-fn map(min: f32, max: f32, v: f32) -> f32 {
-	return (v - min) / (max - min);
-}
 uniform font_sdfIntensity: f32;
 uniform font_pxrange: f32;
-uniform font_textureWidth: f32;
 #ifndef LIT_MSDF_TEXT_ATTRIBUTE
 	uniform outline_color: vec4f;
 	uniform outline_thickness: f32;
@@ -47315,19 +47823,14 @@ fn applyMsdf(color_in: vec4f) -> vec4f {
 	let uvShdw: vec2f = vUv0 - shadow_offsetValue;
 	let ssample: vec3f = textureSample(texture_msdfMap, texture_msdfMapSampler, uvShdw).rgb;
 	let sigDist: f32 = median(tsample.r, tsample.g, tsample.b);
-	var sigDistShdw: f32 = median(ssample.r, ssample.g, ssample.b);
-	let smoothingMax: f32 = 0.2;
-	let w: vec2f = abs(dpdx(vUv0)) + abs(dpdy(vUv0));
-	let smoothing: f32 = clamp(w.x * uniform.font_textureWidth / uniform.font_pxrange, 0.0, smoothingMax);
-	let mapMin: f32 = 0.05;
-	let mapMax: f32 = clamp(1.0 - uniform.font_sdfIntensity, mapMin, 1.0);
-	let sigDistInner: f32 = map(mapMin, mapMax, sigDist);
-	let sigDistOutline: f32 = map(mapMin, mapMax, sigDist + outline_thicknessValue);
-	sigDistShdw = map(mapMin, mapMax, sigDistShdw + outline_thicknessValue);
-	let center: f32 = 0.5;
-	let inside: f32 = smoothstep(center - smoothing, center + smoothing, sigDistInner);
-	let outline: f32 = smoothstep(center - smoothing, center + smoothing, sigDistOutline);
-	let shadow: f32 = smoothstep(center - smoothing, center + smoothing, sigDistShdw);
+	let sigDistShdw: f32 = median(ssample.r, ssample.g, ssample.b);
+	let edge: f32 = 0.5 - 0.5 * uniform.font_sdfIntensity;
+	let unitRange: vec2f = vec2f(uniform.font_pxrange) / vec2f(textureDimensions(texture_msdfMap, 0));
+	let uvDeriv: vec2f = max(abs(dpdx(vUv0)) + abs(dpdy(vUv0)), vec2f(1e-6));
+	let screenPxRange: f32 = max(0.5 * dot(unitRange, vec2f(1.0) / uvDeriv), 1.0);
+	let inside: f32 = clamp(screenPxRange * (sigDist - edge) + 0.5, 0.0, 1.0);
+	let outline: f32 = clamp(screenPxRange * (sigDist + outline_thicknessValue - edge) + 0.5, 0.0, 1.0);
+	let shadow: f32 = clamp(screenPxRange * (sigDistShdw + outline_thicknessValue - edge) + 0.5, 0.0, 1.0);
 	let tcolor_outline: vec4f = outline * vec4f(outline_colorValue.a * outline_colorValue.rgb, outline_colorValue.a);
 	var tcolor: vec4f = select(vec4f(0.0), tcolor_outline, outline > inside);
 	tcolor = mix(tcolor, color, inside);
@@ -48382,15 +48885,14 @@ fn generateDiskSample(data: ptr<function, VogelDiskData>) -> vec2f {
 	return offset;
 }
 fn PCSSFindBlocker(shadowMap: texture_2d<f32>, shadowMapSampler: sampler, avgBlockerDepth: ptr<function, f32>, numBlockers: ptr<function, i32>,
-	shadowCoords: vec2f, z: f32, shadowBlockerSamples: i32, penumbraSize: f32, invShadowMapSize: f32, randomSeed: f32) {
+	shadowCoords: vec2f, z: f32, shadowBlockerSamples: i32, searchWidthUv: f32, randomSeed: f32) {
 	var diskData: VogelDiskData;
 	prepareDiskConstants(&diskData, shadowBlockerSamples, randomSeed);
-	let searchWidth: f32 = penumbraSize * invShadowMapSize;
 	var blockerSum: f32 = 0.0;
 	var numBlockers_local: i32 = 0;
 	for( var i: i32 = 0; i < shadowBlockerSamples; i = i + 1 ) {
 		let diskUV: vec2f = generateDiskSample(&diskData);
-		let sampleUV: vec2f = shadowCoords + diskUV * searchWidth;
+		let sampleUV: vec2f = shadowCoords + diskUV * searchWidthUv;
 		let shadowMapDepth: f32 = textureSampleLevel(shadowMap, shadowMapSampler, sampleUV, 0.0).r;
 		if ( shadowMapDepth < z ) {
 			blockerSum = blockerSum + shadowMapDepth;
@@ -48411,35 +48913,35 @@ fn PCSSFilter(shadowMap: texture_2d<f32>, shadowMapSampler: sampler, uv: vec2f, 
 	}
 	return sum / f32(shadowSamples);
 }
-fn getPenumbra(dblocker: f32, dreceiver: f32, penumbraSize: f32, penumbraFalloff: f32) -> f32 {
-	let dist: f32 = dreceiver - dblocker;
-	let penumbra: f32 = 1.0 - pow(1.0 - dist, penumbraFalloff);
-	return penumbra * penumbraSize;
-}
 fn PCSSDirectional(shadowMap: texture_2d<f32>, shadowMapSampler: sampler, shadowCoords: vec3f, cameraParams: vec4f, softShadowParams: vec4f) -> f32 {
 	let receiverDepth: f32 = shadowCoords.z;
+	let receiverDepthClamped: f32 = min(receiverDepth, 0.9999);
 	let randomSeed: f32 = fractSinRand(pcPosition.xy);
 	let shadowSamples: i32 = i32(softShadowParams.x);
 	let shadowBlockerSamples: i32 = i32(softShadowParams.y);
 	let penumbraSize: f32 = softShadowParams.z;
 	let penumbraFalloff: f32 = softShadowParams.w;
-	let shadowMapSize: i32 = i32(textureDimensions(shadowMap, 0).x);
-	var invShadowMapSize: f32 = 1.0 / f32(shadowMapSize);
-	invShadowMapSize = invShadowMapSize * (f32(shadowMapSize) / 2048.0);
-	var penumbra: f32;
+	let orthoRadius: f32 = cameraParams.x;
+	let depthRange: f32 = cameraParams.y - cameraParams.z;
+	let worldPerUv: f32 = 2.0 * orthoRadius;
+	var filterRadius: f32;
 	if (shadowBlockerSamples > 0) {
+		let searchWidthUv: f32 = (penumbraSize * depthRange) / worldPerUv;
 		var avgBlockerDepth: f32 = 0.0;
 		var numBlockers: i32 = 0;
-		PCSSFindBlocker(shadowMap, shadowMapSampler, &avgBlockerDepth, &numBlockers, shadowCoords.xy, receiverDepth, shadowBlockerSamples, penumbraSize, invShadowMapSize, randomSeed);
+		PCSSFindBlocker(shadowMap, shadowMapSampler, &avgBlockerDepth, &numBlockers, shadowCoords.xy, receiverDepthClamped, shadowBlockerSamples, searchWidthUv, randomSeed);
 		if (numBlockers < 1) {
 			return 1.0;
 		}
-		penumbra = getPenumbra(avgBlockerDepth, shadowCoords.z, penumbraSize, penumbraFalloff);
+		let worldDist: f32 = max((receiverDepth - avgBlockerDepth) * depthRange, 0.0);
+		let t: f32 = clamp(worldDist / depthRange, 0.0, 1.0);
+		let shape: f32 = 1.0 - pow(1.0 - t, penumbraFalloff);
+		let penumbraWorld: f32 = shape * penumbraSize * depthRange;
+		filterRadius = penumbraWorld / worldPerUv;
 	} else {
-		penumbra = penumbraSize;
+		filterRadius = penumbraSize / worldPerUv;
 	}
-	let filterRadius: f32 = penumbra * invShadowMapSize;
-	return PCSSFilter(shadowMap, shadowMapSampler, shadowCoords.xy, receiverDepth, shadowSamples, filterRadius, randomSeed);
+	return PCSSFilter(shadowMap, shadowMapSampler, shadowCoords.xy, receiverDepthClamped, shadowSamples, filterRadius, randomSeed);
 }
 fn getShadowPCSS(shadowMap: texture_2d<f32>, shadowMapSampler: sampler, shadowCoord: vec3f, shadowParams: vec4f, cameraParams: vec4f, softShadowParams: vec4f, lightDir: vec3f) -> f32 {
 	return PCSSDirectional(shadowMap, shadowMapSampler, shadowCoord, cameraParams, softShadowParams);
@@ -49707,7 +50209,7 @@ class AppBase extends EventHandler {
 	scene;
 	lightmapper = null;
 	loader = new ResourceLoader(this);
-	assets;
+	assets = new AssetRegistry(this.loader);
 	bundles;
 	scenes = new SceneRegistry(this);
 	scripts = new ScriptRegistry(this);
@@ -49753,7 +50255,6 @@ class AppBase extends EventHandler {
 		this._soundManager = soundManager;
 		this.scene = new Scene(graphicsDevice);
 		this._registerSceneImmediate(this.scene);
-		this.assets = new AssetRegistry(this.loader);
 		if (assetPrefix) this.assets.prefix = assetPrefix;
 		this.bundles = new BundleRegistry(this.assets);
 		this.scriptsOrder = scriptsOrder || [];
@@ -49889,6 +50390,9 @@ class AppBase extends EventHandler {
 	_parseApplicationProperties(props, callback) {
 		if (typeof props.maxAssetRetries === "number" && props.maxAssetRetries > 0) {
 			this.loader.enableRetry(props.maxAssetRetries);
+		}
+		if (typeof props.maxConcurrentRequests === "number" && props.maxConcurrentRequests >= 0) {
+			this.loader.maxConcurrentRequests = props.maxConcurrentRequests;
 		}
 		if (!props.useDevicePixelRatio) {
 			props.useDevicePixelRatio = props.use_device_pixel_ratio;
@@ -50385,71 +50889,6 @@ class AppOptions {
 	resourceHandlers = [];
 }
 
-class Component extends EventHandler {
-	static order = 0;
-	system;
-	entity;
-	constructor(system, entity) {
-		super();
-		this.system = system;
-		this.entity = entity;
-		if (this.system.schema && !this._accessorsBuilt) {
-			this.buildAccessors(this.system.schema);
-		}
-		this.on("set", function(name, oldValue, newValue) {
-			this.fire(`set_${name}`, name, oldValue, newValue);
-		});
-		this.on("set_enabled", this.onSetEnabled, this);
-	}
-	static _buildAccessors(obj, schema) {
-		schema.forEach((descriptor) => {
-			const name = typeof descriptor === "object" ? descriptor.name : descriptor;
-			Object.defineProperty(obj, name, {
-				get: function() {
-					return this.data[name];
-				},
-				set: function(value) {
-					const data = this.data;
-					const oldValue = data[name];
-					data[name] = value;
-					this.fire("set", name, oldValue, value);
-				},
-				configurable: true
-			});
-		});
-		obj._accessorsBuilt = true;
-	}
-	buildAccessors(schema) {
-		Component._buildAccessors(this, schema);
-	}
-	onSetEnabled(name, oldValue, newValue) {
-		if (oldValue !== newValue) {
-			if (this.entity.enabled) {
-				if (newValue) {
-					this.onEnable();
-				} else {
-					this.onDisable();
-				}
-			}
-		}
-	}
-	onEnable() {
-	}
-	onDisable() {
-	}
-	onPostStateChange() {
-	}
-	get data() {
-		const record = this.system.store[this.entity.guid];
-		return record ? record.data : null;
-	}
-	set enabled(arg) {
-	}
-	get enabled() {
-		return true;
-	}
-}
-
 class ComponentSystem extends EventHandler {
 	id;
 	constructor(app) {
@@ -50460,14 +50899,14 @@ class ComponentSystem extends EventHandler {
 	}
 	addComponent(entity, data = {}) {
 		const component = new this.ComponentType(this, entity);
-		const componentData = new this.DataType();
+		const componentData = this.DataType ? new this.DataType() : {};
 		this.store[entity.guid] = {
 			entity,
 			data: componentData
 		};
 		entity[this.id] = component;
 		entity.c[this.id] = component;
-		this.initializeComponentData(component, data, []);
+		this.initializeComponentData(component, data);
 		this.fire("add", entity, component);
 		return component;
 	}
@@ -50487,25 +50926,29 @@ class ComponentSystem extends EventHandler {
 		return this.addComponent(clone, src.data);
 	}
 	initializeComponentData(component, data = {}, properties) {
-		for (let i = 0, len = properties.length; i < len; i++) {
-			const descriptor = properties[i];
-			let name, type;
-			if (typeof descriptor === "object") {
-				name = descriptor.name;
-				type = descriptor.type;
-			} else {
-				name = descriptor;
-				type = void 0;
-			}
-			let value = data[name];
-			if (value !== void 0) {
-				if (type !== void 0) {
-					value = convertValue(value, type);
+		if (properties) {
+			for (let i = 0, len = properties.length; i < len; i++) {
+				const descriptor = properties[i];
+				let name, type;
+				if (typeof descriptor === "object") {
+					name = descriptor.name;
+					type = descriptor.type;
+				} else {
+					name = descriptor;
+					type = void 0;
 				}
-				component[name] = value;
-			} else {
-				component[name] = component.data[name];
+				let value = data[name];
+				if (value !== void 0) {
+					if (type !== void 0) {
+						value = convertValue(value, type);
+					}
+					component[name] = value;
+				} else if (component.data && name in component.data) {
+					component[name] = component.data[name];
+				}
 			}
+		} else if (data.enabled !== void 0) {
+			component.enabled = data.enabled;
 		}
 		if (component.enabled && component.entity.enabled) {
 			component.onEnable();
@@ -50630,6 +51073,75 @@ class AnimTrack {
 			const result = results[i];
 			cache[curve._input].eval(result, curve._interpolation, output);
 		}
+	}
+}
+
+class Component extends EventHandler {
+	static order = 0;
+	system;
+	entity;
+	_enabled = true;
+	constructor(system, entity) {
+		super();
+		this.system = system;
+		this.entity = entity;
+		if (this.system.schema?.length && !this._accessorsBuilt) {
+			this.buildAccessors(this.system.schema);
+		}
+		this.on("set", function(name, oldValue, newValue) {
+			this.fire(`set_${name}`, name, oldValue, newValue);
+		});
+		this.on("set_enabled", this.onSetEnabled, this);
+	}
+	static _buildAccessors(obj, schema) {
+		schema.forEach((descriptor) => {
+			const name = typeof descriptor === "object" ? descriptor.name : descriptor;
+			Object.defineProperty(obj, name, {
+				get: function() {
+					return this.data[name];
+				},
+				set: function(value) {
+					const data = this.data;
+					const oldValue = data[name];
+					data[name] = value;
+					this.fire("set", name, oldValue, value);
+				},
+				configurable: true
+			});
+		});
+		obj._accessorsBuilt = true;
+	}
+	buildAccessors(schema) {
+		Component._buildAccessors(this, schema);
+	}
+	onSetEnabled(name, oldValue, newValue) {
+		if (oldValue !== newValue) {
+			if (this.entity.enabled) {
+				if (newValue) {
+					this.onEnable();
+				} else {
+					this.onDisable();
+				}
+			}
+		}
+	}
+	onEnable() {
+	}
+	onDisable() {
+	}
+	onPostStateChange() {
+	}
+	get data() {
+		const record = this.system.store[this.entity.guid];
+		return record ? record.data : null;
+	}
+	set enabled(value) {
+		const oldValue = this._enabled;
+		this._enabled = value;
+		this.fire("set", "enabled", oldValue, value);
+	}
+	get enabled() {
+		return this._enabled;
 	}
 }
 
@@ -51080,7 +51592,7 @@ class ModelComponent extends Component {
 			this.addModelToLayers();
 		}
 	}
-	onRemove() {
+	onBeforeRemove() {
 		this.asset = null;
 		this.model = null;
 		this.materialAsset = null;
@@ -51871,7 +52383,7 @@ class RenderComponent extends Component {
 			this.addToLayers();
 		}
 	}
-	onRemove() {
+	onBeforeRemove() {
 		this.destroyMeshInstances();
 		this.asset = null;
 		this.materialAsset = null;
@@ -52065,14 +52577,7 @@ class RenderComponent extends Component {
 	}
 }
 
-class RenderComponentData {
-	enabled = true;
-}
-
-const _schema$4 = [
-	"enabled"
-];
-const _properties$2 = [
+const _properties$4 = [
 	"material",
 	"meshInstances",
 	"asset",
@@ -52094,10 +52599,8 @@ class RenderComponentSystem extends ComponentSystem {
 		super(app);
 		this.id = "render";
 		this.ComponentType = RenderComponent;
-		this.DataType = RenderComponentData;
-		this.schema = _schema$4;
 		this.defaultMaterial = getDefaultMaterial(app.graphicsDevice);
-		this.on("beforeremove", this.onRemove, this);
+		this.on("beforeremove", this.onBeforeRemove, this);
 	}
 	initializeComponentData(component, _data, properties) {
 		if (_data.batchGroupId === null || _data.batchGroupId === void 0) {
@@ -52106,20 +52609,20 @@ class RenderComponentSystem extends ComponentSystem {
 		if (_data.layers && _data.layers.length) {
 			_data.layers = _data.layers.slice(0);
 		}
-		for (let i = 0; i < _properties$2.length; i++) {
-			if (_data.hasOwnProperty(_properties$2[i])) {
-				component[_properties$2[i]] = _data[_properties$2[i]];
+		for (let i = 0; i < _properties$4.length; i++) {
+			if (_data.hasOwnProperty(_properties$4[i])) {
+				component[_properties$4[i]] = _data[_properties$4[i]];
 			}
 		}
 		if (_data.aabbCenter && _data.aabbHalfExtents) {
 			component.customAabb = new BoundingBox(new Vec3(_data.aabbCenter), new Vec3(_data.aabbHalfExtents));
 		}
-		super.initializeComponentData(component, _data, _schema$4);
+		super.initializeComponentData(component, _data);
 	}
 	cloneComponent(entity, clone) {
 		const data = {};
-		for (let i = 0; i < _properties$2.length; i++) {
-			data[_properties$2[i]] = entity.render[_properties$2[i]];
+		for (let i = 0; i < _properties$4.length; i++) {
+			data[_properties$4[i]] = entity.render[_properties$4[i]];
 		}
 		data.enabled = entity.render.enabled;
 		delete data.meshInstances;
@@ -52135,11 +52638,10 @@ class RenderComponentSystem extends ComponentSystem {
 		}
 		return component;
 	}
-	onRemove(entity, component) {
-		component.onRemove();
+	onBeforeRemove(entity, component) {
+		component.onBeforeRemove();
 	}
 }
-Component._buildAccessors(RenderComponent.prototype, _schema$4);
 
 class ObjectPool {
 	_constructor;
@@ -52476,6 +52978,7 @@ class RigidBodyComponent extends Component {
 				}
 				body.activate();
 				this._simulationEnabled = true;
+				this.fire("simulationenabled");
 			}
 		}
 	}
@@ -52498,6 +53001,7 @@ class RigidBodyComponent extends Component {
 			system.removeBody(body);
 			body.forceActivationState(BODYSTATE_DISABLE_SIMULATION);
 			this._simulationEnabled = false;
+			this.fire("simulationdisabled");
 		}
 	}
 	applyForce(x, y, z, px, py, pz) {
@@ -52598,6 +53102,11 @@ class RigidBodyComponent extends Component {
 				if (motionState) {
 					motionState.setWorldTransform(_ammoTransform);
 				}
+			} else if (this._type === BODYTYPE_DYNAMIC && body.setInterpolationWorldTransform) {
+				body.setInterpolationWorldTransform(_ammoTransform);
+				_ammoVec1.setValue(0, 0, 0);
+				body.setInterpolationLinearVelocity(_ammoVec1);
+				body.setInterpolationAngularVelocity(_ammoVec1);
 			}
 			body.activate();
 		}
@@ -52613,8 +53122,8 @@ class RigidBodyComponent extends Component {
 				const q = _ammoTransform.getRotation();
 				const component = entity.collision;
 				if (component && component._hasOffset) {
-					const lo = component.data.linearOffset;
-					const ao = component.data.angularOffset;
+					const lo = component.linearOffset;
+					const ao = component.angularOffset;
 					const invertedAo = _quat2.copy(ao).invert();
 					const entityRot = _quat1.set(q.x(), q.y(), q.z(), q.w()).mul(invertedAo);
 					entityRot.transformVector(lo, _vec3);
@@ -52660,11 +53169,32 @@ class RigidBodyComponent extends Component {
 	}
 }
 
-class RigidBodyComponentData {
-	enabled = true;
+class ContactPoint {
+	localPoint;
+	localPointOther;
+	point;
+	pointOther;
+	normal;
+	impulse;
+	constructor(localPoint = new Vec3(), localPointOther = new Vec3(), point = new Vec3(), pointOther = new Vec3(), normal = new Vec3(), impulse = 0) {
+		this.localPoint = localPoint;
+		this.localPointOther = localPointOther;
+		this.point = point;
+		this.pointOther = pointOther;
+		this.normal = normal;
+		this.impulse = impulse;
+	}
 }
 
-let ammoRayStart, ammoRayEnd;
+class ContactResult {
+	other;
+	contacts;
+	constructor(other, contacts) {
+		this.other = other;
+		this.contacts = contacts;
+	}
+}
+
 class RaycastResult {
 	entity;
 	point;
@@ -52677,6 +53207,7 @@ class RaycastResult {
 		this.hitFraction = hitFraction;
 	}
 }
+
 class SingleContactResult {
 	a;
 	b;
@@ -52708,31 +53239,21 @@ class SingleContactResult {
 		}
 	}
 }
-class ContactPoint {
-	localPoint;
-	localPointOther;
-	point;
-	pointOther;
-	normal;
-	impulse;
-	constructor(localPoint = new Vec3(), localPointOther = new Vec3(), point = new Vec3(), pointOther = new Vec3(), normal = new Vec3(), impulse = 0) {
-		this.localPoint = localPoint;
-		this.localPointOther = localPointOther;
-		this.point = point;
-		this.pointOther = pointOther;
-		this.normal = normal;
-		this.impulse = impulse;
-	}
-}
-class ContactResult {
-	other;
-	contacts;
-	constructor(other, contacts) {
-		this.other = other;
-		this.contacts = contacts;
-	}
-}
-const _schema$3 = ["enabled"];
+
+let ammoRayStart, ammoRayEnd;
+const _properties$3 = [
+	"mass",
+	"linearDamping",
+	"angularDamping",
+	"linearFactor",
+	"angularFactor",
+	"friction",
+	"rollingFriction",
+	"restitution",
+	"type",
+	"group",
+	"mask"
+];
 class RigidBodyComponentSystem extends ComponentSystem {
 	static EVENT_CONTACT = "contact";
 	maxSubSteps = 10;
@@ -52748,11 +53269,9 @@ class RigidBodyComponentSystem extends ComponentSystem {
 		this.id = "rigidbody";
 		this._stats = app.stats.frame;
 		this.ComponentType = RigidBodyComponent;
-		this.DataType = RigidBodyComponentData;
 		this.contactPointPool = null;
 		this.contactResultPool = null;
 		this.singleContactResultPool = null;
-		this.schema = _schema$3;
 		this.collisions = {};
 		this.frameCollisions = {};
 		this.on("beforeremove", this.onBeforeRemove, this);
@@ -52779,21 +53298,8 @@ class RigidBodyComponentSystem extends ComponentSystem {
 			this.app.systems.off("update", this.onUpdate, this);
 		}
 	}
-	initializeComponentData(component, data, properties) {
-		const props = [
-			"mass",
-			"linearDamping",
-			"angularDamping",
-			"linearFactor",
-			"angularFactor",
-			"friction",
-			"rollingFriction",
-			"restitution",
-			"type",
-			"group",
-			"mask"
-		];
-		for (const property of props) {
+	initializeComponentData(component, data) {
+		for (const property of _properties$3) {
 			if (data.hasOwnProperty(property)) {
 				const value = data[property];
 				if (Array.isArray(value)) {
@@ -52803,24 +53309,16 @@ class RigidBodyComponentSystem extends ComponentSystem {
 				}
 			}
 		}
-		super.initializeComponentData(component, data, ["enabled"]);
+		super.initializeComponentData(component, data);
 	}
 	cloneComponent(entity, clone) {
-		const rigidbody = entity.rigidbody;
+		const c = entity.rigidbody;
 		const data = {
-			enabled: rigidbody.enabled,
-			mass: rigidbody.mass,
-			linearDamping: rigidbody.linearDamping,
-			angularDamping: rigidbody.angularDamping,
-			linearFactor: [rigidbody.linearFactor.x, rigidbody.linearFactor.y, rigidbody.linearFactor.z],
-			angularFactor: [rigidbody.angularFactor.x, rigidbody.angularFactor.y, rigidbody.angularFactor.z],
-			friction: rigidbody.friction,
-			rollingFriction: rigidbody.rollingFriction,
-			restitution: rigidbody.restitution,
-			type: rigidbody.type,
-			group: rigidbody.group,
-			mask: rigidbody.mask
+			enabled: c.enabled
 		};
+		for (const property of _properties$3) {
+			data[property] = c[property];
+		}
 		return this.addComponent(clone, data);
 	}
 	onBeforeRemove(entity, component) {
@@ -53034,6 +53532,9 @@ class RigidBodyComponentSystem extends ComponentSystem {
 			}
 		}
 	}
+	clearEntityCollisions(entity) {
+		delete this.collisions[entity.guid];
+	}
 	_hasContactEvent(entity) {
 		const c = entity.collision;
 		if (c && (c.hasEvent("collisionstart") || c.hasEvent("collisionend") || c.hasEvent("contact"))) {
@@ -53212,7 +53713,6 @@ class RigidBodyComponentSystem extends ComponentSystem {
 		}
 	}
 }
-Component._buildAccessors(RigidBodyComponent.prototype, _schema$3);
 
 class PostEffectEntry {
 	constructor(effect, inputTarget) {
@@ -53835,7 +54335,7 @@ class CameraComponent extends Component {
 		}
 		this.system.removeCamera(this);
 	}
-	onRemove() {
+	onBeforeRemove() {
 		this.onDisable();
 		this.off();
 		this.camera.destroy();
@@ -53852,11 +54352,12 @@ class CameraComponent extends Component {
 		this.system.app.xr.start(this, type, spaceType, options);
 	}
 	endXr(callback) {
-		if (!this._camera.xr) {
+		const xr = this.system.app.xr;
+		if (xr?.camera !== this.entity) {
 			if (callback) callback(new Error("Camera is not in XR"));
 			return;
 		}
-		this._camera.xr.end(callback);
+		xr.end(callback);
 	}
 	copy(source) {
 		this.aperture = source.aperture;
@@ -53888,58 +54389,51 @@ class CameraComponent extends Component {
 	}
 }
 
-class CameraComponentData {
-	enabled = true;
-}
-
-const _schema$2 = ["enabled"];
+const _properties$2 = [
+	"aspectRatio",
+	"aspectRatioMode",
+	"calculateProjection",
+	"calculateTransform",
+	"clearColor",
+	"clearColorBuffer",
+	"clearDepth",
+	"clearDepthBuffer",
+	"clearStencilBuffer",
+	"renderSceneColorMap",
+	"renderSceneDepthMap",
+	"cullFaces",
+	"farClip",
+	"flipFaces",
+	"fog",
+	"fov",
+	"frustumCulling",
+	"horizontalFov",
+	"layers",
+	"renderTarget",
+	"nearClip",
+	"orthoHeight",
+	"projection",
+	"priority",
+	"rect",
+	"scissorRect",
+	"aperture",
+	"shutter",
+	"sensitivity",
+	"gammaCorrection",
+	"toneMapping"
+];
 class CameraComponentSystem extends ComponentSystem {
 	cameras = [];
 	constructor(app) {
 		super(app);
 		this.id = "camera";
 		this.ComponentType = CameraComponent;
-		this.DataType = CameraComponentData;
-		this.schema = _schema$2;
 		this.on("beforeremove", this.onBeforeRemove, this);
 		this.app.on("prerender", this.onAppPrerender, this);
 	}
-	initializeComponentData(component, data, properties) {
-		properties = [
-			"aspectRatio",
-			"aspectRatioMode",
-			"calculateProjection",
-			"calculateTransform",
-			"clearColor",
-			"clearColorBuffer",
-			"clearDepth",
-			"clearDepthBuffer",
-			"clearStencilBuffer",
-			"renderSceneColorMap",
-			"renderSceneDepthMap",
-			"cullFaces",
-			"farClip",
-			"flipFaces",
-			"fog",
-			"fov",
-			"frustumCulling",
-			"horizontalFov",
-			"layers",
-			"renderTarget",
-			"nearClip",
-			"orthoHeight",
-			"projection",
-			"priority",
-			"rect",
-			"scissorRect",
-			"aperture",
-			"shutter",
-			"sensitivity",
-			"gammaCorrection",
-			"toneMapping"
-		];
-		for (let i = 0; i < properties.length; i++) {
-			const property = properties[i];
+	initializeComponentData(component, data) {
+		for (let i = 0; i < _properties$2.length; i++) {
+			const property = _properties$2[i];
 			if (data.hasOwnProperty(property)) {
 				const value = data[property];
 				switch (property) {
@@ -53964,46 +54458,22 @@ class CameraComponentSystem extends ComponentSystem {
 				}
 			}
 		}
-		super.initializeComponentData(component, data, ["enabled"]);
+		super.initializeComponentData(component, data);
 	}
 	cloneComponent(entity, clone) {
 		const c = entity.camera;
-		return this.addComponent(clone, {
-			aspectRatio: c.aspectRatio,
-			aspectRatioMode: c.aspectRatioMode,
-			calculateProjection: c.calculateProjection,
-			calculateTransform: c.calculateTransform,
-			clearColor: c.clearColor,
-			clearColorBuffer: c.clearColorBuffer,
-			clearDepthBuffer: c.clearDepthBuffer,
-			clearStencilBuffer: c.clearStencilBuffer,
-			renderSceneDepthMap: c.renderSceneDepthMap,
-			renderSceneColorMap: c.renderSceneColorMap,
-			cullFaces: c.cullFaces,
-			enabled: c.enabled,
-			farClip: c.farClip,
-			flipFaces: c.flipFaces,
-			fov: c.fov,
-			frustumCulling: c.frustumCulling,
-			horizontalFov: c.horizontalFov,
-			layers: c.layers,
-			renderTarget: c.renderTarget,
-			nearClip: c.nearClip,
-			orthoHeight: c.orthoHeight,
-			projection: c.projection,
-			priority: c.priority,
-			rect: c.rect,
-			scissorRect: c.scissorRect,
-			aperture: c.aperture,
-			sensitivity: c.sensitivity,
-			shutter: c.shutter,
-			gammaCorrection: c.gammaCorrection,
-			toneMapping: c.toneMapping
-		});
+		const data = {
+			enabled: c.enabled
+		};
+		for (let i = 0; i < _properties$2.length; i++) {
+			const property = _properties$2[i];
+			data[property] = c[property];
+		}
+		return this.addComponent(clone, data);
 	}
 	onBeforeRemove(entity, component) {
 		this.removeCamera(component);
-		component.onRemove();
+		component.onBeforeRemove();
 	}
 	onAppPrerender() {
 		for (let i = 0, len = this.cameras.length; i < len; i++) {
@@ -54026,7 +54496,6 @@ class CameraComponentSystem extends ComponentSystem {
 		super.destroy();
 	}
 }
-Component._buildAccessors(CameraComponent.prototype, _schema$2);
 
 const _properties$1 = [
 	"type",
@@ -54593,26 +55062,19 @@ class LightComponent extends Component {
 		}
 		this.removeLightFromLayers();
 	}
-	onRemove() {
+	onBeforeRemove() {
 		this.onDisable();
 		this._light.destroy();
 		this.cookieAsset = null;
 	}
 }
 
-class LightComponentData {
-	enabled = true;
-}
-
-const _schema$1 = ["enabled"];
 class LightComponentSystem extends ComponentSystem {
 	constructor(app) {
 		super(app);
 		this.id = "light";
 		this.ComponentType = LightComponent;
-		this.DataType = LightComponentData;
-		this.schema = _schema$1;
-		this.on("beforeremove", this._onRemoveComponent, this);
+		this.on("beforeremove", this.onBeforeRemove, this);
 	}
 	initializeComponentData(component, _data) {
 		const data = { ..._data };
@@ -54638,10 +55100,10 @@ class LightComponentSystem extends ComponentSystem {
 				component[property] = data[property];
 			}
 		}
-		super.initializeComponentData(component, data, ["enabled"]);
+		super.initializeComponentData(component, data);
 	}
-	_onRemoveComponent(entity, component) {
-		component.onRemove();
+	onBeforeRemove(entity, component) {
+		component.onBeforeRemove();
 	}
 	cloneComponent(entity, clone) {
 		const c = entity.light;
@@ -54660,7 +55122,6 @@ class LightComponentSystem extends ComponentSystem {
 		return this.addComponent(clone, data);
 	}
 }
-Component._buildAccessors(LightComponent.prototype, _schema$1);
 
 const components = ["x", "y", "z", "w"];
 const vecLookup = [void 0, void 0, Vec2, Vec3, Vec4];
@@ -54954,7 +55415,6 @@ class ScriptComponent extends Component {
 		this._destroyed = false;
 		this._scriptsData = null;
 		this._oldState = true;
-		this._enabled = true;
 		this._beingEnabled = false;
 		this._isLoopingThroughScripts = false;
 		this._executionOrder = -1;
@@ -54995,14 +55455,6 @@ class ScriptComponent extends Component {
 	}
 	get scripts() {
 		return this._scripts;
-	}
-	set enabled(value) {
-		const oldValue = this._enabled;
-		this._enabled = value;
-		this.fire("set", "enabled", oldValue, value);
-	}
-	get enabled() {
-		return this._enabled;
 	}
 	onEnable() {
 		this._beingEnabled = true;
@@ -55074,7 +55526,7 @@ class ScriptComponent extends Component {
 		}
 		this._endLooping(wasLooping);
 	}
-	_onBeforeRemove() {
+	onBeforeRemove() {
 		this.fire("remove");
 		const wasLooping = this._beginLooping();
 		for (let i = 0; i < this.scripts.length; i++) {
@@ -55499,10 +55951,6 @@ class ScriptComponent extends Component {
 	}
 }
 
-class ScriptComponentData {
-	enabled = true;
-}
-
 const METHOD_INITIALIZE_ATTRIBUTES = "_onInitializeAttributes";
 const METHOD_INITIALIZE = "_onInitialize";
 const METHOD_POST_INITIALIZE = "_onPostInitialize";
@@ -55514,7 +55962,6 @@ class ScriptComponentSystem extends ComponentSystem {
 		super(app);
 		this.id = "script";
 		this.ComponentType = ScriptComponent;
-		this.DataType = ScriptComponentData;
 		this._components = new SortedLoopArray({
 			sortBy: "_executionOrder"
 		});
@@ -55522,7 +55969,7 @@ class ScriptComponentSystem extends ComponentSystem {
 			sortBy: "_executionOrder"
 		});
 		this.preloading = true;
-		this.on("beforeremove", this._onBeforeRemove, this);
+		this.on("beforeremove", this.onBeforeRemove, this);
 		this.app.systems.on("initialize", this._onInitialize, this);
 		this.app.systems.on("postInitialize", this._onPostInitialize, this);
 		this.app.systems.on("update", this._onUpdate, this);
@@ -55611,10 +56058,10 @@ class ScriptComponentSystem extends ComponentSystem {
 	_removeComponentFromEnabled(component) {
 		this._enabledComponents.remove(component);
 	}
-	_onBeforeRemove(entity, component) {
+	onBeforeRemove(entity, component) {
 		const ind = this._components.items.indexOf(component);
 		if (ind >= 0) {
-			component._onBeforeRemove();
+			component.onBeforeRemove();
 		}
 		this._removeComponentFromEnabled(component);
 		this._components.remove(component);
@@ -55625,215 +56072,6 @@ class ScriptComponentSystem extends ComponentSystem {
 		this.app.systems.off("postInitialize", this._onPostInitialize, this);
 		this.app.systems.off("update", this._onUpdate, this);
 		this.app.systems.off("postUpdate", this._onPostUpdate, this);
-	}
-}
-
-const tmpSize = new Vec2();
-let subDrawDataArray = new Uint32Array(0);
-const _fullRangeInterval = [0, 0];
-class GSplatInfo {
-	device;
-	resource;
-	node;
-	lodIndex;
-	placementId;
-	allocId;
-	parentPlacementId;
-	numSplats;
-	activeSplats = 0;
-	intervals = [];
-	intervalOffsets = [];
-	intervalAllocIds = [];
-	intervalNodeIndices = [];
-	previousWorldTransform = new Mat4();
-	aabb = new BoundingBox();
-	subDrawTexture = null;
-	subDrawCount = 0;
-	numBoundsEntries = 0;
-	boundsBaseIndex = 0;
-	octreeNodes = null;
-	nodeInfos = null;
-	colorAccumulatedTranslation = 0;
-	parameters = null;
-	getWorkBufferModifier = null;
-	getInstanceStreams = null;
-	_consumeRenderDirty = null;
-	constructor(device, resource, placement, consumeRenderDirty = null, octreeNodes = null, nodeInfos = null) {
-		this.device = device;
-		this.resource = resource;
-		this.node = placement.node;
-		this.lodIndex = placement.lodIndex;
-		this.placementId = placement.id;
-		this.allocId = placement.allocId;
-		this.parentPlacementId = octreeNodes && placement.parentPlacement ? placement.parentPlacement.allocId : placement.allocId;
-		this.numSplats = resource.numSplats;
-		this.aabb.copy(placement.aabb);
-		this.parameters = placement.parameters;
-		this.getWorkBufferModifier = () => placement.workBufferModifier;
-		this.getInstanceStreams = () => placement.streams;
-		this._consumeRenderDirty = consumeRenderDirty;
-		this.octreeNodes = octreeNodes;
-		this.nodeInfos = nodeInfos;
-		this.updateIntervals(placement.intervals);
-	}
-	destroy() {
-		this.intervals.length = 0;
-		this.intervalOffsets.length = 0;
-		this.intervalAllocIds.length = 0;
-		this.intervalNodeIndices.length = 0;
-		this.subDrawTexture?.destroy();
-		this.subDrawTexture = null;
-		this.subDrawCount = 0;
-	}
-	setLayout(intervalOffsets) {
-		this.intervalOffsets = intervalOffsets;
-		this.subDrawTexture?.destroy();
-		this.subDrawTexture = null;
-		this.subDrawCount = 0;
-	}
-	ensureSubDrawTexture(textureWidth) {
-		if (!this.subDrawTexture && textureWidth > 0) {
-			this.updateSubDraws(textureWidth);
-		}
-	}
-	updateIntervals(intervals) {
-		const resource = this.resource;
-		this.intervals.length = 0;
-		this.intervalAllocIds.length = 0;
-		this.intervalNodeIndices.length = 0;
-		this.activeSplats = resource.numSplats;
-		if (intervals.size > 0) {
-			let totalCount = 0;
-			let k = 0;
-			this.intervals.length = intervals.size * 2;
-			for (const [nodeIndex, interval] of intervals) {
-				this.intervals[k++] = interval.x;
-				this.intervals[k++] = interval.y + 1;
-				totalCount += interval.y - interval.x + 1;
-				if (this.nodeInfos) {
-					this.intervalAllocIds.push(this.nodeInfos[nodeIndex].allocId);
-					this.intervalNodeIndices.push(nodeIndex);
-				}
-			}
-			if (this.octreeNodes) {
-				this.activeSplats = totalCount;
-				this.numBoundsEntries = this.octreeNodes.length;
-			} else if (totalCount === this.numSplats) {
-				this.intervals.length = 0;
-			} else {
-				this.activeSplats = totalCount;
-			}
-		} else {
-			this.numBoundsEntries = 1;
-			this.intervalAllocIds.push(this.allocId);
-			const totalCapacity = resource.maxSplats;
-			if (totalCapacity && this.activeSplats < totalCapacity) {
-				this.intervals[0] = 0;
-				this.intervals[1] = this.activeSplats;
-			}
-		}
-	}
-	appendSubDraws(subDrawData, subDrawCount, sourceBase, size, targetOffset, textureWidth) {
-		let remaining = size;
-		let row = targetOffset / textureWidth | 0;
-		const col = targetOffset % textureWidth;
-		if (col > 0) {
-			const count = Math.min(remaining, textureWidth - col);
-			const idx = subDrawCount * 4;
-			subDrawData[idx] = row | 1 << 16;
-			subDrawData[idx + 1] = col;
-			subDrawData[idx + 2] = col + count;
-			subDrawData[idx + 3] = sourceBase;
-			subDrawCount++;
-			sourceBase += count;
-			remaining -= count;
-			row++;
-		}
-		const fullRows = remaining / textureWidth | 0;
-		if (fullRows > 0) {
-			const idx = subDrawCount * 4;
-			subDrawData[idx] = row | fullRows << 16;
-			subDrawData[idx + 1] = 0;
-			subDrawData[idx + 2] = textureWidth;
-			subDrawData[idx + 3] = sourceBase;
-			subDrawCount++;
-			sourceBase += fullRows * textureWidth;
-			remaining -= fullRows * textureWidth;
-			row += fullRows;
-		}
-		if (remaining > 0) {
-			const idx = subDrawCount * 4;
-			subDrawData[idx] = row | 1 << 16;
-			subDrawData[idx + 1] = 0;
-			subDrawData[idx + 2] = remaining;
-			subDrawData[idx + 3] = sourceBase;
-			subDrawCount++;
-		}
-		return subDrawCount;
-	}
-	updateSubDraws(textureWidth) {
-		let intervals = this.intervals;
-		let numIntervals = intervals.length / 2;
-		if (numIntervals === 0) {
-			_fullRangeInterval[0] = 0;
-			_fullRangeInterval[1] = this.activeSplats;
-			intervals = _fullRangeInterval;
-			numIntervals = 1;
-		}
-		const maxSubDraws = numIntervals * 3;
-		const requiredSize = maxSubDraws * 4;
-		if (subDrawDataArray.length < requiredSize) {
-			subDrawDataArray = new Uint32Array(requiredSize);
-		}
-		const subDrawData = subDrawDataArray;
-		let subDrawCount = 0;
-		for (let i = 0; i < numIntervals; i++) {
-			subDrawCount = this.appendSubDraws(
-				subDrawData,
-				subDrawCount,
-				intervals[i * 2],
-				intervals[i * 2 + 1] - intervals[i * 2],
-				this.intervalOffsets[i],
-				textureWidth
-			);
-		}
-		this.subDrawCount = subDrawCount;
-		const { x: texWidth, y: texHeight } = TextureUtils.calcTextureSize(subDrawCount, tmpSize);
-		this.subDrawTexture = Texture.createDataTexture2D(this.device, "subDrawData", texWidth, texHeight, PIXELFORMAT_RGBA32U);
-		const texData = this.subDrawTexture.lock();
-		texData.set(subDrawData.subarray(0, subDrawCount * 4));
-		this.subDrawTexture.unlock();
-	}
-	update() {
-		const worldMatrix = this.node.getWorldTransform();
-		const worldMatrixChanged = !this.previousWorldTransform.equals(worldMatrix);
-		if (worldMatrixChanged) {
-			this.previousWorldTransform.copy(worldMatrix);
-		}
-		const renderDirty = this._consumeRenderDirty ? this._consumeRenderDirty() : false;
-		return worldMatrixChanged || renderDirty;
-	}
-	writeBoundsSpheres(data, offset) {
-		if (this.octreeNodes) {
-			for (let i = 0; i < this.octreeNodes.length; i++) {
-				const s = this.octreeNodes[i].boundingSphere;
-				data[offset++] = s.x;
-				data[offset++] = s.y;
-				data[offset++] = s.z;
-				data[offset++] = s.w;
-			}
-		} else {
-			const aabb = this.resource.aabb;
-			const he = aabb.halfExtents;
-			const r = Math.sqrt(he.x * he.x + he.y * he.y + he.z * he.z);
-			data[offset++] = aabb.center.x;
-			data[offset++] = aabb.center.y;
-			data[offset++] = aabb.center.z;
-			data[offset++] = r;
-		}
-	}
-	get hasSphericalHarmonics() {
-		return this.resource.gsplatData?.shBands > 0;
 	}
 }
 
@@ -56319,3709 +56557,585 @@ class GSplatUnifiedSorter extends EventHandler {
 	}
 }
 
-var gsplatOutput_default$1 = `
-#include "tonemappingPS"
-#include "decodePS"
-#include "gammaPS"
-#include "fogPS"
-#if FOG != NONE && !defined(GSPLAT_NO_FOG)
-	#define GSPLAT_FOG
-#endif
-fn prepareOutputFromGamma(gammaColor: vec3f, depth: f32) -> vec3f {
-	var color = gammaColor;
-	#if TONEMAP != NONE || GAMMA == NONE || defined(GSPLAT_FOG)
-		color = decodeGamma3(color);
-	#endif
-	#ifdef GSPLAT_FOG
-		color = addFog(color, depth);
-	#endif
-	#if TONEMAP != NONE
-		color = toneMap(color);
-	#endif
-	#if TONEMAP != NONE || (GAMMA != NONE && defined(GSPLAT_FOG))
-		color = gammaCorrectOutput(color);
-	#endif
-	return color;
+class MemBlock {
+	_offset = 0;
+	_size = 0;
+	_free = true;
+	_prev = null;
+	_next = null;
+	_prevFree = null;
+	_nextFree = null;
+	_bucket = -1;
+	get offset() {
+		return this._offset;
+	}
+	get size() {
+		return this._size;
+	}
 }
-`;
-
-class GSplatRenderer {
-	device;
-	node;
-	cameraNode;
-	layer;
-	workBuffer;
-	renderMode;
-	_workBufferFormatVersion = -1;
-	fisheyeProj = new FisheyeProjection();
-	constructor(device, node, cameraNode, layer, workBuffer) {
-		this.device = device;
-		this.node = node;
-		this.cameraNode = cameraNode;
-		this.layer = layer;
-		this.workBuffer = workBuffer;
-		this._workBufferFormatVersion = workBuffer?.format.extraStreamsVersion ?? -1;
+class BlockAllocator {
+	_headAll = null;
+	_tailAll = null;
+	_freeBucketHeads = [];
+	_pool = [];
+	_capacity = 0;
+	_usedSize = 0;
+	_freeSize = 0;
+	_freeRegionCount = 0;
+	_growMultiplier;
+	constructor(capacity = 0, growMultiplier = 1.1) {
+		this._growMultiplier = growMultiplier;
+		if (capacity > 0) {
+			this._capacity = capacity;
+			this._freeSize = capacity;
+			const block = this._obtain(0, capacity, true);
+			this._headAll = block;
+			this._tailAll = block;
+			this._addToBucket(block);
+		}
 	}
-	destroy() {
+	get capacity() {
+		return this._capacity;
 	}
-	setRenderMode(renderMode) {
-		this.renderMode = renderMode;
+	get usedSize() {
+		return this._usedSize;
 	}
-	get material() {
+	get freeSize() {
+		return this._freeSize;
+	}
+	get fragmentation() {
+		return this._freeSize > 0 ? 1 - 1 / this._freeRegionCount : 0;
+	}
+	_bucketFor(size) {
+		return 31 - Math.clz32(size);
+	}
+	_addToBucket(block) {
+		const b = this._bucketFor(block._size);
+		block._bucket = b;
+		while (b >= this._freeBucketHeads.length) {
+			this._freeBucketHeads.push(null);
+		}
+		block._prevFree = null;
+		block._nextFree = this._freeBucketHeads[b];
+		if (this._freeBucketHeads[b]) this._freeBucketHeads[b]._prevFree = block;
+		this._freeBucketHeads[b] = block;
+		this._freeRegionCount++;
+	}
+	_removeFromBucket(block) {
+		const b = block._bucket;
+		if (block._prevFree) block._prevFree._nextFree = block._nextFree;
+		else this._freeBucketHeads[b] = block._nextFree;
+		if (block._nextFree) block._nextFree._prevFree = block._prevFree;
+		block._prevFree = null;
+		block._nextFree = null;
+		block._bucket = -1;
+		this._freeRegionCount--;
+	}
+	_rebucket(block) {
+		const newBucket = this._bucketFor(block._size);
+		if (newBucket !== block._bucket) {
+			this._removeFromBucket(block);
+			this._addToBucket(block);
+		}
+	}
+	_obtain(offset, size, free) {
+		let block;
+		if (this._pool.length > 0) {
+			block = this._pool.pop();
+		} else {
+			block = new MemBlock();
+		}
+		block._offset = offset;
+		block._size = size;
+		block._free = free;
+		block._prev = null;
+		block._next = null;
+		block._prevFree = null;
+		block._nextFree = null;
+		block._bucket = -1;
+		return block;
+	}
+	_release(block) {
+		block._prev = null;
+		block._next = null;
+		block._prevFree = null;
+		block._nextFree = null;
+		block._bucket = -1;
+		this._pool.push(block);
+	}
+	_insertAfterInMainList(block, after) {
+		if (after === null) {
+			block._prev = null;
+			block._next = this._headAll;
+			if (this._headAll) this._headAll._prev = block;
+			this._headAll = block;
+			if (!this._tailAll) this._tailAll = block;
+		} else {
+			block._prev = after;
+			block._next = after._next;
+			if (after._next) after._next._prev = block;
+			after._next = block;
+			if (this._tailAll === after) this._tailAll = block;
+		}
+	}
+	_removeFromMainList(block) {
+		if (block._prev) block._prev._next = block._next;
+		else this._headAll = block._next;
+		if (block._next) block._next._prev = block._prev;
+		else this._tailAll = block._prev;
+		block._prev = null;
+		block._next = null;
+	}
+	_findFreeBlock(size) {
+		const startBucket = this._bucketFor(size);
+		const len = this._freeBucketHeads.length;
+		if (startBucket < len) {
+			let best = null;
+			let node = this._freeBucketHeads[startBucket];
+			while (node) {
+				if (node._size >= size) {
+					if (!best || node._size < best._size) {
+						best = node;
+						if (node._size === size) break;
+					}
+				}
+				node = node._nextFree;
+			}
+			if (best) return best;
+		}
+		for (let b = startBucket + 1; b < len; b++) {
+			if (this._freeBucketHeads[b]) {
+				return this._freeBucketHeads[b];
+			}
+		}
 		return null;
 	}
-	setDataSource(source) {
-		this.workBuffer = source;
-		this.onWorkBufferFormatChanged();
-	}
-	onWorkBufferFormatChanged() {
-	}
-	update(count, textureSize) {
-	}
-	setGpuSortedRendering(drawSlot, sortedIds, numSplatsBuffer, textureSize) {
-	}
-	setCpuSortedRendering() {
-	}
-	setOrderData() {
-	}
-	frameUpdate(params, exposure, fogParams) {
-	}
-	updateOverdrawMode(params) {
-	}
-	_createTonemapIncludes(cincludes) {
-		cincludes.set("gsplatOutputVS", gsplatOutput_default$1);
-		const chunkNames = [
-			"tonemappingPS",
-			"tonemappingNonePS",
-			"tonemappingLinearPS",
-			"tonemappingFilmicPS",
-			"tonemappingHejlPS",
-			"tonemappingAcesPS",
-			"tonemappingAces2PS",
-			"tonemappingNeutralPS",
-			"decodePS",
-			"gammaPS"
-		];
-		for (const name of chunkNames) {
-			cincludes.set(name, shaderChunksWGSL[name]);
+	allocate(size) {
+		const gap = this._findFreeBlock(size);
+		if (!gap) return null;
+		this._usedSize += size;
+		this._freeSize -= size;
+		if (gap._size === size) {
+			gap._free = false;
+			this._removeFromBucket(gap);
+			return gap;
 		}
+		const alloc = this._obtain(gap._offset, size, false);
+		gap._offset += size;
+		gap._size -= size;
+		this._rebucket(gap);
+		this._insertAfterInMainList(alloc, gap._prev);
+		return alloc;
 	}
-}
-
-class GSplatQuadRenderer extends GSplatRenderer {
-	_material;
-	meshInstance;
-	originalBlendType = BLEND_ADDITIVE;
-	_internalDefines = /* @__PURE__ */ new Set();
-	forceCopyMaterial = true;
-	_lastFisheyeEnabled = false;
-	_lastSourceChunksKey = "";
-	constructor(device, node, cameraNode, layer, workBuffer) {
-		super(device, node, cameraNode, layer, workBuffer);
-		this._material = new ShaderMaterial({
-			uniqueName: "UnifiedSplatMaterial",
-			vertexGLSL: '#include "gsplatVS"',
-			fragmentGLSL: '#include "gsplatPS"',
-			vertexWGSL: '#include "gsplatVS"',
-			fragmentWGSL: '#include "gsplatPS"',
-			attributes: {
-				vertex_position: SEMANTIC_POSITION
-			}
-		});
-		this._material.setDefine("{GSPLAT_INSTANCE_SIZE}", GSplatResourceBase.instanceSize);
-		this.configureMaterial();
-		this._material.defines.forEach((value, key) => {
-			this._internalDefines.add(key);
-		});
-		this._internalDefines.add("{GSPLAT_INSTANCE_SIZE}");
-		this._internalDefines.add("GSPLAT_UNIFIED_ID");
-		this._internalDefines.add("PICK_CUSTOM_ID");
-		this._internalDefines.add("GSPLAT_INDIRECT_DRAW");
-		this._internalDefines.add("GSPLAT_SEPARATE_OPACITY");
-		this._internalDefines.add("GSPLAT_FISHEYE");
-		this.meshInstance = this.createMeshInstance();
-	}
-	setRenderMode(renderMode) {
-		const oldRenderMode = this.renderMode ?? 0;
-		const wasForward = (oldRenderMode & GSPLAT_FORWARD) !== 0;
-		const wasShadow = (oldRenderMode & GSPLAT_SHADOW) !== 0;
-		const isForward = (renderMode & GSPLAT_FORWARD) !== 0;
-		const isShadow = (renderMode & GSPLAT_SHADOW) !== 0;
-		this.meshInstance.castShadow = isShadow;
-		if (wasForward && !isForward) {
-			this.layer.removeMeshInstances([this.meshInstance], true);
-		}
-		if (wasShadow && !isShadow) {
-			this.layer.removeShadowCasters([this.meshInstance]);
-		}
-		if (!wasForward && isForward) {
-			this.layer.addMeshInstances([this.meshInstance], true);
-		}
-		if (!wasShadow && isShadow) {
-			this.layer.addShadowCasters([this.meshInstance]);
-		}
-		super.setRenderMode(renderMode);
-	}
-	destroy() {
-		if (this.renderMode) {
-			if (this.renderMode & GSPLAT_FORWARD) {
-				this.layer.removeMeshInstances([this.meshInstance], true);
-			}
-			if (this.renderMode & GSPLAT_SHADOW) {
-				this.layer.removeShadowCasters([this.meshInstance]);
-			}
-		}
-		this._material.destroy();
-		this.meshInstance.destroy();
-		super.destroy();
-	}
-	get material() {
-		return this._material;
-	}
-	onWorkBufferFormatChanged() {
-		this.configureMaterial();
-	}
-	configureMaterial() {
-		const { workBuffer } = this;
-		this._injectFormatChunks();
-		this._material.setDefine("SH_BANDS", "0");
-		this._material.setDefine("GSPLAT_SEPARATE_OPACITY", "");
-		const colorStream = workBuffer.format.getStream("dataColor");
-		if (colorStream && colorStream.format !== PIXELFORMAT_RGBA16U) {
-			this._material.setDefine("GSPLAT_COLOR_FLOAT", "");
-		}
-		this._updateIdDefines();
-		this._bindWorkBufferTextures();
-		this._material.setParameter("numSplats", 0);
-		this.setOrderData();
-		this._material.setDefine(`DITHER_${"NONE"}`, "");
-		this._material.cull = CULLFACE_NONE;
-		this._material.blendType = BLEND_PREMULTIPLIED;
-		this._material.depthWrite = false;
-		this._material.update();
-	}
-	_bindWorkBufferTextures() {
-		const { workBuffer } = this;
-		for (const stream of workBuffer.format.resourceStreams) {
-			const texture = workBuffer.getTexture(stream.name);
-			if (texture) {
-				this._material.setParameter(stream.name, texture);
-			}
-		}
-	}
-	_injectFormatChunks() {
-		const chunks = this.device.isWebGPU ? this._material.shaderChunks.wgsl : this._material.shaderChunks.glsl;
-		const wbFormat = this.workBuffer.format;
-		chunks.set("gsplatDeclarationsVS", wbFormat.getInputDeclarations());
-		chunks.set("gsplatReadVS", wbFormat.getReadCode());
-	}
-	update(count, textureSize) {
-		this.meshInstance.instancingCount = Math.ceil(count / GSplatResourceBase.instanceSize);
-		this._material.setParameter("numSplats", count);
-		this._material.setParameter("splatTextureSize", textureSize);
-		this.meshInstance.visible = count > 0;
-	}
-	setGpuSortedRendering(drawSlot, sortedIds, numSplatsBuffer, textureSize) {
-		this.meshInstance.setIndirect(null, drawSlot, 1);
-		this._material.setParameter("compactedSplatIds", sortedIds);
-		this._material.setParameter("numSplatsStorage", numSplatsBuffer);
-		if (!this._material.getDefine("GSPLAT_INDIRECT_DRAW")) {
-			this._material.setDefine("GSPLAT_INDIRECT_DRAW", true);
-			this._material.update();
-		}
-		this._material.setParameter("splatTextureSize", textureSize);
-		this.meshInstance.visible = true;
-		if (this.meshInstance.instancingCount <= 0) {
-			this.meshInstance.instancingCount = 1;
-		}
-	}
-	setCpuSortedRendering() {
-		this.meshInstance.setIndirect(null, -1);
-		if (this._material.getDefine("GSPLAT_INDIRECT_DRAW")) {
-			this._material.setDefine("GSPLAT_INDIRECT_DRAW", false);
-			this._material.update();
-		}
-		this.setOrderData();
-		this.meshInstance.visible = false;
-	}
-	setOrderData() {
-		if (this.device.isWebGPU) {
-			this._material.setParameter("splatOrder", this.workBuffer.orderBuffer);
+	free(block) {
+		block._free = true;
+		this._usedSize -= block._size;
+		this._freeSize += block._size;
+		const prev = block._prev;
+		const next = block._next;
+		const prevFree = prev && prev._free;
+		const nextFree = next && next._free;
+		if (prevFree && nextFree) {
+			prev._size += block._size + next._size;
+			this._removeFromMainList(block);
+			this._removeFromMainList(next);
+			this._removeFromBucket(next);
+			this._release(block);
+			this._release(next);
+			this._rebucket(prev);
+		} else if (prevFree) {
+			prev._size += block._size;
+			this._removeFromMainList(block);
+			this._release(block);
+			this._rebucket(prev);
+		} else if (nextFree) {
+			block._size += next._size;
+			this._removeFromMainList(next);
+			this._removeFromBucket(next);
+			this._release(next);
+			this._addToBucket(block);
 		} else {
-			this._material.setParameter("splatOrder", this.workBuffer.orderTexture);
+			this._addToBucket(block);
 		}
 	}
-	frameUpdate(params) {
-		if (params.colorRamp) {
-			this._material.setParameter("colorRampIntensity", params.colorRampIntensity);
-		}
-		const cam = this.cameraNode.camera;
-		this.fisheyeProj.update(params.fisheye, cam.fov, cam.projectionMatrix);
-		const fisheyeEnabled = this.fisheyeProj.enabled;
-		if (fisheyeEnabled !== this._lastFisheyeEnabled) {
-			this._lastFisheyeEnabled = fisheyeEnabled;
-			this._material.setDefine("GSPLAT_FISHEYE", fisheyeEnabled);
-			this._material.update();
-		}
-		if (fisheyeEnabled) {
-			const fp = this.fisheyeProj;
-			this._material.setParameter("fisheye_k", fp.k);
-			this._material.setParameter("fisheye_inv_k", fp.invK);
-			this._material.setParameter("fisheye_projMat00", fp.projMat00);
-			this._material.setParameter("fisheye_projMat11", fp.projMat11);
-		}
-		const noFog = !params.useFog;
-		if (noFog !== this._lastNoFog) {
-			this._lastNoFog = noFog;
-			this._material.setDefine("GSPLAT_NO_FOG", noFog);
-			this._material.update();
-		}
-		this._syncWithWorkBufferFormat();
-		if (this.forceCopyMaterial || params.material.dirty) {
-			this.copyMaterialSettings(params.material);
-			this.forceCopyMaterial = false;
+	grow(newCapacity) {
+		if (newCapacity <= this._capacity) return;
+		const added = newCapacity - this._capacity;
+		this._capacity = newCapacity;
+		this._freeSize += added;
+		if (this._tailAll && this._tailAll._free) {
+			this._tailAll._size += added;
+			this._rebucket(this._tailAll);
+		} else {
+			const block = this._obtain(this._capacity - added, added, true);
+			this._insertAfterInMainList(block, this._tailAll);
+			this._addToBucket(block);
 		}
 	}
-	_updateIdDefines() {
-		const hasPcId = !!this.workBuffer.format.getStream("pcId");
-		this._material.setDefine("GSPLAT_UNIFIED_ID", hasPcId);
-		this._material.setDefine("PICK_CUSTOM_ID", hasPcId);
-	}
-	_syncWithWorkBufferFormat() {
-		const wbFormat = this.workBuffer.format;
-		if (this._workBufferFormatVersion !== wbFormat.extraStreamsVersion) {
-			this._workBufferFormatVersion = wbFormat.extraStreamsVersion;
-			this.workBuffer.syncWithFormat();
-			this._injectFormatChunks();
-			this._bindWorkBufferTextures();
-			this._updateIdDefines();
-			this._material.update();
+	defrag(maxMoves = 0, result = /* @__PURE__ */ new Set()) {
+		result.clear();
+		if (this._freeRegionCount === 0) return result;
+		if (maxMoves === 0) {
+			this._defragFull(result);
+		} else {
+			this._defragIncremental(maxMoves, result);
 		}
+		return result;
 	}
-	copyMaterialSettings(sourceMaterial) {
-		const keysToDelete = [];
-		this._material.defines.forEach((value, key) => {
-			if (!this._internalDefines.has(key) && !sourceMaterial.defines.has(key)) {
-				keysToDelete.push(key);
+	_defragFull(result) {
+		for (let b = 0; b < this._freeBucketHeads.length; b++) {
+			let node = this._freeBucketHeads[b];
+			while (node) {
+				const nextFree = node._nextFree;
+				this._removeFromMainList(node);
+				node._prevFree = null;
+				node._nextFree = null;
+				node._bucket = -1;
+				this._pool.push(node);
+				node = nextFree;
 			}
-		});
-		keysToDelete.forEach((key) => this._material.setDefine(key, void 0));
-		sourceMaterial.defines.forEach((value, key) => {
-			this._material.setDefine(key, value);
-		});
-		const srcParams = sourceMaterial.parameters;
-		for (const paramName in srcParams) {
-			if (srcParams.hasOwnProperty(paramName)) {
-				this._material.setParameter(paramName, srcParams[paramName].data);
-			}
+			this._freeBucketHeads[b] = null;
 		}
-		if (sourceMaterial.hasShaderChunks) {
-			const sourceChunksKey = sourceMaterial.shaderChunks.key;
-			if (sourceChunksKey !== this._lastSourceChunksKey) {
-				this._material.shaderChunks.copy(sourceMaterial.shaderChunks);
-				this._injectFormatChunks();
-				this._lastSourceChunksKey = sourceChunksKey;
+		this._freeRegionCount = 0;
+		let offset = 0;
+		let block = this._headAll;
+		while (block) {
+			if (block._offset !== offset) {
+				block._offset = offset;
+				result.add(block);
 			}
+			offset += block._size;
+			block = block._next;
 		}
-		this._material.update();
+		const remaining = this._capacity - offset;
+		if (remaining > 0) {
+			const freeBlock = this._obtain(offset, remaining, true);
+			this._insertAfterInMainList(freeBlock, this._tailAll);
+			this._addToBucket(freeBlock);
+		}
 	}
-	updateOverdrawMode(params) {
-		const overdrawEnabled = !!params.colorRamp;
-		const wasOverdrawEnabled = this._material.getDefine("GSPLAT_OVERDRAW");
-		if (overdrawEnabled) {
-			this._material.setParameter("colorRamp", params.colorRamp);
-			this._material.setParameter("colorRampIntensity", params.colorRampIntensity);
+	_defragIncremental(maxMoves, result) {
+		const phase1Moves = Math.ceil(maxMoves / 2);
+		const phase2Moves = maxMoves - phase1Moves;
+		for (let i = 0; i < phase1Moves; i++) {
+			let lastAlloc = this._tailAll;
+			while (lastAlloc && lastAlloc._free) lastAlloc = lastAlloc._prev;
+			if (!lastAlloc) break;
+			const gap = this._findFreeBlock(lastAlloc._size);
+			if (!gap || gap._offset >= lastAlloc._offset) break;
+			this._moveBlock(lastAlloc, gap);
+			result.add(lastAlloc);
 		}
-		if (overdrawEnabled !== wasOverdrawEnabled) {
-			this._material.setDefine("GSPLAT_OVERDRAW", overdrawEnabled);
-			if (overdrawEnabled) {
-				this.originalBlendType = this._material.blendType;
-				this._material.blendType = BLEND_ADDITIVE;
+		let block = this._headAll;
+		for (let i = 0; i < phase2Moves && block; ) {
+			const next = block._next;
+			if (block._free && next && !next._free) {
+				const allocBlock = next;
+				const freeBlock = block;
+				allocBlock._offset = freeBlock._offset;
+				freeBlock._offset = allocBlock._offset + allocBlock._size;
+				const a = freeBlock._prev;
+				const b = allocBlock._next;
+				allocBlock._prev = a;
+				allocBlock._next = freeBlock;
+				freeBlock._prev = allocBlock;
+				freeBlock._next = b;
+				if (a) a._next = allocBlock;
+				else this._headAll = allocBlock;
+				if (b) b._prev = freeBlock;
+				else this._tailAll = freeBlock;
+				if (freeBlock._next && freeBlock._next._free) {
+					const right = freeBlock._next;
+					freeBlock._size += right._size;
+					this._removeFromMainList(right);
+					this._removeFromBucket(right);
+					this._release(right);
+					this._rebucket(freeBlock);
+				}
+				result.add(allocBlock);
+				i++;
+				block = freeBlock._next;
 			} else {
-				this._material.blendType = this.originalBlendType;
+				block = next;
 			}
-			this._material.update();
 		}
 	}
-	createMeshInstance() {
-		const mesh = GSplatResourceBase.createMesh(this.device);
-		const meshInstance = new MeshInstance(mesh, this._material);
-		meshInstance.node = this.node;
-		meshInstance.setInstancing(true, true);
-		meshInstance.instancingCount = 0;
-		const thisCamera = this.cameraNode.camera;
-		meshInstance.isVisibleFunc = (camera) => {
-			const renderMode = this.renderMode ?? 0;
-			if (thisCamera.camera === camera && renderMode & GSPLAT_FORWARD) {
+	_moveBlock(block, gap) {
+		const blockSize = block._size;
+		const newOffset = gap._offset;
+		const prev = block._prev;
+		this._removeFromMainList(block);
+		const freed = this._obtain(block._offset, blockSize, true);
+		this._insertAfterInMainList(freed, prev);
+		this._addToBucket(freed);
+		if (freed._next && freed._next._free) {
+			const right = freed._next;
+			freed._size += right._size;
+			this._removeFromMainList(right);
+			this._removeFromBucket(right);
+			this._release(right);
+			this._rebucket(freed);
+		}
+		if (freed._prev && freed._prev._free) {
+			const left = freed._prev;
+			left._size += freed._size;
+			this._removeFromMainList(freed);
+			this._removeFromBucket(freed);
+			this._release(freed);
+			this._rebucket(left);
+		}
+		block._offset = newOffset;
+		if (gap._size === blockSize) {
+			const gapPrev = gap._prev;
+			this._removeFromMainList(gap);
+			this._removeFromBucket(gap);
+			this._release(gap);
+			this._insertAfterInMainList(block, gapPrev);
+		} else {
+			gap._offset += blockSize;
+			gap._size -= blockSize;
+			this._rebucket(gap);
+			this._insertAfterInMainList(block, gap._prev);
+		}
+	}
+	updateAllocation(toFree, toAllocate) {
+		for (let i = 0; i < toFree.length; i++) {
+			this.free(toFree[i]);
+		}
+		for (let i = 0; i < toAllocate.length; i++) {
+			const size = toAllocate[i];
+			const block = this.allocate(size);
+			if (block) {
+				toAllocate[i] = block;
+			} else {
+				let totalRemaining = size;
+				for (let j = i + 1; j < toAllocate.length; j++) {
+					totalRemaining += toAllocate[j];
+				}
+				const neededCapacity = this._usedSize + totalRemaining;
+				const headroomCapacity = Math.ceil(neededCapacity * this._growMultiplier);
+				if (headroomCapacity > this._capacity) {
+					this.grow(headroomCapacity);
+				}
+				this.defrag(0);
+				for (let j = i; j < toAllocate.length; j++) {
+					const s = toAllocate[j];
+					const b = this.allocate(s);
+					toAllocate[j] = b;
+				}
 				return true;
 			}
-			if (renderMode & GSPLAT_SHADOW) {
-				return camera.node?.name === SHADOWCAMERA_NAME;
-			}
-			return false;
-		};
-		return meshInstance;
+		}
+		return false;
 	}
 }
 
-const CACHE_STRIDE$1 = 8;
-
-const _invProjMat = new Mat4();
-const _shaderProjMat$2 = new Mat4();
-class GSplatHybridRenderer extends GSplatRenderer {
-	_material;
-	meshInstance;
-	_pickMaterial = null;
-	_pickMeshInstance = null;
-	_clipToViewZ = new Float32Array(4);
-	_clipToViewZPick = null;
-	originalBlendType = BLEND_ADDITIVE;
-	_internalDefines = /* @__PURE__ */ new Set();
-	forceCopyMaterial = true;
-	constructor(device, node, cameraNode, layer, workBuffer) {
-		super(device, node, cameraNode, layer, workBuffer);
-		this._material = new ShaderMaterial({
-			uniqueName: "UnifiedSplatHybridMaterial",
-			vertexWGSL: '#include "gsplatHybridVS"',
-			fragmentWGSL: '#include "gsplatPS"',
-			attributes: {
-				vertex_position: SEMANTIC_POSITION
-			}
-		});
-		this._material.setDefine("{GSPLAT_INSTANCE_SIZE}", GSplatResourceBase.instanceSize);
-		this._material.setDefine("{CACHE_STRIDE}", CACHE_STRIDE$1);
-		this.configureMaterial();
-		this._material.defines.forEach((value, key) => {
-			this._internalDefines.add(key);
-		});
-		this._internalDefines.add("{GSPLAT_INSTANCE_SIZE}");
-		this._internalDefines.add("{CACHE_STRIDE}");
-		this._internalDefines.add("GSPLAT_UNIFIED_ID");
-		this._internalDefines.add("PICK_CUSTOM_ID");
-		this._internalDefines.add("GSPLAT_OVERDRAW");
-		this._internalDefines.add("GSPLAT_NO_FOG");
-		this.meshInstance = this.createMeshInstance();
-	}
-	setRenderMode(renderMode) {
-		const oldRenderMode = this.renderMode ?? 0;
-		const wasForward = (oldRenderMode & GSPLAT_FORWARD) !== 0;
-		const isForward = (renderMode & GSPLAT_FORWARD) !== 0;
-		if (wasForward && !isForward) {
-			this.layer.removeMeshInstances([this.meshInstance], true);
-		}
-		if (!wasForward && isForward) {
-			this.layer.addMeshInstances([this.meshInstance], true);
-		}
-		super.setRenderMode(renderMode);
-	}
-	destroy() {
-		if (this.renderMode && this.renderMode & GSPLAT_FORWARD) {
-			this.layer.removeMeshInstances([this.meshInstance], true);
-		}
-		this._material.destroy();
-		this._pickMaterial?.destroy();
-		this.meshInstance.destroy();
-		this._pickMeshInstance?.destroy();
-		super.destroy();
-	}
-	get material() {
-		return this._material;
-	}
-	onWorkBufferFormatChanged() {
-		this.configureMaterial();
-	}
-	configureMaterial() {
-		this._material.setDefine("SH_BANDS", "0");
-		this._material.setDefine("GSPLAT_INDIRECT_DRAW", true);
-		this._updateIdDefines(this._material);
-		this._material.setDefine(`DITHER_${"NONE"}`, "");
-		this._material.cull = CULLFACE_NONE;
-		this._material.blendType = BLEND_PREMULTIPLIED;
-		this._material.depthWrite = false;
-		this._material.update();
-	}
-	update(count, textureSize) {
-		if (this.meshInstance.instancingCount <= 0) {
-			this.meshInstance.instancingCount = 1;
-		}
-		this.meshInstance.visible = count > 0;
-	}
-	setHybridSortedRendering(drawSlot, sortedIndices, projCache, numSplatsBuffer) {
-		this.meshInstance.setIndirect(null, drawSlot, 1);
-		this._material.setParameter("sortedIndices", sortedIndices);
-		this._material.setParameter("projCache", projCache);
-		this._material.setParameter("numSplatsStorage", numSplatsBuffer);
-		this._computeClipToViewZ(this.cameraNode, this._clipToViewZ);
-		this._material.setParameter("clipToViewZ", this._clipToViewZ);
-		this.meshInstance.visible = true;
-		if (this.meshInstance.instancingCount <= 0) {
-			this.meshInstance.instancingCount = 1;
-		}
-	}
-	prepareForPicking(drawSlot, sortedIndices, projCache, numSplatsBuffer, alphaClip, alphaClipForward, cameraNode) {
-		if (!this._pickMaterial) {
-			this._pickMaterial = new ShaderMaterial({
-				uniqueName: "UnifiedSplatHybridPickMaterial",
-				vertexWGSL: '#include "gsplatHybridVS"',
-				fragmentWGSL: '#include "gsplatPS"',
-				attributes: {
-					vertex_position: SEMANTIC_POSITION
-				}
-			});
-			this._pickMaterial.setDefine("{GSPLAT_INSTANCE_SIZE}", GSplatResourceBase.instanceSize);
-			this._pickMaterial.setDefine("{CACHE_STRIDE}", CACHE_STRIDE$1);
-			this._pickMaterial.setDefine("SH_BANDS", "0");
-			this._pickMaterial.setDefine("GSPLAT_INDIRECT_DRAW", true);
-			this._pickMaterial.setDefine("DITHER_NONE", "");
-			this._updateIdDefines(this._pickMaterial);
-			this._pickMaterial.cull = CULLFACE_NONE;
-			this._pickMaterial.blendType = BLEND_NONE;
-			this._pickMaterial.depthWrite = false;
-			this._pickMaterial.update();
-			const mesh = GSplatResourceBase.createMesh(this.device);
-			this._pickMeshInstance = new MeshInstance(mesh, this._pickMaterial);
-			this._pickMeshInstance.node = this.node;
-			this._pickMeshInstance.setInstancing(true, true);
-			this._pickMeshInstance.instancingCount = 1;
-		} else {
-			if (this._updateIdDefines(this._pickMaterial)) {
-				this._pickMaterial.update();
-			}
-		}
-		const pickMaterial = this._pickMaterial;
-		const pickMeshInstance = this._pickMeshInstance;
-		pickMeshInstance.setIndirect(null, drawSlot, 1);
-		pickMaterial.setParameter("sortedIndices", sortedIndices);
-		pickMaterial.setParameter("projCache", projCache);
-		pickMaterial.setParameter("numSplatsStorage", numSplatsBuffer);
-		pickMaterial.setParameter("alphaClip", alphaClip);
-		pickMaterial.setParameter("alphaClipForward", alphaClipForward);
-		this._clipToViewZPick ?? (this._clipToViewZPick = new Float32Array(4));
-		this._computeClipToViewZ(cameraNode, this._clipToViewZPick);
-		pickMaterial.setParameter("clipToViewZ", this._clipToViewZPick);
-		return pickMeshInstance;
-	}
-	_computeClipToViewZ(cameraNode, dst) {
-		const camComp = cameraNode.camera;
-		const cam = camComp.camera;
-		if (this.fisheyeProj.enabled) {
-			const near = cam.nearClip;
-			const far = cam.farClip;
-			dst[0] = 0;
-			dst[1] = 0;
-			dst[2] = far - near;
-			dst[3] = near;
-			return;
-		}
-		const flipY = !!camComp.renderTarget?.flipY;
-		_invProjMat.copy(Camera$1.applyShaderProjectionTransform(cam.projectionMatrix, _shaderProjMat$2, flipY, this.device.isWebGPU)).invert();
-		const d = _invProjMat.data;
-		dst[0] = -d[2];
-		dst[1] = -d[6];
-		dst[2] = -d[10];
-		dst[3] = -d[14];
-	}
-	setCpuSortedRendering() {
-		this.meshInstance.setIndirect(null, -1);
-		this.meshInstance.visible = false;
-	}
-	setOrderData() {
-	}
-	frameUpdate(params) {
-		this._material.setParameter("alphaClip", params.alphaClip);
-		this._material.setParameter("alphaClipForward", params.alphaClipForward);
-		this._pickMaterial?.setParameter("alphaClip", params.alphaClip);
-		this._pickMaterial?.setParameter("alphaClipForward", params.alphaClipForward);
-		if (params.colorRamp) {
-			this._material.setParameter("colorRampIntensity", params.colorRampIntensity);
-		}
-		const noFog = !params.useFog;
-		if (noFog !== this._lastNoFog) {
-			this._lastNoFog = noFog;
-			this._material.setDefine("GSPLAT_NO_FOG", noFog);
-			this._material.update();
-		}
-	}
-	_updateIdDefines(material) {
-		const hasPcId = !!this.workBuffer.format.getStream("pcId");
-		const changed = material.getDefine("GSPLAT_UNIFIED_ID") !== hasPcId || material.getDefine("PICK_CUSTOM_ID") !== hasPcId;
-		material.setDefine("GSPLAT_UNIFIED_ID", hasPcId);
-		material.setDefine("PICK_CUSTOM_ID", hasPcId);
-		return changed;
-	}
-	updateOverdrawMode(params) {
-		const overdrawEnabled = !!params.colorRamp;
-		const wasOverdrawEnabled = this._material.getDefine("GSPLAT_OVERDRAW");
-		if (overdrawEnabled) {
-			this._material.setParameter("colorRamp", params.colorRamp);
-			this._material.setParameter("colorRampIntensity", params.colorRampIntensity);
-		}
-		if (overdrawEnabled !== wasOverdrawEnabled) {
-			this._material.setDefine("GSPLAT_OVERDRAW", overdrawEnabled);
-			if (overdrawEnabled) {
-				this.originalBlendType = this._material.blendType;
-				this._material.blendType = BLEND_ADDITIVE;
-			} else {
-				this._material.blendType = this.originalBlendType;
-			}
-			this._material.update();
-		}
-	}
-	createMeshInstance() {
-		const mesh = GSplatResourceBase.createMesh(this.device);
-		const meshInstance = new MeshInstance(mesh, this._material);
-		meshInstance.node = this.node;
-		meshInstance.setInstancing(true, true);
-		meshInstance.instancingCount = 0;
-		meshInstance.pick = false;
-		const thisCamera = this.cameraNode.camera;
-		meshInstance.isVisibleFunc = (camera) => {
-			const renderMode = this.renderMode ?? 0;
-			if (thisCamera.camera === camera && renderMode & GSPLAT_FORWARD) {
-				return true;
-			}
-			if (camera.node?.name === SHADOWCAMERA_NAME) {
-				return false;
-			}
-			return false;
-		};
-		return meshInstance;
-	}
-}
-
-class FramePassGSplatComputeLocal extends FramePass {
-	renderer;
-	constructor(renderer) {
-		super(renderer.device);
-		this.renderer = renderer;
-		this.name = "FramePassGSplatComputeLocal";
-	}
-	frameUpdate() {
-		const renderer = this.renderer;
-		const camera = renderer.cameraNode.camera;
-		const rt = camera.renderTarget;
-		const rtWidth = rt ? rt.width : this.device.width;
-		const rtHeight = rt ? rt.height : this.device.height;
-		const rect = camera.rect;
-		const width = Math.floor(rtWidth * rect.z);
-		const height = Math.floor(rtHeight * rect.w);
-		renderer.resizeOutputTexture(width, height);
-	}
-	execute() {
-		this.renderer.dispatch();
-	}
-}
-
-const computeGsplatLocalDispatchPrepSource = `
-@group(0) @binding(0) var<storage, read> sortElementCount: array<u32>;
-@group(0) @binding(1) var<storage, read_write> dispatchArgs: array<u32>;
-@compute @workgroup_size(1)
-fn main() {
-	let count = sortElementCount[0];
-	let maxDim = {MAX_DIM}u;
-	let countWg = (count + {SPLATS_PER_WG_MINUS_1}u) / {SPLATS_PER_WG}u;
-	if (countWg <= maxDim) {
-		dispatchArgs[0] = countWg;
-		dispatchArgs[1] = 1u;
-	} else {
-		let y = (countWg + maxDim - 1u) / maxDim;
-		let x = (countWg + y - 1u) / y;
-		dispatchArgs[0] = x;
-		dispatchArgs[1] = y;
-	}
-	dispatchArgs[2] = 1u;
-	let placeWg = (count + 255u) / 256u;
-	if (placeWg <= maxDim) {
-		dispatchArgs[3] = placeWg;
-		dispatchArgs[4] = 1u;
-	} else {
-		let y = (placeWg + maxDim - 1u) / maxDim;
-		let x = (placeWg + y - 1u) / y;
-		dispatchArgs[3] = x;
-		dispatchArgs[4] = y;
-	}
-	dispatchArgs[5] = 1u;
-}
-`;
-
-const computeGsplatLocalDispatchPrepLargeSource = `
-@group(0) @binding(0) var<storage, read> countersBuffer: array<u32>;
-@group(0) @binding(1) var<storage, read_write> dispatchArgs: array<u32>;
-@group(0) @binding(2) var<storage, read> largeSplatIds: array<u32>;
-@compute @workgroup_size(1)
-fn main() {
-	let count = min(countersBuffer[1], arrayLength(&largeSplatIds));
-	let maxDim = {MAX_DIM}u;
-	if (count <= maxDim) {
-		dispatchArgs[0] = count;
-		dispatchArgs[1] = 1u;
-	} else {
-		let y = (count + maxDim - 1u) / maxDim;
-		let x = (count + y - 1u) / y;
-		dispatchArgs[0] = x;
-		dispatchArgs[1] = y;
-	}
-	dispatchArgs[2] = 1u;
-}
-`;
-
-const computeGsplatLocalTileCountSource = `
-#include "gsplatCommonCS"
-#include "gsplatTileIntersectCS"
-const MAX_TILE_ENTRIES: u32 = 0xFFFFu;
-const BITMASK_W: u32 = 8u;
-const BITMASK_H: u32 = 4u;
-const LARGE_AABB_THRESHOLD: u32 = 64u;
-@group(0) @binding(0) var<storage, read> compactedSplatIds: array<u32>;
-@group(0) @binding(1) var<storage, read> sortElementCount: array<u32>;
-@group(0) @binding(2) var<storage, read_write> projCache: array<u32>;
-@group(0) @binding(3) var<storage, read_write> tileSplatCounts: array<atomic<u32>>;
-struct Uniforms {
-	splatTextureSize: u32,
-	numTilesX: u32,
-	numTilesY: u32,
-	viewProj: mat4x4f,
-	viewMatrix: mat4x4f,
-	focal: f32,
-	viewportWidth: f32,
-	viewportHeight: f32,
-	nearClip: f32,
-	farClip: f32,
-	minPixelSize: f32,
-	isOrtho: u32,
-	exposure: f32,
-	alphaClip: f32,
-	minContribution: f32,
-	#ifdef GSPLAT_FISHEYE
-		fisheye_k: f32,
-		fisheye_inv_k: f32,
-		fisheye_projMat00: f32,
-		fisheye_projMat11: f32,
-	#endif
-}
-@group(0) @binding(4) var<uniform> uniforms: Uniforms;
-@group(0) @binding(5) var<storage, read_write> pairBuffer: array<u32>;
-@group(0) @binding(6) var<storage, read_write> countersBuffer: array<atomic<u32>>;
-@group(0) @binding(7) var<storage, read_write> splatPairStart: array<u32>;
-@group(0) @binding(8) var<storage, read_write> splatPairCount: array<u32>;
-@group(0) @binding(9) var<storage, read_write> largeSplatIds: array<u32>;
-@group(0) @binding(10) var<storage, read_write> depthBuffer: array<u32>;
-#include "gsplatComputeSplatCS"
-#include "gsplatFormatDeclCS"
-#include "gsplatFormatReadCS"
-#include "gsplatProjectCommonCS"
-@compute @workgroup_size(256)
-fn main(
-	@builtin(global_invocation_id) gid: vec3u,
-	@builtin(num_workgroups) numWorkgroups: vec3u
-) {
-	let threadIdx = gid.y * (numWorkgroups.x * 256u) + gid.x;
-	let numVisible = sortElementCount[0];
-	let projected = projectSplatCommon(
-		threadIdx,
-		numVisible,
-		uniforms.alphaClip,
-		uniforms.minPixelSize,
-		uniforms.minContribution,
-		uniforms.viewMatrix,
-		uniforms.viewProj,
-		uniforms.focal,
-		uniforms.viewportWidth,
-		uniforms.viewportHeight,
-		uniforms.nearClip,
-		uniforms.farClip,
-		uniforms.isOrtho,
-		#ifdef GSPLAT_FISHEYE
-			uniforms.fisheye_k, uniforms.fisheye_inv_k,
-			uniforms.fisheye_projMat00, uniforms.fisheye_projMat11,
-		#endif
-	);
-	if (!projected.valid) {
-		if (threadIdx < numVisible) {
-			projCache[threadIdx * {CACHE_STRIDE}u + 6u] = 0u;
-			splatPairStart[threadIdx] = 0u;
-			splatPairCount[threadIdx] = 0u;
-		}
-		return;
-	}
-	let opacity = projected.opacity;
-	let proj = projected.proj;
-	let det = proj.a * proj.c - proj.b * proj.b;
-	let invDet = 1.0 / det;
-	let cx = 4.0 * proj.c * invDet;
-	let cy = -4.0 * proj.b * invDet;
-	let cz = 4.0 * proj.a * invDet;
-	let base = threadIdx * {CACHE_STRIDE}u;
-	projCache[base + 0u] = bitcast<u32>(proj.screen.x);
-	projCache[base + 1u] = bitcast<u32>(proj.screen.y);
-	projCache[base + 2u] = bitcast<u32>(cx);
-	projCache[base + 3u] = bitcast<u32>(cy);
-	projCache[base + 4u] = bitcast<u32>(cz);
-#ifdef PICK_MODE
-	let pcIdVal = loadPcId().r;
-	projCache[base + 5u] = pcIdVal;
-	projCache[base + 6u] = pack2x16float(vec2f(0.0, opacity));
-#else
-	let color = getColor();
-	var rgb = max(color, vec3f(0.0));
-	projCache[base + 5u] = pack2x16float(vec2f(rgb.x, rgb.y));
-	projCache[base + 6u] = pack2x16float(vec2f(rgb.z, opacity));
-#endif
-	depthBuffer[threadIdx] = bitcast<u32>(proj.viewDepth);
-	let screen = proj.screen;
-	let eval = computeSplatTileEval(screen, cx, cy, cz, half(opacity),
-									uniforms.viewportWidth, uniforms.viewportHeight,
-									uniforms.alphaClip);
-	let radiusFactor = eval.radiusFactor;
-	projCache[base + 7u] = bitcast<u32>(-0.5 * radiusFactor);
-	let minTileX = max(0i, i32(floor(eval.splatMin.x / f32(TILE_SIZE))));
-	let maxTileX = min(i32(uniforms.numTilesX) - 1i, i32(floor(eval.splatMax.x / f32(TILE_SIZE))));
-	let minTileY = max(0i, i32(floor(eval.splatMin.y / f32(TILE_SIZE))));
-	let maxTileY = min(i32(uniforms.numTilesY) - 1i, i32(floor(eval.splatMax.y / f32(TILE_SIZE))));
-	let aabbW = u32(maxTileX - minTileX + 1i);
-	var deferredToLarge = false;
-	if (maxTileX >= minTileX && maxTileY >= minTileY &&
-		aabbW * u32(maxTileY - minTileY + 1i) > LARGE_AABB_THRESHOLD) {
-		let idx = atomicAdd(&countersBuffer[1], 1u);
-		if (idx < arrayLength(&largeSplatIds)) {
-			largeSplatIds[idx] = threadIdx;
-			deferredToLarge = true;
-		}
-	}
-	if (deferredToLarge) {
-		splatPairStart[threadIdx] = 0u;
-		splatPairCount[threadIdx] = 0u;
-		return;
-	}
-	var myPairCount: u32 = 0u;
-	var bitmask: u32 = 0u;
-	if (minTileX == maxTileX && minTileY == maxTileY) {
-		myPairCount = 1u;
-		bitmask = 1u;
-	} else {
-		for (var ty = minTileY; ty <= maxTileY; ty++) {
-			for (var tx = minTileX; tx <= maxTileX; tx++) {
-				let tMin = vec2f(f32(tx) * f32(TILE_SIZE), f32(ty) * f32(TILE_SIZE));
-				let tMax = tMin + vec2f(f32(TILE_SIZE));
-				if (tileIntersectsEllipse(tMin, tMax, screen, cx, cy, cz, radiusFactor)) {
-					myPairCount++;
-					let localX = u32(tx - minTileX);
-					let localY = u32(ty - minTileY);
-					if (localX < BITMASK_W && localY < BITMASK_H) {
-						let bitIdx = localY * BITMASK_W + localX;
-						bitmask |= (1u << bitIdx);
-					}
-				}
-			}
-		}
-	}
-	if (myPairCount == 0u) {
-		splatPairStart[threadIdx] = 0u;
-		splatPairCount[threadIdx] = 0u;
-		return;
-	}
-	let pairBase = atomicAdd(&countersBuffer[0], myPairCount);
-	splatPairStart[threadIdx] = pairBase;
-	splatPairCount[threadIdx] = myPairCount;
-	var j: u32 = 0u;
-	for (var ty = minTileY; ty <= maxTileY; ty++) {
-		for (var tx = minTileX; tx <= maxTileX; tx++) {
-			let localX = u32(tx - minTileX);
-			let localY = u32(ty - minTileY);
-			var hits: bool;
-			if (localX < BITMASK_W && localY < BITMASK_H) {
-				let bitIdx = localY * BITMASK_W + localX;
-				hits = (bitmask & (1u << bitIdx)) != 0u;
-			} else {
-				let tMin = vec2f(f32(tx) * f32(TILE_SIZE), f32(ty) * f32(TILE_SIZE));
-				let tMax = tMin + vec2f(f32(TILE_SIZE));
-				hits = tileIntersectsEllipse(tMin, tMax, screen, cx, cy, cz, radiusFactor);
-			}
-			if (hits) {
-				let tileIdx = u32(ty) * uniforms.numTilesX + u32(tx);
-				let localOff = atomicAdd(&tileSplatCounts[tileIdx], 1u);
-				if (localOff < MAX_TILE_ENTRIES) {
-					pairBuffer[pairBase + j] = (tileIdx << 16u) | (localOff & 0xFFFFu);
-					j++;
-				}
-			}
-		}
-	}
-	if (j != myPairCount) {
-		splatPairCount[threadIdx] = j;
-	}
-}
-`;
-
-const computeGsplatLocalTileCountLargeSource = `
-#include "gsplatCommonCS"
-#include "gsplatTileIntersectCS"
-const WG_SIZE: u32 = 256u;
-const MAX_TILE_ENTRIES: u32 = 0xFFFFu;
-@group(0) @binding(0) var<storage, read> projCache: array<u32>;
-@group(0) @binding(1) var<storage, read_write> tileSplatCounts: array<atomic<u32>>;
-@group(0) @binding(2) var<storage, read_write> pairBuffer: array<u32>;
-@group(0) @binding(3) var<storage, read_write> countersBuffer: array<atomic<u32>>;
-@group(0) @binding(4) var<storage, read_write> splatPairStart: array<u32>;
-@group(0) @binding(5) var<storage, read_write> splatPairCount: array<u32>;
-@group(0) @binding(6) var<storage, read> largeSplatIds: array<u32>;
-struct Uniforms {
-	numTilesX: u32,
-	numTilesY: u32,
-	viewportWidth: f32,
-	viewportHeight: f32,
-	alphaClip: f32,
-}
-@group(0) @binding(7) var<uniform> uniforms: Uniforms;
-var<workgroup> wgPairCounts: array<u32, WG_SIZE>;
-var<workgroup> wgPairOffsets: array<u32, WG_SIZE>;
-var<workgroup> wgBase: u32;
-@compute @workgroup_size(256)
-fn main(
-	@builtin(workgroup_id) wgId: vec3u,
-	@builtin(num_workgroups) numWorkgroups: vec3u,
-	@builtin(local_invocation_index) lid: u32
-) {
-	let largeSplatIdx = wgId.y * numWorkgroups.x + wgId.x;
-	let count = min(atomicLoad(&countersBuffer[1]), arrayLength(&largeSplatIds));
-	let isActive = largeSplatIdx < count;
-	var threadIdx = u32(0);
-	var minTileX = 0i;
-	var maxTileX = 0i;
-	var minTileY = 0i;
-	var maxTileY = 0i;
-	var aabbW = u32(0);
-	var totalTiles = u32(0);
-	var screen = vec2f(0.0);
-	var cx = 0.0f;
-	var cy = 0.0f;
-	var cz = 0.0f;
-	var radiusFactor = 0.0f;
-	if (isActive) {
-		threadIdx = largeSplatIds[largeSplatIdx];
-		let cacheBase = threadIdx * {CACHE_STRIDE}u;
-		screen = vec2f(bitcast<f32>(projCache[cacheBase + 0u]), bitcast<f32>(projCache[cacheBase + 1u]));
-		cx = bitcast<f32>(projCache[cacheBase + 2u]);
-		cy = bitcast<f32>(projCache[cacheBase + 3u]);
-		cz = bitcast<f32>(projCache[cacheBase + 4u]);
-		let opacity = unpack2x16float(projCache[cacheBase + 6u]).y;
-		let eval = computeSplatTileEval(screen, cx, cy, cz, half(opacity),
-										uniforms.viewportWidth, uniforms.viewportHeight,
-										uniforms.alphaClip);
-		radiusFactor = eval.radiusFactor;
-		minTileX = max(0i, i32(floor(eval.splatMin.x / f32(TILE_SIZE))));
-		maxTileX = min(i32(uniforms.numTilesX) - 1i, i32(floor(eval.splatMax.x / f32(TILE_SIZE))));
-		minTileY = max(0i, i32(floor(eval.splatMin.y / f32(TILE_SIZE))));
-		maxTileY = min(i32(uniforms.numTilesY) - 1i, i32(floor(eval.splatMax.y / f32(TILE_SIZE))));
-		if (maxTileX >= minTileX && maxTileY >= minTileY) {
-			aabbW = u32(maxTileX - minTileX + 1i);
-			totalTiles = aabbW * u32(maxTileY - minTileY + 1i);
-		}
-	}
-	var myHitCount: u32 = 0u;
-	for (var i = lid; i < totalTiles; i += WG_SIZE) {
-		let localX = i % aabbW;
-		let localY = i / aabbW;
-		let tx = minTileX + i32(localX);
-		let ty = minTileY + i32(localY);
-		let tMin = vec2f(f32(tx) * f32(TILE_SIZE), f32(ty) * f32(TILE_SIZE));
-		let tMax = tMin + vec2f(f32(TILE_SIZE));
-		if (tileIntersectsEllipse(tMin, tMax, screen, cx, cy, cz, radiusFactor)) {
-			myHitCount++;
-		}
-	}
-	wgPairCounts[lid] = myHitCount;
-	workgroupBarrier();
-	if (lid == 0u && isActive) {
-		var sum: u32 = 0u;
-		for (var i: u32 = 0u; i < WG_SIZE; i++) {
-			wgPairOffsets[i] = sum;
-			sum += wgPairCounts[i];
-		}
-		if (sum > 0u) {
-			wgBase = atomicAdd(&countersBuffer[0], sum);
-		} else {
-			wgBase = 0u;
-		}
-		splatPairStart[threadIdx] = wgBase;
-		splatPairCount[threadIdx] = sum | 0x80000000u;
-	}
-	workgroupBarrier();
-	let myBase = wgBase + wgPairOffsets[lid];
-	var j: u32 = 0u;
-	for (var i = lid; i < totalTiles; i += WG_SIZE) {
-		let localX = i % aabbW;
-		let localY = i / aabbW;
-		let tx = minTileX + i32(localX);
-		let ty = minTileY + i32(localY);
-		let tMin = vec2f(f32(tx) * f32(TILE_SIZE), f32(ty) * f32(TILE_SIZE));
-		let tMax = tMin + vec2f(f32(TILE_SIZE));
-		if (tileIntersectsEllipse(tMin, tMax, screen, cx, cy, cz, radiusFactor)) {
-			let tileIdx = u32(ty) * uniforms.numTilesX + u32(tx);
-			let localOff = atomicAdd(&tileSplatCounts[tileIdx], 1u);
-			if (localOff < MAX_TILE_ENTRIES) {
-				pairBuffer[myBase + j] = (tileIdx << 16u) | (localOff & 0xFFFFu);
-				j++;
-			}
-		}
-	}
-	wgPairCounts[lid] = j;
-	workgroupBarrier();
-	if (lid == 0u && isActive) {
-		var actualTotal: u32 = 0u;
-		for (var i: u32 = 0u; i < WG_SIZE; i++) {
-			actualTotal += wgPairCounts[i];
-		}
-		let storedCount = splatPairCount[threadIdx] & 0x7FFFFFFFu;
-		if (actualTotal != storedCount) {
-			splatPairCount[threadIdx] = actualTotal | 0x80000000u;
-		}
-	}
-}
-`;
-
-const computeGsplatLocalPlaceEntriesSource = `
-@group(0) @binding(0) var<storage, read> pairBuffer: array<u32>;
-@group(0) @binding(1) var<storage, read> splatPairStart: array<u32>;
-@group(0) @binding(2) var<storage, read> splatPairCount: array<u32>;
-@group(0) @binding(3) var<storage, read> tileSplatCounts: array<u32>;
-@group(0) @binding(4) var<storage, read_write> tileEntries: array<u32>;
-@group(0) @binding(5) var<storage, read> sortElementCount: array<u32>;
-@compute @workgroup_size(256)
-fn main(@builtin(global_invocation_id) gid: vec3u, @builtin(num_workgroups) numWorkgroups: vec3u) {
-	let threadIdx = gid.y * (numWorkgroups.x * 256u) + gid.x;
-	let numVisible = sortElementCount[0];
-	if (threadIdx >= numVisible) {
-		return;
-	}
-	let rawCount = splatPairCount[threadIdx];
-	if (rawCount == 0u || (rawCount & 0x80000000u) != 0u) {
-		return;
-	}
-	let count = rawCount;
-	let start = splatPairStart[threadIdx];
-	let pairLen = arrayLength(&pairBuffer);
-	let tileEntriesLen = arrayLength(&tileEntries);
-	for (var j: u32 = 0u; j < count; j++) {
-		let pairIdx = start + j;
-		if (pairIdx >= pairLen) { break; }
-		let packed = pairBuffer[pairIdx];
-		let tileIdx = packed >> 16u;
-		let localOff = packed & 0xFFFFu;
-		let entryIdx = tileSplatCounts[tileIdx] + localOff;
-		if (entryIdx < tileEntriesLen) {
-			tileEntries[entryIdx] = threadIdx;
-		}
-	}
-}
-`;
-
-const computeGsplatLocalPlaceEntriesLargeSource = `
-const WG_SIZE: u32 = 256u;
-@group(0) @binding(0) var<storage, read> pairBuffer: array<u32>;
-@group(0) @binding(1) var<storage, read> splatPairStart: array<u32>;
-@group(0) @binding(2) var<storage, read> splatPairCount: array<u32>;
-@group(0) @binding(3) var<storage, read> tileSplatCounts: array<u32>;
-@group(0) @binding(4) var<storage, read_write> tileEntries: array<u32>;
-@group(0) @binding(5) var<storage, read> largeSplatIds: array<u32>;
-@group(0) @binding(6) var<storage, read> countersBuffer: array<u32>;
-@compute @workgroup_size(256)
-fn main(
-	@builtin(workgroup_id) wgId: vec3u,
-	@builtin(num_workgroups) numWorkgroups: vec3u,
-	@builtin(local_invocation_index) lid: u32
-) {
-	let largeSplatIdx = wgId.y * numWorkgroups.x + wgId.x;
-	let numLarge = min(countersBuffer[1], arrayLength(&largeSplatIds));
-	if (largeSplatIdx >= numLarge) {
-		return;
-	}
-	let threadIdx = largeSplatIds[largeSplatIdx];
-	let pairCount = splatPairCount[threadIdx] & 0x7FFFFFFFu;
-	if (pairCount == 0u) {
-		return;
-	}
-	let start = splatPairStart[threadIdx];
-	let pairLen = arrayLength(&pairBuffer);
-	let tileEntriesLen = arrayLength(&tileEntries);
-	for (var j = lid; j < pairCount; j += WG_SIZE) {
-		let pairIdx = start + j;
-		if (pairIdx >= pairLen) { break; }
-		let packed = pairBuffer[pairIdx];
-		let tileIdx = packed >> 16u;
-		let localOff = packed & 0xFFFFu;
-		let entryIdx = tileSplatCounts[tileIdx] + localOff;
-		if (entryIdx < tileEntriesLen) {
-			tileEntries[entryIdx] = threadIdx;
-		}
-	}
-}
-`;
-
-const computeGsplatLocalTileSortSource = `
-#include "gsplatLocalBitonicCS"
-@group(0) @binding(0) var<storage, read_write> tileEntries: array<u32>;
-@group(0) @binding(1) var<storage, read> tileSplatCounts: array<u32>;
-@group(0) @binding(2) var<storage, read> depthBuffer: array<u32>;
-@group(0) @binding(3) var<storage, read> smallTileList: array<u32>;
-@group(0) @binding(4) var<storage, read> tileListCounts: array<u32>;
-@compute @workgroup_size(256)
-fn main(
-	@builtin(local_invocation_index) localIdx: u32,
-	@builtin(workgroup_id) wid: vec3u,
-	@builtin(num_workgroups) numWorkgroups: vec3u
-) {
-	let workgroupIdx = wid.y * numWorkgroups.x + wid.x;
-	if (workgroupIdx >= tileListCounts[0]) {
-		return;
-	}
-	let tileIdx = smallTileList[workgroupIdx];
-	let tStart = tileSplatCounts[tileIdx];
-	let tEnd = tileSplatCounts[tileIdx + 1u];
-	let count = tEnd - tStart;
-	bitonicSortRange(localIdx, tStart, count);
-}
-`;
-
-var dispatch_core_default = `
-fn calcDispatch2D(count: u32, maxDim: u32) -> vec2u {
-	if (count <= maxDim) {
-		return vec2u(count, 1u);
-	}
-	let y = (count + maxDim - 1u) / maxDim;
-	let x = (count + y - 1u) / y;
-	return vec2u(x, y);
-}
-`;
-
-const computeGsplatLocalClassifySource = `
-${indirect_core_default}
-${dispatch_core_default}
-const MAX_TILE_ENTRIES: u32 = 4096u;
-const CLASSIFY_WORKGROUP: u32 = 256u;
-@group(0) @binding(0) var<storage, read> tileSplatCounts: array<u32>;
-@group(0) @binding(1) var<storage, read_write> smallTileList: array<u32>;
-@group(0) @binding(2) var<storage, read_write> largeTileList: array<u32>;
-@group(0) @binding(3) var<storage, read_write> rasterizeTileList: array<u32>;
-@group(0) @binding(4) var<storage, read_write> tileListCounts: array<atomic<u32>>;
-@group(0) @binding(5) var<storage, read_write> indirectDispatchArgs: array<u32>;
-@group(0) @binding(6) var<storage, read_write> largeTileOverflowBases: array<u32>;
-@group(0) @binding(8) var<storage, read_write> indirectDrawArgs: array<DrawIndirectArgs>;
-struct Uniforms {
-	numTiles: u32,
-	dispatchSlotOffset: u32,
-	bufferCapacity: u32,
-	maxWorkgroupsPerDim: u32,
-	drawSlot: u32,
-}
-@group(0) @binding(7) var<uniform> uniforms: Uniforms;
-@compute @workgroup_size(256)
-fn main(@builtin(local_invocation_index) localIdx: u32) {
-	let numTiles = uniforms.numTiles;
-	let totalEntries = tileSplatCounts[numTiles];
-	for (var i: u32 = localIdx; i < numTiles; i += CLASSIFY_WORKGROUP) {
-		let tStart = tileSplatCounts[i];
-		let tEnd = tileSplatCounts[i + 1u];
-		let count = tEnd - tStart;
-		if (count == 0u || tEnd > uniforms.bufferCapacity) {
-			continue;
-		}
-		let rIdx = atomicAdd(&tileListCounts[2], 1u);
-		rasterizeTileList[rIdx] = i;
-		if (count <= MAX_TILE_ENTRIES) {
-			let sIdx = atomicAdd(&tileListCounts[0], 1u);
-			smallTileList[sIdx] = i;
-		} else {
-			let overflowOffset = atomicAdd(&tileListCounts[3], count);
-			let lIdx = atomicAdd(&tileListCounts[1], 1u);
-			largeTileList[lIdx] = i;
-			largeTileOverflowBases[lIdx] = totalEntries + overflowOffset;
-		}
-	}
-	workgroupBarrier();
-	if (localIdx == 0u) {
-		let smallCount = atomicLoad(&tileListCounts[0]);
-		let largeCount = atomicLoad(&tileListCounts[1]);
-		let rasterizeCount = atomicLoad(&tileListCounts[2]);
-		let off = uniforms.dispatchSlotOffset;
-		let maxDim = uniforms.maxWorkgroupsPerDim;
-		let smallDim = calcDispatch2D(smallCount, maxDim);
-		indirectDispatchArgs[off + 0u] = smallDim.x;
-		indirectDispatchArgs[off + 1u] = smallDim.y;
-		indirectDispatchArgs[off + 2u] = 1u;
-		let largeDim = calcDispatch2D(largeCount, maxDim);
-		indirectDispatchArgs[off + 3u] = largeDim.x;
-		indirectDispatchArgs[off + 4u] = largeDim.y;
-		indirectDispatchArgs[off + 5u] = 1u;
-		let rasterDim = calcDispatch2D(rasterizeCount, maxDim);
-		indirectDispatchArgs[off + 6u] = rasterDim.x;
-		indirectDispatchArgs[off + 7u] = rasterDim.y;
-		indirectDispatchArgs[off + 8u] = 1u;
-		indirectDrawArgs[uniforms.drawSlot] = DrawIndirectArgs(rasterizeCount * 6u, 1u, 0u, 0u, 0u);
-	}
-}
-`;
-
-const NUM_BUCKETS$1 = 128;
-const computeGsplatLocalBucketSortSource = `
-const NUM_BUCKETS: u32 = ${NUM_BUCKETS$1}u;
-const MAX_CHUNK_SIZE: u32 = 4096u;
-const WG_SIZE: u32 = 256u;
-@group(0) @binding(0) var<storage, read_write> tileEntries: array<u32>;
-@group(0) @binding(1) var<storage, read> largeTileOverflowBases: array<u32>;
-@group(0) @binding(2) var<storage, read> tileSplatCounts: array<u32>;
-@group(0) @binding(3) var<storage, read> depthBuffer: array<u32>;
-@group(0) @binding(4) var<storage, read> largeTileList: array<u32>;
-@group(0) @binding(5) var<storage, read_write> chunkRanges: array<u32>;
-@group(0) @binding(6) var<storage, read_write> totalChunks: array<atomic<u32>>;
-@group(0) @binding(7) var<storage, read> tileListCounts: array<u32>;
-struct Uniforms {
-	bufferCapacity: u32,
-	maxChunks: u32,
-}
-@group(0) @binding(8) var<uniform> uniforms: Uniforms;
-var<workgroup> sDepthMin: atomic<u32>;
-var<workgroup> sDepthMax: atomic<u32>;
-var<workgroup> sBucketCounts: array<atomic<u32>, NUM_BUCKETS>;
-var<workgroup> sBucketOffsets: array<u32, NUM_BUCKETS + 1>;
-var<workgroup> sBucketCursors: array<atomic<u32>, NUM_BUCKETS>;
-@compute @workgroup_size(256)
-fn main(
-	@builtin(local_invocation_index) localIdx: u32,
-	@builtin(workgroup_id) wid: vec3u,
-	@builtin(num_workgroups) numWorkgroups: vec3u
-) {
-	let largeTileIdx = wid.y * numWorkgroups.x + wid.x;
-	if (largeTileIdx >= tileListCounts[1]) {
-		return;
-	}
-	let tileIdx = largeTileList[largeTileIdx];
-	let tStart = tileSplatCounts[tileIdx];
-	let tEnd = tileSplatCounts[tileIdx + 1u];
-	let count = tEnd - tStart;
-	let overflowBase = largeTileOverflowBases[largeTileIdx];
-	if (overflowBase + count > uniforms.bufferCapacity) {
-		return;
-	}
-	if (localIdx == 0u) {
-		atomicStore(&sDepthMin, 0xFFFFFFFFu);
-		atomicStore(&sDepthMax, 0u);
-	}
-	if (localIdx < NUM_BUCKETS) {
-		atomicStore(&sBucketCounts[localIdx], 0u);
-		atomicStore(&sBucketCursors[localIdx], 0u);
-	}
-	workgroupBarrier();
-	for (var i: u32 = localIdx; i < count; i += WG_SIZE) {
-		let entryIdx = tileEntries[tStart + i];
-		let depthU = depthBuffer[entryIdx];
-		atomicMin(&sDepthMin, depthU);
-		atomicMax(&sDepthMax, depthU);
-	}
-	workgroupBarrier();
-	let depthMinU = atomicLoad(&sDepthMin);
-	let depthMaxU = atomicLoad(&sDepthMax);
-	let depthMin = bitcast<f32>(depthMinU);
-	let depthMax = bitcast<f32>(depthMaxU);
-	let logMin = log(max(depthMin, 1e-6));
-	let logRange = log(max(depthMax, 1e-6)) - logMin;
-	let bucketScale = select(f32(NUM_BUCKETS) / logRange, 0.0, logRange < 1e-10);
-	for (var i: u32 = localIdx; i < count; i += WG_SIZE) {
-		let entryIdx = tileEntries[tStart + i];
-		let depth = bitcast<f32>(depthBuffer[entryIdx]);
-		let bucket = min(u32((log(max(depth, 1e-6)) - logMin) * bucketScale), NUM_BUCKETS - 1u);
-		atomicAdd(&sBucketCounts[bucket], 1u);
-		tileEntries[overflowBase + i] = entryIdx;
-	}
-	workgroupBarrier();
-	if (localIdx == 0u) {
-		sBucketOffsets[0] = 0u;
-		for (var b: u32 = 0u; b < NUM_BUCKETS; b++) {
-			sBucketOffsets[b + 1u] = sBucketOffsets[b] + atomicLoad(&sBucketCounts[b]);
-		}
-	}
-	workgroupBarrier();
-	for (var i: u32 = localIdx; i < count; i += WG_SIZE) {
-		let entryIdx = tileEntries[overflowBase + i];
-		let depth = bitcast<f32>(depthBuffer[entryIdx]);
-		let bucket = min(u32((log(max(depth, 1e-6)) - logMin) * bucketScale), NUM_BUCKETS - 1u);
-		let writePos = sBucketOffsets[bucket] + atomicAdd(&sBucketCursors[bucket], 1u);
-		tileEntries[tStart + writePos] = entryIdx;
-	}
-	workgroupBarrier();
-	if (localIdx == 0u) {
-		var chunkStart: u32 = 0u;
-		var currentSize: u32 = 0u;
-		let maxChunks = uniforms.maxChunks;
-		for (var b: u32 = 0u; b < NUM_BUCKETS; b++) {
-			var bRemaining = sBucketOffsets[b + 1u] - sBucketOffsets[b];
-			if (bRemaining == 0u) {
-				continue;
-			}
-			while (bRemaining > 0u) {
-				let space = MAX_CHUNK_SIZE - currentSize;
-				let take = min(bRemaining, space);
-				currentSize += take;
-				bRemaining -= take;
-				if (currentSize == MAX_CHUNK_SIZE) {
-					let cIdx = atomicAdd(&totalChunks[0], 1u);
-					if (cIdx < maxChunks) {
-						chunkRanges[cIdx * 2u] = tStart + chunkStart;
-						chunkRanges[cIdx * 2u + 1u] = currentSize;
-					}
-					chunkStart += currentSize;
-					currentSize = 0u;
-				}
-			}
-		}
-		if (currentSize > 0u) {
-			let cIdx = atomicAdd(&totalChunks[0], 1u);
-			if (cIdx < maxChunks) {
-				chunkRanges[cIdx * 2u] = tStart + chunkStart;
-				chunkRanges[cIdx * 2u + 1u] = currentSize;
-			}
-		}
-	}
-}
-`;
-
-const computeGsplatLocalChunkSortSource = `
-#include "gsplatLocalBitonicCS"
-@group(0) @binding(0) var<storage, read_write> tileEntries: array<u32>;
-@group(0) @binding(1) var<storage, read> depthBuffer: array<u32>;
-@group(0) @binding(2) var<storage, read> chunkRanges: array<u32>;
-@group(0) @binding(3) var<storage, read> totalChunks: array<u32>;
-struct Uniforms {
-	maxChunks: u32,
-}
-@group(0) @binding(4) var<uniform> uniforms: Uniforms;
-@compute @workgroup_size(256)
-fn main(
-	@builtin(local_invocation_index) localIdx: u32,
-	@builtin(workgroup_id) wid: vec3u,
-	@builtin(num_workgroups) numWorkgroups: vec3u
-) {
-	let chunkIdx = wid.y * numWorkgroups.x + wid.x;
-	if (chunkIdx >= min(totalChunks[0], uniforms.maxChunks)) {
-		return;
-	}
-	let tStart = chunkRanges[chunkIdx * 2u];
-	let count = chunkRanges[chunkIdx * 2u + 1u];
-	bitonicSortRange(localIdx, tStart, count);
-}
-`;
-
-const computeGsplatLocalCopySource = `
-${dispatch_core_default}
-@group(0) @binding(0) var<storage, read> totalChunks: array<u32>;
-@group(0) @binding(1) var<storage, read_write> chunkSortIndirect: array<u32>;
-struct Uniforms {
-	maxChunks: u32,
-	maxWorkgroupsPerDim: u32,
-}
-@group(0) @binding(2) var<uniform> uniforms: Uniforms;
-@compute @workgroup_size(1)
-fn main() {
-	let count = min(totalChunks[0], uniforms.maxChunks);
-	let dim = calcDispatch2D(count, uniforms.maxWorkgroupsPerDim);
-	chunkSortIndirect[0] = dim.x;
-	chunkSortIndirect[1] = dim.y;
-	chunkSortIndirect[2] = 1u;
-}
-`;
-
-const computeGsplatLocalBitonicSource = `
-const MAX_TILE_ENTRIES: u32 = 4096u;
-const INDEX_BITS: u32 = 12u;
-const INDEX_MASK: u32 = 0xFFFu;
-const DEPTH_LEVELS: f32 = 1048575.0;
-const BITONIC_WG_SIZE: u32 = 256u;
-var<workgroup> sData: array<u32, 4096>;
-var<workgroup> sDepthMin: atomic<u32>;
-var<workgroup> sDepthMax: atomic<u32>;
-fn insertZeroBit(v: u32, bitPos: u32) -> u32 {
-	let mask = (1u << bitPos) - 1u;
-	return ((v >> bitPos) << (bitPos + 1u)) | (v & mask);
-}
-fn bitonicSortRange(localIdx: u32, tStart: u32, count: u32) {
-	let clampedCount = min(count, MAX_TILE_ENTRIES);
-	if (clampedCount <= 1u) {
-		return;
-	}
-	if (localIdx == 0u) {
-		atomicStore(&sDepthMin, 0xFFFFFFFFu);
-		atomicStore(&sDepthMax, 0u);
-	}
-	var sortN: u32 = 1u;
-	while (sortN < clampedCount) {
-		sortN = sortN << 1u;
-	}
-	for (var i: u32 = localIdx; i < sortN; i += BITONIC_WG_SIZE) {
-		if (i < clampedCount) {
-			let entryIdx = tileEntries[tStart + i];
-			sData[i] = depthBuffer[entryIdx];
-		} else {
-			sData[i] = 0xFFFFFFFFu;
-		}
-	}
-	workgroupBarrier();
-	for (var i: u32 = localIdx; i < clampedCount; i += BITONIC_WG_SIZE) {
-		atomicMin(&sDepthMin, sData[i]);
-		atomicMax(&sDepthMax, sData[i]);
-	}
-	workgroupBarrier();
-	let depthMinU = atomicLoad(&sDepthMin);
-	let depthMaxU = atomicLoad(&sDepthMax);
-	let depthMin = bitcast<f32>(depthMinU);
-	let depthMax = bitcast<f32>(depthMaxU);
-	let logMin = log(max(depthMin, 1e-6));
-	let logRange = log(max(depthMax, 1e-6)) - logMin;
-	let invLogRange = select(DEPTH_LEVELS / logRange, 0.0, logRange < 1e-10);
-	for (var i: u32 = localIdx; i < sortN; i += BITONIC_WG_SIZE) {
-		if (i < clampedCount) {
-			let depth = bitcast<f32>(sData[i]);
-			let logDepth = log(max(depth, 1e-6));
-			let depth20 = min(u32((logDepth - logMin) * invLogRange + 0.5), u32(DEPTH_LEVELS));
-			sData[i] = (depth20 << INDEX_BITS) | i;
-		} else {
-			sData[i] = 0xFFFFFFFFu;
-		}
-	}
-	workgroupBarrier();
-	for (var k: u32 = 2u; k <= sortN; k = k << 1u) {
-		for (var j: u32 = k >> 1u; j > 0u; j = j >> 1u) {
-			let bitPos = countTrailingZeros(j);
-			let halfN = sortN >> 1u;
-			for (var c: u32 = localIdx; c < halfN; c += BITONIC_WG_SIZE) {
-				let l = insertZeroBit(c, bitPos);
-				let r = l | j;
-				let ascending = (l & k) == 0u;
-				let shouldSwap = select(sData[l] < sData[r], sData[l] > sData[r], ascending);
-				if (shouldSwap) {
-					let tmp = sData[l]; sData[l] = sData[r]; sData[r] = tmp;
-				}
-			}
-			workgroupBarrier();
-		}
-	}
-	for (var i: u32 = localIdx; i < clampedCount; i += BITONIC_WG_SIZE) {
-		let localIndex = sData[i] & INDEX_MASK;
-		sData[i] = tileEntries[tStart + localIndex];
-	}
-	workgroupBarrier();
-	for (var i: u32 = localIdx; i < clampedCount; i += BITONIC_WG_SIZE) {
-		tileEntries[tStart + i] = sData[i];
-	}
-}
-`;
-
-const computeGsplatProjectCommonSource = `
-struct ProjectedSplatCommon {
-	valid: bool,
-	splatId: u32,
-	center: vec3f,
-	opacity: f32,
-	proj: SplatCov2D
-}
-fn invalidProjectedSplatCommon() -> ProjectedSplatCommon {
-	var cov: SplatCov2D;
-	cov.screen = vec2f(0.0);
-	cov.a = 0.0;
-	cov.b = 0.0;
-	cov.c = 0.0;
-	cov.viewDepth = 0.0;
-	cov.valid = false;
-	return ProjectedSplatCommon(false, 0u, vec3f(0.0), 0.0, cov);
-}
-fn projectSplatCommon(
-	threadIdx: u32,
-	numVisible: u32,
-	alphaClip: f32,
-	minPixelSize: f32,
-	minContribution: f32,
-	viewMatrix: mat4x4f,
-	viewProj: mat4x4f,
-	focal: f32,
-	viewportWidth: f32,
-	viewportHeight: f32,
-	nearClip: f32,
-	farClip: f32,
-	isOrtho: u32,
-	#ifdef GSPLAT_FISHEYE
-		fisheye_k: f32,
-		fisheye_inv_k: f32,
-		fisheye_projMat00: f32,
-		fisheye_projMat11: f32,
-	#endif
-) -> ProjectedSplatCommon {
-	if (threadIdx >= numVisible) {
-		return invalidProjectedSplatCommon();
-	}
-	let splatId = compactedSplatIds[threadIdx];
-	setSplat(splatId);
-	let center = getCenter();
-	let opacity = getOpacity();
-	if (opacity <= alphaClip) {
-		return invalidProjectedSplatCommon();
-	}
-	let rotation = half4(getRotation());
-	let scale = half3(getScale());
-	let proj = computeSplatCov(
-		center, rotation, scale,
-		viewMatrix, viewProj,
-		focal, viewportWidth, viewportHeight,
-		nearClip, farClip, opacity, minPixelSize,
-		isOrtho, alphaClip, minContribution,
-		#ifdef GSPLAT_FISHEYE
-			fisheye_k, fisheye_inv_k,
-			fisheye_projMat00, fisheye_projMat11,
-		#endif
-	);
-	if (!proj.valid) {
-		return invalidProjectedSplatCommon();
-	}
-	return ProjectedSplatCommon(true, splatId, center, opacity, proj);
-}
-`;
-
-const computeGsplatCommonSource = `
-#include "halfTypesCS"
-const TILE_SIZE: u32 = 16u;
-fn quatToMat3(r: half4) -> half3x3 {
-	let r2: half4 = r + r;
-	let x: half   = r2.x * r.w;
-	let y: half4  = r2.y * r;
-	let z: half4  = r2.z * r;
-	let w: half   = r2.w * r.w;
-	return half3x3(
-		half(1.0) - z.z - w,  y.z + x,			  y.w - z.x,
-		y.z - x,			  half(1.0) - y.y - w,   z.w + y.x,
-		y.w + z.x,			z.w - y.x,			 half(1.0) - y.y - z.z
-	);
-}
-struct SplatCov2D {
-	screen: vec2f,
-	a: f32,
-	b: f32,
-	c: f32,
-	viewDepth: f32,
-	valid: bool,
-	#if GSPLAT_AA
-		aaFactor: f32,
-	#endif
-}
-fn computeSplatCov(
-	worldCenter: vec3f,
-	rotation: half4,
-	scale: half3,
-	viewMatrix: mat4x4f,
-	viewProj: mat4x4f,
-	focal: f32,
-	viewportWidth: f32,
-	viewportHeight: f32,
-	nearClip: f32,
-	farClip: f32,
-	opacity: f32,
-	minPixelSize: f32,
-	isOrtho: u32,
-	alphaClip: f32,
-	minContribution: f32,
-	#ifdef GSPLAT_FISHEYE
-		fisheye_k: f32,
-		fisheye_inv_k: f32,
-		fisheye_projMat00: f32,
-		fisheye_projMat11: f32,
-	#endif
-) -> SplatCov2D {
-	var result: SplatCov2D;
-	result.valid = false;
-	let viewCenter = (viewMatrix * vec4f(worldCenter, 1.0)).xyz;
-	#ifdef GSPLAT_FISHEYE
-		let fv = viewCenter;
-		let r_xy = length(fv.xy);
-		let neg_z = -fv.z;
-		let theta = atan2(r_xy, neg_z);
-		let maxTheta = min(fisheye_k * 1.5707963, 3.13);
-		if (theta > maxTheta - 0.01 || dot(fv, fv) < 0.0001) {
-			return result;
-		}
-		let tk = theta * fisheye_inv_k;
-		let sin_tk = sin(tk);
-		let cos_tk = cos(tk);
-		let g_theta = fisheye_k * sin_tk / cos_tk;
-		let fisheye_s = select(select(0.0, 1.0 / neg_z, neg_z > 0.0), g_theta / r_xy, r_xy > 1e-4);
-		let fndc = vec2f(fisheye_projMat00 * fisheye_s * fv.x, fisheye_projMat11 * fisheye_s * fv.y);
-		let screen = vec2f(
-			(fndc.x * 0.5 + 0.5) * viewportWidth,
-			(fndc.y * 0.5 + 0.5) * viewportHeight
-		);
-	#else
-		if (viewCenter.z > 0.0) {
-			return result;
-		}
-		let clip = viewProj * vec4f(worldCenter, 1.0);
-		let ndc = clip.xy / clip.w;
-		let screen = vec2f(
-			(ndc.x * 0.5 + 0.5) * viewportWidth,
-			(ndc.y * 0.5 + 0.5) * viewportHeight
-		);
-	#endif
-	let rot: half3x3 = quatToMat3(rotation);
-	let s: vec3f = vec3f(scale);
-	let M: mat3x3f = transpose(mat3x3f(
-		s.x * vec3f(rot[0]),
-		s.y * vec3f(rot[1]),
-		s.z * vec3f(rot[2])
-	));
-	let w0 = vec3f(viewMatrix[0].x, viewMatrix[1].x, viewMatrix[2].x);
-	let w1 = vec3f(viewMatrix[0].y, viewMatrix[1].y, viewMatrix[2].y);
-	let w2 = vec3f(viewMatrix[0].z, viewMatrix[1].z, viewMatrix[2].z);
-	#ifdef GSPLAT_FISHEYE
-		let fisheyeFocal = viewportWidth * fisheye_projMat00;
-		let g_prime = 1.0 / (cos_tk * cos_tk);
-		let d2 = dot(fv, fv);
-		let r_sq = max(r_xy * r_xy, 1e-8);
-		let K_coeff = select(0.0, (g_prime * neg_z / d2 - fisheye_s) / r_sq, r_xy > 1e-4);
-		let Jxx = fisheyeFocal * (fisheye_s + K_coeff * fv.x * fv.x);
-		let Jxy = fisheyeFocal * K_coeff * fv.x * fv.y;
-		let Jyy = fisheyeFocal * (fisheye_s + K_coeff * fv.y * fv.y);
-		let Jzx = fisheyeFocal * g_prime * fv.x / d2;
-		let Jzy = fisheyeFocal * g_prime * fv.y / d2;
-		let tt0 = Jxx * w0 + Jxy * w1 + Jzx * w2;
-		let tt1 = Jxy * w0 + Jyy * w1 + Jzy * w2;
-	#else
-		let ortho = isOrtho == 1u;
-		let v = select(viewCenter.xyz, vec3f(0.0, 0.0, 1.0), ortho);
-		let vz = select(min(v.z, -0.001), v.z, ortho);
-		let J1 = focal / vz;
-		let J2 = -J1 / vz * v.xy;
-		let tt0 = J1 * w0 + J2.x * w2;
-		let tt1 = J1 * w1 + J2.y * w2;
-	#endif
-	let b0 = M * tt0;
-	let b1 = M * tt1;
-	let aRaw = dot(b0, b0);
-	let b = dot(b0, b1);
-	let cRaw = dot(b1, b1);
-	let a = aRaw + 0.3;
-	let c = cRaw + 0.3;
-	let det = a * c - b * b;
-	if (det <= 0.0) {
-		return result;
-	}
-	#if GSPLAT_AA
-		let detOrig = aRaw * cRaw - b * b;
-		result.aaFactor = sqrt(max(detOrig / det, 0.0));
-	#endif
-	let totalContribution = opacity * 6.283185 * sqrt(det);
-	if (totalContribution < minContribution) {
-		return result;
-	}
-	let radiusFactor = computeRadiusFactor(half(opacity), alphaClip);
-	let vmin = min(1024.0, min(viewportWidth, viewportHeight));
-	let maxRadius = vmin;
-	let radiusXUncapped = sqrt(2.0 * a);
-	let radiusYUncapped = sqrt(2.0 * c);
-	let radiusX = min(radiusXUncapped, maxRadius);
-	let radiusY = min(radiusYUncapped, maxRadius);
-	if (max(radiusX, radiusY) < minPixelSize) {
-		return result;
-	}
-	if (screen.x + radiusX < 0.0 || screen.x - radiusX > viewportWidth ||
-		screen.y + radiusY < 0.0 || screen.y - radiusY > viewportHeight) {
-		return result;
-	}
-	let capScale = max(1.0, max(radiusXUncapped, radiusYUncapped) / maxRadius);
-	let invCapScale2 = 1.0 / (capScale * capScale);
-	result.screen = screen;
-	let scaledCov = vec3f(a, b, c) * invCapScale2;
-	result.a = scaledCov.x;
-	result.b = scaledCov.y;
-	result.c = scaledCov.z;
-	#ifdef GSPLAT_FISHEYE
-		result.viewDepth = sqrt(d2);
-	#else
-		result.viewDepth = -viewCenter.z;
-	#endif
-	result.valid = true;
-	return result;
-}
-`;
-
-const computeGsplatTileIntersectSource = `
-struct SplatTileEval {
-	radiusFactor: f32,
-	splatMin: vec2f,
-	splatMax: vec2f,
-}
-fn computeRadiusFactor(opacity: half, alphaClip: f32) -> f32 {
-	return min(8.0, 2.0 * log(f32(opacity) / alphaClip));
-}
-fn computeSplatTileEval(
-	screen: vec2f,
-	cx: f32, cy: f32, cz: f32,
-	opacity: half,
-	viewportWidth: f32, viewportHeight: f32,
-	alphaClip: f32
-) -> SplatTileEval {
-	let K = cx * cz - cy * cy;
-	let a = 4.0 * cz / K;
-	let c = 4.0 * cx / K;
-	let radiusFactor = computeRadiusFactor(opacity, alphaClip);
-	let vmin = min(1024.0, min(viewportWidth, viewportHeight));
-	let radius = vec2f(min(sqrt(2.0 * a), vmin), min(sqrt(2.0 * c), vmin));
-	var result: SplatTileEval;
-	result.radiusFactor = radiusFactor;
-	result.splatMin = screen - radius;
-	result.splatMax = screen + radius;
-	return result;
-}
-fn segmentIntersectsEllipse(a: f32, b: f32, c: f32, d: f32, l: f32, r: f32) -> bool {
-	let delta = b * b - 4.0 * a * c;
-	let t1 = (l - d) * (2.0 * a) + b;
-	let t2 = (r - d) * (2.0 * a) + b;
-	return delta >= 0.0 && (t1 <= 0.0 || t1 * t1 <= delta) && (t2 >= 0.0 || t2 * t2 <= delta);
-}
-fn tileIntersectsEllipse(
-	tileMin: vec2f, tileMax: vec2f, center: vec2f,
-	cx: f32, cy: f32, cz: f32,
-	radiusFactor: f32
-) -> bool {
-	if (center.x >= tileMin.x && center.x <= tileMax.x &&
-		center.y >= tileMin.y && center.y <= tileMax.y) {
-		return true;
-	}
-	let w = radiusFactor;
-	var dx: f32;
-	if (center.x * 2.0 < tileMin.x + tileMax.x) {
-		dx = center.x - tileMin.x;
-	} else {
-		dx = center.x - tileMax.x;
-	}
-	if (segmentIntersectsEllipse(cz, -2.0 * cy * dx, cx * dx * dx - w, center.y, tileMin.y, tileMax.y)) {
-		return true;
-	}
-	var dy: f32;
-	if (center.y * 2.0 < tileMin.y + tileMax.y) {
-		dy = center.y - tileMin.y;
-	} else {
-		dy = center.y - tileMax.y;
-	}
-	if (segmentIntersectsEllipse(cx, -2.0 * cy * dy, cz * dy * dy - w, center.x, tileMin.x, tileMax.x)) {
-		return true;
-	}
-	return false;
-}
-`;
-
-class GSplatTileComposite {
+const tmpSize = new Vec2();
+let subDrawDataArray = new Uint32Array(0);
+const _fullRangeInterval = [0, 0];
+class GSplatInfo {
 	device;
-	_material;
-	_mesh;
-	_meshInstance;
-	_pickMaterial = null;
-	_pickMeshInstance = null;
-	_node;
-	constructor(device, node, isVisibleFunc) {
+	resource;
+	node;
+	lodIndex;
+	placementId;
+	allocId;
+	parentPlacementId;
+	numSplats;
+	activeSplats = 0;
+	intervals = [];
+	intervalOffsets = [];
+	intervalAllocIds = [];
+	intervalNodeIndices = [];
+	previousWorldTransform = new Mat4();
+	aabb = new BoundingBox();
+	subDrawTexture = null;
+	subDrawCount = 0;
+	numBoundsEntries = 0;
+	boundsBaseIndex = 0;
+	octreeNodes = null;
+	nodeInfos = null;
+	colorAccumulatedTranslation = 0;
+	parameters = null;
+	getWorkBufferModifier = null;
+	getInstanceStreams = null;
+	_consumeRenderDirty = null;
+	constructor(device, resource, placement, consumeRenderDirty = null, octreeNodes = null, nodeInfos = null) {
 		this.device = device;
-		this._node = node;
-		this._material = new ShaderMaterial({
-			uniqueName: "GSplatTileComposite",
-			vertexWGSL: '#include "gsplatTileCompositeVS"',
-			fragmentWGSL: '#include "gsplatTileCompositePS"'
-		});
-		this._material.blendType = BLEND_PREMULTIPLIED;
-		this._material.cull = CULLFACE_NONE;
-		this._material.depthWrite = false;
-		this._material.update();
-		this._mesh = new Mesh(device);
-		this._mesh.primitive[0].type = PRIMITIVE_TRIANGLES;
-		this._mesh.primitive[0].base = 0;
-		this._mesh.primitive[0].count = 0;
-		this._mesh.primitive[0].indexed = false;
-		this._meshInstance = new MeshInstance(this._mesh, this._material);
-		this._meshInstance.node = node;
-		this._meshInstance.instancingCount = 1;
-		this._meshInstance.isVisibleFunc = isVisibleFunc;
-		this._meshInstance.pick = false;
+		this.resource = resource;
+		this.node = placement.node;
+		this.lodIndex = placement.lodIndex;
+		this.placementId = placement.id;
+		this.allocId = placement.allocId;
+		this.parentPlacementId = octreeNodes && placement.parentPlacement ? placement.parentPlacement.allocId : placement.allocId;
+		this.numSplats = resource.numSplats;
+		this.aabb.copy(placement.aabb);
+		this.parameters = placement.parameters;
+		this.getWorkBufferModifier = () => placement.workBufferModifier;
+		this.getInstanceStreams = () => placement.streams;
+		this._consumeRenderDirty = consumeRenderDirty;
+		this.octreeNodes = octreeNodes;
+		this.nodeInfos = nodeInfos;
+		this.updateIntervals(placement.intervals);
 	}
 	destroy() {
-		this._material.destroy();
-		this._mesh.destroy();
-		this._meshInstance.destroy();
-		this._pickMaterial?.destroy();
-		this._pickMeshInstance?.destroy();
+		this.intervals.length = 0;
+		this.intervalOffsets.length = 0;
+		this.intervalAllocIds.length = 0;
+		this.intervalNodeIndices.length = 0;
+		this.subDrawTexture?.destroy();
+		this.subDrawTexture = null;
+		this.subDrawCount = 0;
 	}
-	get material() {
-		return this._material;
+	setLayout(intervalOffsets) {
+		this.intervalOffsets = intervalOffsets;
+		this.subDrawTexture?.destroy();
+		this.subDrawTexture = null;
+		this.subDrawCount = 0;
 	}
-	get meshInstance() {
-		return this._meshInstance;
-	}
-	update(drawSlot, outputTexture, rasterizeTileList, numTilesX, screenWidth, screenHeight) {
-		this._meshInstance.setIndirect(null, drawSlot, 1);
-		this._material.setParameter("source", outputTexture);
-		this._material.setParameter("rasterizeTileList", rasterizeTileList);
-		this._material.setParameter("numTilesX", numTilesX);
-		this._material.setParameter("screenWidth", screenWidth);
-		this._material.setParameter("screenHeight", screenHeight);
-	}
-	prepareForPicking(drawSlot, pickIdTexture, pickDepthTexture, rasterizeTileList, numTilesX, screenWidth, screenHeight) {
-		if (!this._pickMaterial) {
-			this._pickMaterial = new ShaderMaterial({
-				uniqueName: "GSplatTileCompositePick",
-				vertexWGSL: '#include "gsplatTileCompositeVS"',
-				fragmentWGSL: '#include "gsplatTileCompositePS"'
-			});
-			this._pickMaterial.setDefine("PICK_MODE", true);
-			this._pickMaterial.cull = CULLFACE_NONE;
-			this._pickMaterial.depthWrite = false;
-			this._pickMaterial.update();
-			this._pickMeshInstance = new MeshInstance(this._mesh, this._pickMaterial);
-			this._pickMeshInstance.node = this._node;
-			this._pickMeshInstance.instancingCount = 1;
+	ensureSubDrawTexture(textureWidth) {
+		if (!this.subDrawTexture && textureWidth > 0) {
+			this.updateSubDraws(textureWidth);
 		}
-		const pickMI = this._pickMeshInstance;
-		const pickMat = this._pickMaterial;
-		pickMI.setIndirect(null, drawSlot, 1);
-		pickMat.setParameter("pickIdTexture", pickIdTexture);
-		pickMat.setParameter("pickDepthTexture", pickDepthTexture);
-		pickMat.setParameter("rasterizeTileList", rasterizeTileList);
-		pickMat.setParameter("numTilesX", numTilesX);
-		pickMat.setParameter("screenWidth", screenWidth);
-		pickMat.setParameter("screenHeight", screenHeight);
-		return pickMI;
 	}
-}
-
-const computeGsplatLocalRasterizeSource = `
-#include "halfTypesCS"
-#ifndef PICK_MODE
-	#include "decodePS"
-	#if FOG != NONE
-		#include "fogMathPS"
-		#include "gammaPS"
-	#endif
-#endif
-const BATCH_SIZE: u32 = 64u;
-const ALPHA_THRESHOLD: half = half(1.0) / half(255.0);
-const EXP4: half = exp(half(-4.0));
-const INV_EXP4: half = half(1.0) / (half(1.0) - EXP4);
-struct Uniforms {
-	screenWidth: u32,
-	screenHeight: u32,
-	numTilesX: u32,
-	nearClip: f32,
-	farClip: f32,
-	alphaClip: f32,
-	#if FOG != NONE
-		fog_color: vec3f,
-		fog_start: f32,
-		fog_end: f32,
-		fog_density: f32,
-	#endif
-}
-@group(0) @binding(0) var<uniform> uniforms: Uniforms;
-@group(0) @binding(1) var<storage, read> tileEntries: array<u32>;
-@group(0) @binding(2) var<storage, read> tileSplatCounts: array<u32>;
-@group(0) @binding(3) var<storage, read> projCache: array<u32>;
-@group(0) @binding(4) var<storage, read> rasterizeTileList: array<u32>;
-@group(0) @binding(5) var<storage, read> tileListCounts: array<u32>;
-@group(0) @binding(6) var<storage, read> depthBuffer: array<u32>;
-#ifdef PICK_MODE
-	@group(0) @binding(7) var pickIdTexture: texture_storage_2d<r32uint, write>;
-	@group(0) @binding(8) var pickDepthTexture: texture_storage_2d<rgba16float, write>;
-#else
-	@group(0) @binding(7) var outputTexture: texture_storage_2d<rgba16float, write>;
-	#ifdef DEPTH_TEST
-		@group(0) @binding(8) var sceneDepthMap: texture_2d<f32>;
-	#endif
-#endif
-var<workgroup> sharedCenterScreen: array<vec2f, 64>;
-var<workgroup> sharedCoeffs: array<vec3f, 64>;
-var<workgroup> sharedPowerCutoff: array<f32, 64>;
-#ifdef HEATMAP_MODE
-	var<workgroup> sharedHeatCount: atomic<u32>;
-#endif
-#ifdef PICK_MODE
-	var<workgroup> sharedOpacity: array<half, 64>;
-	var<workgroup> sharedPickId: array<u32, 64>;
-	var<workgroup> sharedViewDepth: array<f32, 64>;
-#else
-	var<workgroup> sharedColor: array<half4, 64>;
-	#ifdef DEPTH_TEST
-		var<workgroup> sharedViewDepth: array<f32, 64>;
-	#endif
-#endif
-#ifdef PICK_MODE
-fn evalSplatPick(pixelCoord: vec2f, center: vec2f, coeffX: f32, coeffY: f32, coeffXY: f32,
-				 opacity: half, pickId: u32, viewDepth: f32, alphaClip: half,
-				 bestPickId: ptr<function, u32>, depthAccum: ptr<function, f32>,
-				 weightAccum: ptr<function, f32>, T: ptr<function, half>) {
-	let dx = pixelCoord - center;
-	let power = coeffX * dx.x * dx.x + coeffXY * dx.x * dx.y + coeffY * dx.y * dx.y;
-	let gauss = (half(exp(power)) - EXP4) * INV_EXP4;
-	let alpha = half(min(half(0.99), opacity * gauss));
-	let newT = *T * (half(1.0) - alpha);
-	let visible = power > -4.0 && alpha > ALPHA_THRESHOLD && *T >= ALPHA_THRESHOLD;
-	if (!visible) { return; }
-	if (alpha >= alphaClip) {
-		if (*bestPickId == 0xFFFFFFFFu) {
-			*bestPickId = pickId;
-		}
-		let normalizedDepth = saturate((viewDepth - uniforms.nearClip) / (uniforms.farClip - uniforms.nearClip));
-		let w = f32(alpha) * f32(*T);
-		*depthAccum += w * normalizedDepth;
-		*weightAccum += w;
-	}
-	*T = newT;
-}
-#endif
-#ifdef HEATMAP_MODE
-fn heatmapColor(v: f32) -> vec3f {
-	let t = saturate(v / 2000.0);
-	if (t < 0.2) {
-		return mix(vec3f(0.0, 0.0, 1.0), vec3f(0.0, 1.0, 1.0), t * 5.0);
-	} else if (t < 0.4) {
-		return mix(vec3f(0.0, 1.0, 1.0), vec3f(1.0, 1.0, 0.0), (t - 0.2) * 5.0);
-	} else if (t < 0.6) {
-		return mix(vec3f(1.0, 1.0, 0.0), vec3f(1.0, 0.0, 0.0), (t - 0.4) * 5.0);
-	}
-	return mix(vec3f(1.0, 0.0, 0.0), vec3f(0.15, 0.0, 0.0), (t - 0.6) * 2.5);
-}
-#endif
-@compute @workgroup_size(8, 8)
-fn main(
-	@builtin(local_invocation_id) lid: vec3u,
-	@builtin(local_invocation_index) localIdx: u32,
-	@builtin(workgroup_id) wid: vec3u,
-	@builtin(num_workgroups) numWorkgroups: vec3u
-) {
-	let workgroupIdx = wid.y * numWorkgroups.x + wid.x;
-	if (workgroupIdx >= tileListCounts[2]) {
-		return;
-	}
-	let tileIdx = rasterizeTileList[workgroupIdx];
-	let tileX = tileIdx % uniforms.numTilesX;
-	let tileY = tileIdx / uniforms.numTilesX;
-	let tStart = tileSplatCounts[tileIdx];
-	let tEnd = tileSplatCounts[tileIdx + 1u];
-	let basePixel = vec2u(tileX * 16u + lid.x * 2u, tileY * 16u + lid.y * 2u);
-	let p00 = vec2f(f32(basePixel.x) + 0.5, f32(basePixel.y) + 0.5);
-	let p10 = p00 + vec2f(1.0, 0.0);
-	let p01 = p00 + vec2f(0.0, 1.0);
-	let p11 = p00 + vec2f(1.0, 1.0);
-	#ifdef PICK_MODE
-		var T00: half = half(1.0); var T10: half = half(1.0);
-		var T01: half = half(1.0); var T11: half = half(1.0);
-		var pickId00: u32 = 0xFFFFFFFFu; var pickId10: u32 = 0xFFFFFFFFu;
-		var pickId01: u32 = 0xFFFFFFFFu; var pickId11: u32 = 0xFFFFFFFFu;
-		var dAcc00: f32 = 0.0; var dAcc10: f32 = 0.0;
-		var dAcc01: f32 = 0.0; var dAcc11: f32 = 0.0;
-		var wAcc00: f32 = 0.0; var wAcc10: f32 = 0.0;
-		var wAcc01: f32 = 0.0; var wAcc11: f32 = 0.0;
-		let clipH = half(uniforms.alphaClip);
-	#else
-		var T = half4(1.0);
-		var c00 = half3(0.0); var c10 = half3(0.0);
-		var c01 = half3(0.0); var c11 = half3(0.0);
-		#ifdef DEPTH_TEST
-			var sceneDepth = vec4f(1e20);
-			let depthY0 = uniforms.screenHeight - 1u - basePixel.y;
-			let depthY1 = depthY0 - 1u;
-			if (basePixel.x < uniforms.screenWidth && basePixel.y < uniforms.screenHeight) {
-				sceneDepth.x = textureLoad(sceneDepthMap, vec2i(vec2u(basePixel.x, depthY0)), 0).r;
+	updateIntervals(intervals) {
+		const resource = this.resource;
+		this.intervals.length = 0;
+		this.intervalAllocIds.length = 0;
+		this.intervalNodeIndices.length = 0;
+		this.activeSplats = resource.numSplats;
+		if (intervals.size > 0) {
+			let totalCount = 0;
+			let k = 0;
+			this.intervals.length = intervals.size * 2;
+			for (const [nodeIndex, interval] of intervals) {
+				this.intervals[k++] = interval.x;
+				this.intervals[k++] = interval.y + 1;
+				totalCount += interval.y - interval.x + 1;
+				if (this.nodeInfos) {
+					this.intervalAllocIds.push(this.nodeInfos[nodeIndex].allocId);
+					this.intervalNodeIndices.push(nodeIndex);
+				}
 			}
-			if (basePixel.x + 1u < uniforms.screenWidth && basePixel.y < uniforms.screenHeight) {
-				sceneDepth.y = textureLoad(sceneDepthMap, vec2i(vec2u(basePixel.x + 1u, depthY0)), 0).r;
-			}
-			if (basePixel.x < uniforms.screenWidth && basePixel.y + 1u < uniforms.screenHeight) {
-				sceneDepth.z = textureLoad(sceneDepthMap, vec2i(vec2u(basePixel.x, depthY1)), 0).r;
-			}
-			if (basePixel.x + 1u < uniforms.screenWidth && basePixel.y + 1u < uniforms.screenHeight) {
-				sceneDepth.w = textureLoad(sceneDepthMap, vec2i(vec2u(basePixel.x + 1u, depthY1)), 0).r;
-			}
-		#endif
-	#endif
-	let tileCount = tEnd - tStart;
-	#ifdef HEATMAP_MODE
-		if (localIdx == 0u) { atomicStore(&sharedHeatCount, 0u); }
-		workgroupBarrier();
-		var processedCount: u32 = 0u;
-	#endif
-	let numBatches = (tileCount + BATCH_SIZE - 1u) / BATCH_SIZE;
-	var threadDone = false;
-	for (var batch: u32 = 0u; batch < numBatches; batch++) {
-		let batchOffset = batch * BATCH_SIZE + localIdx;
-		if (batchOffset < tileCount) {
-			let cacheIdx = tileEntries[tStart + batchOffset];
-			let base = cacheIdx * {CACHE_STRIDE}u;
-			sharedCenterScreen[localIdx] = vec2f(
-				bitcast<f32>(projCache[base + 0u]),
-				bitcast<f32>(projCache[base + 1u])
-			);
-			let cx = bitcast<f32>(projCache[base + 2u]);
-			let cy = bitcast<f32>(projCache[base + 3u]);
-			let cz = bitcast<f32>(projCache[base + 4u]);
-			sharedCoeffs[localIdx] = vec3f(cx * -0.5, cz * -0.5, -cy);
-			sharedPowerCutoff[localIdx] = bitcast<f32>(projCache[base + 7u]);
-			#ifdef PICK_MODE
-				sharedPickId[localIdx] = projCache[base + 5u];
-				sharedOpacity[localIdx] = half(unpack2x16float(projCache[base + 6u]).y);
-				sharedViewDepth[localIdx] = bitcast<f32>(depthBuffer[cacheIdx]);
-			#else
-				let rg = unpack2x16float(projCache[base + 5u]);
-				let ba = unpack2x16float(projCache[base + 6u]);
-				#if FOG != NONE
-					let viewDepth = bitcast<f32>(depthBuffer[cacheIdx]);
-					#if (FOG == LINEAR)
-						let fogFactor = evaluateFogFactorLinear(viewDepth, uniforms.fog_start, uniforms.fog_end);
-					#elif (FOG == EXP)
-						let fogFactor = evaluateFogFactorExp(viewDepth, uniforms.fog_density);
-					#elif (FOG == EXP2)
-						let fogFactor = evaluateFogFactorExp2(viewDepth, uniforms.fog_density);
-					#endif
-					var foggedColor = decodeGamma3(vec3f(rg.x, rg.y, ba.x));
-					foggedColor = mix(uniforms.fog_color, foggedColor, fogFactor);
-					sharedColor[localIdx] = half4(half3(gammaCorrectOutput(foggedColor)), half(ba.y));
-				#else
-					sharedColor[localIdx] = half4(half(rg.x), half(rg.y), half(ba.x), half(ba.y));
-				#endif
-				#ifdef DEPTH_TEST
-					sharedViewDepth[localIdx] = bitcast<f32>(depthBuffer[cacheIdx]);
-				#endif
-			#endif
-		}
-		workgroupBarrier();
-		if (!threadDone) {
-			let batchCount = min(BATCH_SIZE, tileCount - batch * BATCH_SIZE);
-			for (var i: u32 = 0u; i < batchCount; i++) {
-				let center = sharedCenterScreen[i];
-				let coeffs = sharedCoeffs[i];
-				#ifdef PICK_MODE
-					let splatOpacity = sharedOpacity[i];
-					let splatPickId = sharedPickId[i];
-					let splatDepth = sharedViewDepth[i];
-					let d = p00 - center;
-					let dxV = vec4f(d.x, d.x + 1.0, d.x, d.x + 1.0);
-					let dyV = vec4f(d.y, d.y, d.y + 1.0, d.y + 1.0);
-					let power4 = coeffs.x * dxV * dxV + coeffs.z * dxV * dyV + coeffs.y * dyV * dyV;
-					if (all(power4 <= vec4f(sharedPowerCutoff[i]))) {
-						continue;
-					}
-					evalSplatPick(p00, center, coeffs.x, coeffs.y, coeffs.z, splatOpacity, splatPickId, splatDepth, clipH, &pickId00, &dAcc00, &wAcc00, &T00);
-					evalSplatPick(p10, center, coeffs.x, coeffs.y, coeffs.z, splatOpacity, splatPickId, splatDepth, clipH, &pickId10, &dAcc10, &wAcc10, &T10);
-					evalSplatPick(p01, center, coeffs.x, coeffs.y, coeffs.z, splatOpacity, splatPickId, splatDepth, clipH, &pickId01, &dAcc01, &wAcc01, &T01);
-					evalSplatPick(p11, center, coeffs.x, coeffs.y, coeffs.z, splatOpacity, splatPickId, splatDepth, clipH, &pickId11, &dAcc11, &wAcc11, &T11);
-					if (all(vec4<half>(T00, T10, T01, T11) < half4(ALPHA_THRESHOLD))) {
-						threadDone = true;
-						break;
-					}
-				#else
-					let splatColor = sharedColor[i];
-					#ifdef DEPTH_TEST
-						let splatDepth = sharedViewDepth[i];
-						if (all(vec4f(splatDepth) > sceneDepth)) {
-							threadDone = true;
-							break;
-						}
-					#endif
-					let d = p00 - center;
-					let dxV = vec4f(d.x, d.x + 1.0, d.x, d.x + 1.0);
-					let dyV = vec4f(d.y, d.y, d.y + 1.0, d.y + 1.0);
-					let power4 = coeffs.x * dxV * dxV + coeffs.z * dxV * dyV + coeffs.y * dyV * dyV;
-					if (all(power4 <= vec4f(sharedPowerCutoff[i]))) {
-						continue;
-					}
-					let gauss4 = (half4(exp(power4)) - half4(EXP4)) * half4(INV_EXP4);
-					let alpha4 = min(half4(0.99), half4(splatColor.a) * gauss4);
-					let newT = T * (half4(1.0) - alpha4);
-					var valid = (power4 > vec4f(-4.0)) & (alpha4 > half4(ALPHA_THRESHOLD)) & (T >= half4(ALPHA_THRESHOLD));
-					#ifdef DEPTH_TEST
-						valid = valid & (vec4f(splatDepth) <= sceneDepth);
-					#endif
-					let weight = alpha4 * T * select(half4(0.0), half4(1.0), valid);
-					c00 += splatColor.rgb * weight.x;
-					c10 += splatColor.rgb * weight.y;
-					c01 += splatColor.rgb * weight.z;
-					c11 += splatColor.rgb * weight.w;
-					T = select(T, newT, valid);
-					#ifdef HEATMAP_MODE
-						processedCount += 1u;
-					#endif
-					if (all(T < half4(ALPHA_THRESHOLD))) {
-						threadDone = true;
-						break;
-					}
-				#endif
-			}
-		}
-		workgroupBarrier();
-	}
-	#ifdef HEATMAP_MODE
-		atomicAdd(&sharedHeatCount, processedCount);
-		workgroupBarrier();
-		let avgCount = f32(atomicLoad(&sharedHeatCount)) / 64.0;
-		let heatColor = vec4f(heatmapColor(avgCount), 1.0);
-		if (basePixel.x < uniforms.screenWidth && basePixel.y < uniforms.screenHeight) {
-			textureStore(outputTexture, basePixel, heatColor);
-		}
-		if (basePixel.x + 1u < uniforms.screenWidth && basePixel.y < uniforms.screenHeight) {
-			textureStore(outputTexture, vec2u(basePixel.x + 1u, basePixel.y), heatColor);
-		}
-		if (basePixel.x < uniforms.screenWidth && basePixel.y + 1u < uniforms.screenHeight) {
-			textureStore(outputTexture, vec2u(basePixel.x, basePixel.y + 1u), heatColor);
-		}
-		if (basePixel.x + 1u < uniforms.screenWidth && basePixel.y + 1u < uniforms.screenHeight) {
-			textureStore(outputTexture, vec2u(basePixel.x + 1u, basePixel.y + 1u), heatColor);
-		}
-	#else
-		if (basePixel.x < uniforms.screenWidth && basePixel.y < uniforms.screenHeight) {
-			#ifdef PICK_MODE
-				textureStore(pickIdTexture, basePixel, vec4u(pickId00, 0u, 0u, 0u));
-				textureStore(pickDepthTexture, basePixel, vec4f(dAcc00, wAcc00, 0.0, 0.0));
-			#else
-				textureStore(outputTexture, basePixel, vec4f(decodeGamma3(vec3f(c00)), f32(half(1.0) - T.x)));
-			#endif
-		}
-		if (basePixel.x + 1u < uniforms.screenWidth && basePixel.y < uniforms.screenHeight) {
-			let px10 = vec2u(basePixel.x + 1u, basePixel.y);
-			#ifdef PICK_MODE
-				textureStore(pickIdTexture, px10, vec4u(pickId10, 0u, 0u, 0u));
-				textureStore(pickDepthTexture, px10, vec4f(dAcc10, wAcc10, 0.0, 0.0));
-			#else
-				textureStore(outputTexture, px10, vec4f(decodeGamma3(vec3f(c10)), f32(half(1.0) - T.y)));
-			#endif
-		}
-		if (basePixel.x < uniforms.screenWidth && basePixel.y + 1u < uniforms.screenHeight) {
-			let px01 = vec2u(basePixel.x, basePixel.y + 1u);
-			#ifdef PICK_MODE
-				textureStore(pickIdTexture, px01, vec4u(pickId01, 0u, 0u, 0u));
-				textureStore(pickDepthTexture, px01, vec4f(dAcc01, wAcc01, 0.0, 0.0));
-			#else
-				textureStore(outputTexture, px01, vec4f(decodeGamma3(vec3f(c01)), f32(half(1.0) - T.z)));
-			#endif
-		}
-		if (basePixel.x + 1u < uniforms.screenWidth && basePixel.y + 1u < uniforms.screenHeight) {
-			let px11 = vec2u(basePixel.x + 1u, basePixel.y + 1u);
-			#ifdef PICK_MODE
-				textureStore(pickIdTexture, px11, vec4u(pickId11, 0u, 0u, 0u));
-				textureStore(pickDepthTexture, px11, vec4f(dAcc11, wAcc11, 0.0, 0.0));
-			#else
-				textureStore(outputTexture, px11, vec4f(decodeGamma3(vec3f(c11)), f32(half(1.0) - T.w)));
-			#endif
-		}
-	#endif
-}
-`;
-
-const ALPHA_VISIBILITY_THRESHOLD = 1 / 255;
-const CACHE_STRIDE = 8;
-const NUM_BUCKETS = 64;
-
-const MAX_CHUNKS_PER_TILE$1 = 8;
-class GSplatLocalDispatchSet {
-	device;
-	pickMode;
-	// Count compute caching: standard and fisheye variants, created lazily
-	_countShader = null;
-	_countBindGroupFormat = null;
-	_countCompute = null;
-	_countShaderFisheye = null;
-	_countBindGroupFormatFisheye = null;
-	_countComputeFisheye = null;
-	placeEntriesCompute;
-	largeSplatCompute;
-	largePlaceEntriesCompute;
-	classifyCompute;
-	sortCompute;
-	bucketSortCompute;
-	copyCompute;
-	chunkSortCompute;
-	_rasterizeVariants = /* @__PURE__ */ new Map();
-	prefixSumKernel;
-	_tileSplatCountsBuffer = null;
-	_smallTileListBuffer = null;
-	_largeTileListBuffer = null;
-	_largeTileOverflowBasesBuffer = null;
-	_rasterizeTileListBuffer = null;
-	_tileListCountsBuffer = null;
-	_chunkRangesBuffer = null;
-	_totalChunksBuffer = null;
-	_chunkSortIndirectBuffer = null;
-	_allocatedTileCapacity = 0;
-	outputTexture = null;
-	pickIdTexture = null;
-	pickDepthTexture = null;
-	constructor(device, pickMode) {
-		this.device = device;
-		this.pickMode = pickMode;
-		this.prefixSumKernel = new PrefixSumKernel(device);
-		if (pickMode) {
-			this.pickIdTexture = new Texture(device, {
-				name: "GSplatLocalPickId",
-				width: 4,
-				height: 4,
-				format: PIXELFORMAT_R32U,
-				mipmaps: false,
-				minFilter: FILTER_NEAREST,
-				magFilter: FILTER_NEAREST,
-				storage: true
-			});
-			this.pickDepthTexture = new Texture(device, {
-				name: "GSplatLocalPickDepth",
-				width: 4,
-				height: 4,
-				format: PIXELFORMAT_RGBA16F,
-				mipmaps: false,
-				minFilter: FILTER_NEAREST,
-				magFilter: FILTER_NEAREST,
-				storage: true
-			});
-		} else {
-			this.outputTexture = new Texture(device, {
-				name: "GSplatLocalComputeOutput",
-				width: 4,
-				height: 4,
-				format: PIXELFORMAT_RGBA16F,
-				mipmaps: false,
-				minFilter: FILTER_NEAREST,
-				magFilter: FILTER_NEAREST,
-				storage: true
-			});
-		}
-	}
-	resizeOutputTextures(width, height) {
-		if (this.pickMode) {
-			this.pickIdTexture?.resize(width, height);
-			this.pickDepthTexture?.resize(width, height);
-		} else {
-			this.outputTexture?.resize(width, height);
-		}
-	}
-	ensureTileBuffers(numTiles) {
-		const requiredTileSlots = numTiles + 1;
-		if (requiredTileSlots <= this._allocatedTileCapacity) return;
-		this._tileSplatCountsBuffer?.destroy();
-		this._smallTileListBuffer?.destroy();
-		this._largeTileListBuffer?.destroy();
-		this._largeTileOverflowBasesBuffer?.destroy();
-		this._rasterizeTileListBuffer?.destroy();
-		this._tileListCountsBuffer?.destroy();
-		this._chunkRangesBuffer?.destroy();
-		this._totalChunksBuffer?.destroy();
-		this._chunkSortIndirectBuffer?.destroy();
-		this._allocatedTileCapacity = requiredTileSlots;
-		this._tileSplatCountsBuffer = new StorageBuffer(this.device, requiredTileSlots * 4, BUFFERUSAGE_COPY_DST | BUFFERUSAGE_COPY_SRC);
-		this._smallTileListBuffer = new StorageBuffer(this.device, numTiles * 4);
-		this._largeTileListBuffer = new StorageBuffer(this.device, numTiles * 4);
-		this._largeTileOverflowBasesBuffer = new StorageBuffer(this.device, numTiles * 4);
-		this._rasterizeTileListBuffer = new StorageBuffer(this.device, numTiles * 4);
-		this._tileListCountsBuffer = new StorageBuffer(this.device, 4 * 4, BUFFERUSAGE_COPY_DST | BUFFERUSAGE_COPY_SRC);
-		const maxChunks = numTiles * MAX_CHUNKS_PER_TILE$1;
-		this._chunkRangesBuffer = new StorageBuffer(this.device, maxChunks * 8);
-		this._totalChunksBuffer = new StorageBuffer(this.device, 1 * 4, BUFFERUSAGE_COPY_DST);
-		this._chunkSortIndirectBuffer = new StorageBuffer(this.device, 3 * 4, BUFFERUSAGE_COPY_DST | BUFFERUSAGE_INDIRECT);
-		this.prefixSumKernel.destroyPasses();
-	}
-	getCountCompute(fisheyeEnabled, createShaderAndFormat) {
-		if (fisheyeEnabled) {
-			if (!this._countComputeFisheye) {
-				const { shader, bindGroupFormat } = createShaderAndFormat(this.pickMode, true);
-				this._countShaderFisheye = shader;
-				this._countBindGroupFormatFisheye = bindGroupFormat;
-				const label = this.pickMode ? "GSplatPickTileCountFisheye" : "GSplatLocalTileCountFisheye";
-				this._countComputeFisheye = new Compute(this.device, shader, label);
-			}
-			return this._countComputeFisheye;
-		}
-		if (!this._countCompute) {
-			const { shader, bindGroupFormat } = createShaderAndFormat(this.pickMode, false);
-			this._countShader = shader;
-			this._countBindGroupFormat = bindGroupFormat;
-			const label = this.pickMode ? "GSplatPickTileCount" : "GSplatLocalTileCount";
-			this._countCompute = new Compute(this.device, shader, label);
-		}
-		return this._countCompute;
-	}
-	destroyCountResources() {
-		this._countShader?.destroy();
-		this._countBindGroupFormat?.destroy();
-		this._countCompute?.destroy();
-		this._countShaderFisheye?.destroy();
-		this._countBindGroupFormatFisheye?.destroy();
-		this._countComputeFisheye?.destroy();
-		this._countShader = null;
-		this._countBindGroupFormat = null;
-		this._countCompute = null;
-		this._countShaderFisheye = null;
-		this._countBindGroupFormatFisheye = null;
-		this._countComputeFisheye = null;
-	}
-	getRasterizeCompute(pickMode, depthTest, fogType = "none", heatmap = false) {
-		let key = pickMode ? "pick" : "color";
-		if (depthTest) key += "-depth";
-		if (fogType !== "none") key += `-fog-${fogType}`;
-		if (heatmap) key += "-heatmap";
-		let variant = this._rasterizeVariants.get(key);
-		if (!variant) {
-			const { shader, bindGroupFormat } = this._createRasterizeShaderAndFormat(pickMode, depthTest, fogType, heatmap);
-			const compute = new Compute(this.device, shader, `GSplatRasterize-${key}`);
-			variant = { shader, bindGroupFormat, compute };
-			this._rasterizeVariants.set(key, variant);
-		}
-		return variant.compute;
-	}
-	_createRasterizeShaderAndFormat(pickMode, depthTest = false, fogType = "none", heatmap = false) {
-		const device = this.device;
-		const hasFog = fogType !== "none";
-		const uniforms = [
-			new UniformFormat("screenWidth", UNIFORMTYPE_UINT),
-			new UniformFormat("screenHeight", UNIFORMTYPE_UINT),
-			new UniformFormat("numTilesX", UNIFORMTYPE_UINT),
-			new UniformFormat("nearClip", UNIFORMTYPE_FLOAT),
-			new UniformFormat("farClip", UNIFORMTYPE_FLOAT),
-			new UniformFormat("alphaClip", UNIFORMTYPE_FLOAT)
-		];
-		if (hasFog) {
-			uniforms.push(
-				new UniformFormat("fog_color", UNIFORMTYPE_VEC3),
-				new UniformFormat("fog_start", UNIFORMTYPE_FLOAT),
-				new UniformFormat("fog_end", UNIFORMTYPE_FLOAT),
-				new UniformFormat("fog_density", UNIFORMTYPE_FLOAT)
-			);
-		}
-		const ubf = new UniformBufferFormat(device, uniforms);
-		const sharedBindings = [
-			new BindUniformBufferFormat("uniforms", SHADERSTAGE_COMPUTE),
-			new BindStorageBufferFormat("tileEntries", SHADERSTAGE_COMPUTE, true),
-			new BindStorageBufferFormat("tileSplatCounts", SHADERSTAGE_COMPUTE, true),
-			new BindStorageBufferFormat("projCache", SHADERSTAGE_COMPUTE, true),
-			new BindStorageBufferFormat("rasterizeTileList", SHADERSTAGE_COMPUTE, true),
-			new BindStorageBufferFormat("tileListCounts", SHADERSTAGE_COMPUTE, true),
-			new BindStorageBufferFormat("depthBuffer", SHADERSTAGE_COMPUTE, true)
-		];
-		const outputBindings = pickMode ? [
-			new BindStorageTextureFormat("pickIdTexture", PIXELFORMAT_R32U),
-			new BindStorageTextureFormat("pickDepthTexture", PIXELFORMAT_RGBA16F)
-		] : [
-			new BindStorageTextureFormat("outputTexture", PIXELFORMAT_RGBA16F)
-		];
-		const depthBindings = depthTest ? [
-			new BindTextureFormat("sceneDepthMap", SHADERSTAGE_COMPUTE, TEXTUREDIMENSION_2D, SAMPLETYPE_UNFILTERABLE_FLOAT, false)
-		] : [];
-		const bgf = new BindGroupFormat(device, [...sharedBindings, ...outputBindings, ...depthBindings]);
-		const cdefines = /* @__PURE__ */ new Map();
-		cdefines.set("{CACHE_STRIDE}", CACHE_STRIDE.toString());
-		if (pickMode) cdefines.set("PICK_MODE", "");
-		if (depthTest) cdefines.set("DEPTH_TEST", "");
-		if (heatmap) cdefines.set("HEATMAP_MODE", "");
-		cdefines.set("GAMMA", "SRGB");
-		cdefines.set("FOG", hasFog ? fogType.toUpperCase() : "NONE");
-		const cincludes = pickMode ? void 0 : /* @__PURE__ */ new Map([["decodePS", shaderChunksWGSL.decodePS]]);
-		if (hasFog && cincludes) {
-			cincludes.set("fogMathPS", shaderChunksWGSL.fogMathPS);
-			cincludes.set("gammaPS", shaderChunksWGSL.gammaPS);
-		}
-		let name = "GSplatLocalRasterize";
-		if (pickMode) name = "GSplatLocalRasterizePick";
-		else if (depthTest) name = "GSplatLocalRasterizeDepth";
-		const shader = new Shader(device, {
-			name,
-			shaderLanguage: SHADERLANGUAGE_WGSL,
-			cshader: computeGsplatLocalRasterizeSource,
-			cdefines: cdefines.size > 0 ? cdefines : void 0,
-			cincludes,
-			computeBindGroupFormat: bgf,
-			computeUniformBufferFormats: { uniforms: ubf }
-		});
-		return { shader, bindGroupFormat: bgf };
-	}
-	destroy() {
-		this.destroyCountResources();
-		for (const { shader, bindGroupFormat, compute } of this._rasterizeVariants.values()) {
-			compute.destroy();
-			shader.destroy();
-			bindGroupFormat.destroy();
-		}
-		this._tileSplatCountsBuffer?.destroy();
-		this._smallTileListBuffer?.destroy();
-		this._largeTileListBuffer?.destroy();
-		this._largeTileOverflowBasesBuffer?.destroy();
-		this._rasterizeTileListBuffer?.destroy();
-		this._tileListCountsBuffer?.destroy();
-		this._chunkRangesBuffer?.destroy();
-		this._totalChunksBuffer?.destroy();
-		this._chunkSortIndirectBuffer?.destroy();
-		this.prefixSumKernel.destroy();
-		this.outputTexture?.destroy();
-		this.pickIdTexture?.destroy();
-		this.pickDepthTexture?.destroy();
-	}
-}
-
-var gsplatComputeSplat_default = `
-struct Splat {
-	index: u32,
-	uv: vec2i
-}
-var<private> splat: Splat;
-fn setSplat(idx: u32) {
-	splat.index = idx;
-	splat.uv = vec2i(i32(idx % uniforms.splatTextureSize), i32(idx / uniforms.splatTextureSize));
-}
-`;
-
-const INITIAL_TILE_ENTRY_MULTIPLIER = 2.5;
-const ENTRY_HEADROOM_MULTIPLIER = 2;
-const SHRINK_THRESHOLD = 200;
-const INITIAL_LARGE_SPLAT_CAPACITY = 16384;
-const TILE_SIZE = 16;
-const MAX_TILES = 65535;
-const MAX_CHUNKS_PER_TILE = 8;
-const _viewProjMat$1 = new Mat4();
-const _viewProjData$1 = new Float32Array(16);
-const _viewData$1 = new Float32Array(16);
-const _shaderProjMat$1 = new Mat4();
-const _fogColorLinear = new Color();
-const _fogColorArray = new Float32Array(3);
-class GSplatComputeLocalRenderer extends GSplatRenderer {
-	_mainSet;
-	_pickSet = null;
-	framePass;
-	tileComposite;
-	_needsFramePassRegister = false;
-	_textureSize = 0;
-	_minPixelSize = 2;
-	_minContribution = 3;
-	_alphaClip = 0.3;
-	_alphaClipForward = ALPHA_VISIBILITY_THRESHOLD;
-	_exposure = 1;
-	_numSplats = 0;
-	_compactedSplatIds = null;
-	_sortElementCountBuffer = null;
-	// --- Shared splat/entry-dependent buffers ---
-	_projCacheBuffer = null;
-	_tileEntriesBuffer = null;
-	// Pair buffer for scatter-free tile binning: stores packed (tileIdx << 16 | localOffset)
-	// per splat-tile intersection. Same size as tileEntries (one u32 per pair).
-	_pairBuffer = null;
-	_countersBuffer = null;
-	_splatPairStartBuffer = null;
-	_splatPairCountBuffer = null;
-	// --- Large-splat deferred processing buffers ---
-	_largeSplatIdsBuffer = null;
-	_largeSplatIdsCapacity = INITIAL_LARGE_SPLAT_CAPACITY;
-	_allocatedLargeSplatCapacity = 0;
-	_allocatedSplatCapacity = 0;
-	_allocatedEntryCapacity = 0;
-	_tileEntryMultiplier = INITIAL_TILE_ENTRY_MULTIPLIER;
-	_lastBufferSubmitVersion = -1;
-	_lastReadbackEntryCount = -1;
-	_shrinkFrameCount = 0;
-	_fisheye = 0;
-	_dataSource;
-	_placeEntriesShader;
-	_placeEntriesBindGroupFormat;
-	_placeEntryPrepShader;
-	_placeEntryPrepBindGroupFormat;
-	_placeEntryPrepDispatchBuffer = null;
-	_placeEntryPrepCompute = null;
-	_largeSplatShader;
-	_largeSplatBindGroupFormat;
-	_largeSplatPrepShader;
-	_largeSplatPrepBindGroupFormat;
-	_largeSplatDispatchBuffer = null;
-	_largeSplatPrepCompute = null;
-	_largePlaceEntriesShader;
-	_largePlaceEntriesBindGroupFormat;
-	_classifyShader;
-	_classifyBindGroupFormat;
-	_sortShader;
-	_sortBindGroupFormat;
-	_bucketSortShader;
-	_bucketSortBindGroupFormat;
-	_copyShader;
-	_copyBindGroupFormat;
-	_chunkSortShader;
-	_chunkSortBindGroupFormat;
-	constructor(device, node, cameraNode, layer, workBuffer) {
-		super(device, node, cameraNode, layer, workBuffer);
-		this._dataSource = workBuffer;
-		this._createSharedShaders();
-		this._mainSet = this._createDispatchSet(false);
-		this.framePass = new FramePassGSplatComputeLocal(this);
-		const thisCamera = cameraNode.camera;
-		this.tileComposite = new GSplatTileComposite(device, node, (camera) => {
-			const renderMode = this.renderMode ?? 0;
-			return thisCamera.camera === camera && (renderMode & GSPLAT_FORWARD) !== 0 && this._mainSet._rasterizeTileListBuffer !== null;
-		});
-	}
-	setDataSource(source) {
-		this._dataSource = source;
-	}
-	destroy() {
-		this._unregisterFramePass();
-		if (this.renderMode) {
-			if (this.renderMode & GSPLAT_FORWARD) {
-				this.layer.removeMeshInstances([this.tileComposite.meshInstance], true);
-			}
-		}
-		this._mainSet.destroy();
-		this._pickSet?.destroy();
-		this._placeEntriesShader.destroy();
-		this._placeEntriesBindGroupFormat.destroy();
-		this._placeEntryPrepShader.destroy();
-		this._placeEntryPrepBindGroupFormat.destroy();
-		this._placeEntryPrepDispatchBuffer?.destroy();
-		this._largeSplatShader.destroy();
-		this._largeSplatBindGroupFormat.destroy();
-		this._largeSplatPrepShader.destroy();
-		this._largeSplatPrepBindGroupFormat.destroy();
-		this._largeSplatDispatchBuffer?.destroy();
-		this._largePlaceEntriesShader.destroy();
-		this._largePlaceEntriesBindGroupFormat.destroy();
-		this._classifyShader.destroy();
-		this._classifyBindGroupFormat.destroy();
-		this._sortShader.destroy();
-		this._sortBindGroupFormat.destroy();
-		this._bucketSortShader.destroy();
-		this._bucketSortBindGroupFormat.destroy();
-		this._copyShader.destroy();
-		this._copyBindGroupFormat.destroy();
-		this._chunkSortShader.destroy();
-		this._chunkSortBindGroupFormat.destroy();
-		this._projCacheBuffer?.destroy();
-		this._depthBuffer?.destroy();
-		this._tileEntriesBuffer?.destroy();
-		this._pairBuffer?.destroy();
-		this._countersBuffer?.destroy();
-		this._splatPairStartBuffer?.destroy();
-		this._splatPairCountBuffer?.destroy();
-		this._largeSplatIdsBuffer?.destroy();
-		this.tileComposite.destroy();
-		super.destroy();
-	}
-	get material() {
-		return this.tileComposite.material;
-	}
-	setRenderMode(renderMode) {
-		const oldRenderMode = this.renderMode ?? 0;
-		const wasForward = (oldRenderMode & GSPLAT_FORWARD) !== 0;
-		const isForward = (renderMode & GSPLAT_FORWARD) !== 0;
-		if (!wasForward && isForward) {
-			this.layer.addMeshInstances([this.tileComposite.meshInstance], true);
-			this._registerFramePass();
-		}
-		if (wasForward && !isForward) {
-			this.layer.removeMeshInstances([this.tileComposite.meshInstance], true);
-			this._unregisterFramePass();
-		}
-		super.setRenderMode(renderMode);
-	}
-	frameUpdate(gsplat, exposure, fogParams) {
-		if (this._needsFramePassRegister) {
-			this._registerFramePass();
-		}
-		this._minPixelSize = gsplat.minPixelSize;
-		this._minContribution = gsplat.minContribution;
-		this._alphaClip = gsplat.alphaClip;
-		this._alphaClipForward = gsplat.alphaClipForward;
-		this._exposure = exposure ?? 1;
-		this._fisheye = gsplat.fisheye;
-		this._fogParams = fogParams ?? null;
-		this._debugMode = gsplat.debug;
-		const formatHash = this._dataSource.format.hash;
-		if (formatHash !== this._formatHash) {
-			this._formatHash = formatHash;
-			this._invalidateCountCompute();
-		}
-	}
-	setCompactedData(compactedSplatIds, sortElementCountBuffer, textureSize, numSplats) {
-		this._compactedSplatIds = compactedSplatIds;
-		this._sortElementCountBuffer = sortElementCountBuffer;
-		this._textureSize = textureSize;
-		this._numSplats = numSplats;
-	}
-	_registerFramePass() {
-		const camera = this.cameraNode.camera?.camera;
-		if (camera) {
-			if (!camera.beforePasses.includes(this.framePass)) {
-				camera.beforePasses.push(this.framePass);
-			}
-			this._needsFramePassRegister = false;
-		} else {
-			this._needsFramePassRegister = true;
-		}
-	}
-	_unregisterFramePass() {
-		this._needsFramePassRegister = false;
-		const camera = this.cameraNode.camera?.camera;
-		if (camera) {
-			const idx = camera.beforePasses.indexOf(this.framePass);
-			if (idx !== -1) {
-				camera.beforePasses.splice(idx, 1);
-			}
-		}
-	}
-	resizeOutputTexture(width, height) {
-		this._mainSet.resizeOutputTextures(width, height);
-	}
-	_ensureSharedBuffers(numSplats) {
-		const device = this.device;
-		const canResize = device.submitVersion !== this._lastBufferSubmitVersion;
-		const readbackValue = this._lastReadbackEntryCount;
-		if (readbackValue !== -1) {
-			this._lastReadbackEntryCount = -1;
-			const currentCapacity = this._allocatedEntryCapacity;
-			if (currentCapacity > 0 && readbackValue < currentCapacity / 2) {
-				this._shrinkFrameCount++;
+			if (this.octreeNodes) {
+				this.activeSplats = totalCount;
+				this.numBoundsEntries = this.octreeNodes.length;
+			} else if (totalCount === this.numSplats) {
+				this.intervals.length = 0;
 			} else {
-				this._shrinkFrameCount = 0;
+				this.activeSplats = totalCount;
 			}
-			if (this._shrinkFrameCount >= SHRINK_THRESHOLD && numSplats > 0) {
-				const target = Math.max(INITIAL_TILE_ENTRY_MULTIPLIER, readbackValue / numSplats * ENTRY_HEADROOM_MULTIPLIER);
-				this._tileEntryMultiplier = Math.max(target, this._tileEntryMultiplier * 0.9);
-				this._shrinkFrameCount = 0;
-			}
-		}
-		if (!canResize) return;
-		if (numSplats > this._allocatedSplatCapacity) {
-			this._projCacheBuffer?.destroy();
-			this._depthBuffer?.destroy();
-			this._splatPairStartBuffer?.destroy();
-			this._splatPairCountBuffer?.destroy();
-			this._allocatedSplatCapacity = numSplats;
-			this._projCacheBuffer = new StorageBuffer(device, numSplats * CACHE_STRIDE * 4);
-			this._depthBuffer = new StorageBuffer(device, numSplats * 4);
-			this._splatPairStartBuffer = new StorageBuffer(device, numSplats * 4);
-			this._splatPairCountBuffer = new StorageBuffer(device, numSplats * 4);
-		}
-		if (!this._countersBuffer) {
-			this._countersBuffer = new StorageBuffer(device, 8, BUFFERUSAGE_COPY_DST | BUFFERUSAGE_COPY_SRC);
-		}
-		if (this._largeSplatIdsCapacity > this._allocatedLargeSplatCapacity) {
-			this._largeSplatIdsBuffer?.destroy();
-			this._allocatedLargeSplatCapacity = this._largeSplatIdsCapacity;
-			this._largeSplatIdsBuffer = new StorageBuffer(device, this._largeSplatIdsCapacity * 4);
-		}
-		const requiredEntryCapacity = Math.ceil(numSplats * this._tileEntryMultiplier);
-		const needsGrow = requiredEntryCapacity > this._allocatedEntryCapacity;
-		const needsShrink = this._allocatedEntryCapacity > 0 && requiredEntryCapacity * 2 < this._allocatedEntryCapacity;
-		if (needsGrow || needsShrink) {
-			this._tileEntriesBuffer?.destroy();
-			this._pairBuffer?.destroy();
-			this._allocatedEntryCapacity = requiredEntryCapacity;
-			this._tileEntriesBuffer = new StorageBuffer(device, requiredEntryCapacity * 4, BUFFERUSAGE_COPY_DST);
-			this._pairBuffer = new StorageBuffer(device, requiredEntryCapacity * 4);
-		}
-		this._lastBufferSubmitVersion = device.submitVersion;
-	}
-	dispatch() {
-		const set = this._mainSet;
-		const outputTex = set.outputTexture;
-		if (!outputTex) return;
-		const width = outputTex.width;
-		const height = outputTex.height;
-		this._dispatchPipeline(set, width, height, false);
-		this.tileComposite.update(
-			this._lastDrawSlot,
-			outputTex,
-			set._rasterizeTileListBuffer,
-			this._lastNumTilesX,
-			width,
-			height
-		);
-	}
-	dispatchPick(cam, width, height) {
-		if (!this._pickSet) {
-			this._pickSet = this._createDispatchSet(true);
-		}
-		const set = this._pickSet;
-		set.resizeOutputTextures(width, height);
-		this._dispatchPipeline(set, width, height, true);
-		return this.tileComposite.prepareForPicking(
-			this._lastDrawSlot,
-			set.pickIdTexture,
-			set.pickDepthTexture,
-			set._rasterizeTileListBuffer,
-			this._lastNumTilesX,
-			width,
-			height
-		);
-	}
-	_lastDrawSlot = 0;
-	_lastNumTilesX = 0;
-	_dispatchPipeline(set, width, height, pickMode) {
-		const numSplats = this._numSplats;
-		if (!this._compactedSplatIds || !this._sortElementCountBuffer || numSplats === 0) return;
-		const device = this.device;
-		let numTilesX = Math.ceil(width / TILE_SIZE);
-		let numTilesY = Math.ceil(height / TILE_SIZE);
-		if (numTilesX * numTilesY > MAX_TILES) {
-			const scale = Math.sqrt(MAX_TILES / (numTilesX * numTilesY));
-			numTilesX = Math.max(1, Math.floor(numTilesX * scale));
-			numTilesY = Math.max(1, Math.floor(numTilesY * scale));
-		}
-		const numTiles = numTilesX * numTilesY;
-		this._ensureSharedBuffers(numSplats);
-		set.ensureTileBuffers(numTiles);
-		const maxEntries = this._allocatedEntryCapacity;
-		const ds = this._dataSource;
-		const camera = this.cameraNode.camera;
-		const cam = camera.camera;
-		const view = cam.viewMatrix;
-		const flipY = !!camera.renderTarget?.flipY;
-		const webgpu = device.isWebGPU;
-		_viewProjMat$1.mul2(Camera$1.applyShaderProjectionTransform(cam.projectionMatrix, _shaderProjMat$1, flipY, webgpu), view);
-		_viewProjData$1.set(_viewProjMat$1.data);
-		_viewData$1.set(view.data);
-		const focal = width * _shaderProjMat$1.data[0];
-		const alphaClip = pickMode ? this._alphaClip : Math.max(ALPHA_VISIBILITY_THRESHOLD, this._alphaClipForward);
-		this.fisheyeProj.update(this._fisheye, camera.fov, cam.projectionMatrix);
-		const fisheyeEnabled = this.fisheyeProj.enabled;
-		const createCountShader = (pick, fisheye) => this._createCountShaderAndFormat(pick, fisheye);
-		const countCompute = set.getCountCompute(fisheyeEnabled, createCountShader);
-		this._placeEntryPrepCompute.setParameter("sortElementCount", this._sortElementCountBuffer);
-		this._placeEntryPrepCompute.setParameter("dispatchArgs", this._placeEntryPrepDispatchBuffer);
-		this._placeEntryPrepCompute.setupDispatch(1, 1, 1);
-		device.computeDispatch([this._placeEntryPrepCompute], "GSplatLocalDispatchPrep");
-		set._tileSplatCountsBuffer.clear();
-		this._countersBuffer.clear();
-		countCompute.setParameter("compactedSplatIds", this._compactedSplatIds);
-		countCompute.setParameter("sortElementCount", this._sortElementCountBuffer);
-		countCompute.setParameter("projCache", this._projCacheBuffer);
-		countCompute.setParameter("tileSplatCounts", set._tileSplatCountsBuffer);
-		countCompute.setParameter("pairBuffer", this._pairBuffer);
-		countCompute.setParameter("countersBuffer", this._countersBuffer);
-		countCompute.setParameter("splatPairStart", this._splatPairStartBuffer);
-		countCompute.setParameter("splatPairCount", this._splatPairCountBuffer);
-		countCompute.setParameter("largeSplatIds", this._largeSplatIdsBuffer);
-		countCompute.setParameter("depthBuffer", this._depthBuffer);
-		for (const stream of ds.format.streams) {
-			countCompute.setParameter(stream.name, ds.getTexture(stream.name));
-		}
-		for (const stream of ds.format.extraStreams) {
-			countCompute.setParameter(stream.name, ds.getTexture(stream.name));
-		}
-		countCompute.setParameter("splatTextureSize", this._textureSize);
-		countCompute.setParameter("numTilesX", numTilesX);
-		countCompute.setParameter("numTilesY", numTilesY);
-		countCompute.setParameter("viewProj", _viewProjData$1);
-		countCompute.setParameter("viewMatrix", _viewData$1);
-		countCompute.setParameter("focal", focal);
-		countCompute.setParameter("viewportWidth", width);
-		countCompute.setParameter("viewportHeight", height);
-		countCompute.setParameter("nearClip", cam.nearClip);
-		countCompute.setParameter("farClip", cam.farClip);
-		countCompute.setParameter("minPixelSize", this._minPixelSize * 0.5);
-		countCompute.setParameter("isOrtho", cam.projection === PROJECTION_ORTHOGRAPHIC ? 1 : 0);
-		countCompute.setParameter("exposure", this._exposure);
-		countCompute.setParameter("alphaClip", alphaClip);
-		countCompute.setParameter("minContribution", this._minContribution);
-		if (fisheyeEnabled) {
-			const fp = this.fisheyeProj;
-			countCompute.setParameter("fisheye_k", fp.k);
-			countCompute.setParameter("fisheye_inv_k", fp.invK);
-			countCompute.setParameter("fisheye_projMat00", fp.projMat00);
-			countCompute.setParameter("fisheye_projMat11", fp.projMat11);
-		}
-		countCompute.setupIndirectDispatch(0, this._placeEntryPrepDispatchBuffer);
-		device.computeDispatch([countCompute], pickMode ? "GSplatPickTileCount" : "GSplatLocalTileCount");
-		this._largeSplatPrepCompute.setParameter("countersBuffer", this._countersBuffer);
-		this._largeSplatPrepCompute.setParameter("dispatchArgs", this._largeSplatDispatchBuffer);
-		this._largeSplatPrepCompute.setParameter("largeSplatIds", this._largeSplatIdsBuffer);
-		this._largeSplatPrepCompute.setupDispatch(1, 1, 1);
-		device.computeDispatch([this._largeSplatPrepCompute], pickMode ? "GSplatPickLargeSplatPrep" : "GSplatLocalLargeSplatPrep");
-		set.largeSplatCompute.setParameter("projCache", this._projCacheBuffer);
-		set.largeSplatCompute.setParameter("tileSplatCounts", set._tileSplatCountsBuffer);
-		set.largeSplatCompute.setParameter("pairBuffer", this._pairBuffer);
-		set.largeSplatCompute.setParameter("countersBuffer", this._countersBuffer);
-		set.largeSplatCompute.setParameter("splatPairStart", this._splatPairStartBuffer);
-		set.largeSplatCompute.setParameter("splatPairCount", this._splatPairCountBuffer);
-		set.largeSplatCompute.setParameter("largeSplatIds", this._largeSplatIdsBuffer);
-		set.largeSplatCompute.setParameter("numTilesX", numTilesX);
-		set.largeSplatCompute.setParameter("numTilesY", numTilesY);
-		set.largeSplatCompute.setParameter("viewportWidth", width);
-		set.largeSplatCompute.setParameter("viewportHeight", height);
-		set.largeSplatCompute.setParameter("alphaClip", alphaClip);
-		set.largeSplatCompute.setupIndirectDispatch(0, this._largeSplatDispatchBuffer);
-		device.computeDispatch([set.largeSplatCompute], pickMode ? "GSplatPickLargeTileCount" : "GSplatLocalLargeTileCount");
-		set.prefixSumKernel.resize(set._tileSplatCountsBuffer, numTiles + 1);
-		set.prefixSumKernel.dispatch(device);
-		set.placeEntriesCompute.setParameter("pairBuffer", this._pairBuffer);
-		set.placeEntriesCompute.setParameter("splatPairStart", this._splatPairStartBuffer);
-		set.placeEntriesCompute.setParameter("splatPairCount", this._splatPairCountBuffer);
-		set.placeEntriesCompute.setParameter("tileSplatCounts", set._tileSplatCountsBuffer);
-		set.placeEntriesCompute.setParameter("tileEntries", this._tileEntriesBuffer);
-		set.placeEntriesCompute.setParameter("sortElementCount", this._sortElementCountBuffer);
-		set.placeEntriesCompute.setupIndirectDispatch(1, this._placeEntryPrepDispatchBuffer);
-		device.computeDispatch([set.placeEntriesCompute], pickMode ? "GSplatPickPlaceEntries" : "GSplatLocalPlaceEntries");
-		set.largePlaceEntriesCompute.setParameter("pairBuffer", this._pairBuffer);
-		set.largePlaceEntriesCompute.setParameter("splatPairStart", this._splatPairStartBuffer);
-		set.largePlaceEntriesCompute.setParameter("splatPairCount", this._splatPairCountBuffer);
-		set.largePlaceEntriesCompute.setParameter("tileSplatCounts", set._tileSplatCountsBuffer);
-		set.largePlaceEntriesCompute.setParameter("tileEntries", this._tileEntriesBuffer);
-		set.largePlaceEntriesCompute.setParameter("largeSplatIds", this._largeSplatIdsBuffer);
-		set.largePlaceEntriesCompute.setParameter("countersBuffer", this._countersBuffer);
-		set.largePlaceEntriesCompute.setupIndirectDispatch(0, this._largeSplatDispatchBuffer);
-		device.computeDispatch([set.largePlaceEntriesCompute], pickMode ? "GSplatPickLargePlaceEntries" : "GSplatLocalLargePlaceEntries");
-		set._tileListCountsBuffer.clear();
-		set._totalChunksBuffer.clear();
-		set._chunkSortIndirectBuffer.clear();
-		const indirectSlot = device.getIndirectDispatchSlot(3);
-		const drawSlot = device.getIndirectDrawSlot(1);
-		set.classifyCompute.setParameter("tileSplatCounts", set._tileSplatCountsBuffer);
-		set.classifyCompute.setParameter("smallTileList", set._smallTileListBuffer);
-		set.classifyCompute.setParameter("largeTileList", set._largeTileListBuffer);
-		set.classifyCompute.setParameter("rasterizeTileList", set._rasterizeTileListBuffer);
-		set.classifyCompute.setParameter("tileListCounts", set._tileListCountsBuffer);
-		set.classifyCompute.setParameter("indirectDispatchArgs", device.indirectDispatchBuffer);
-		set.classifyCompute.setParameter("largeTileOverflowBases", set._largeTileOverflowBasesBuffer);
-		set.classifyCompute.setParameter("indirectDrawArgs", device.indirectDrawBuffer);
-		set.classifyCompute.setParameter("numTiles", numTiles);
-		set.classifyCompute.setParameter("dispatchSlotOffset", indirectSlot * 3);
-		set.classifyCompute.setParameter("bufferCapacity", maxEntries);
-		set.classifyCompute.setParameter("maxWorkgroupsPerDim", device.limits.maxComputeWorkgroupsPerDimension || 65535);
-		set.classifyCompute.setParameter("drawSlot", drawSlot);
-		set.classifyCompute.setupDispatch(1, 1, 1);
-		device.computeDispatch([set.classifyCompute], pickMode ? "GSplatPickClassify" : "GSplatLocalClassify");
-		set.bucketSortCompute.setParameter("tileEntries", this._tileEntriesBuffer);
-		set.bucketSortCompute.setParameter("largeTileOverflowBases", set._largeTileOverflowBasesBuffer);
-		set.bucketSortCompute.setParameter("tileSplatCounts", set._tileSplatCountsBuffer);
-		set.bucketSortCompute.setParameter("depthBuffer", this._depthBuffer);
-		set.bucketSortCompute.setParameter("largeTileList", set._largeTileListBuffer);
-		set.bucketSortCompute.setParameter("chunkRanges", set._chunkRangesBuffer);
-		set.bucketSortCompute.setParameter("totalChunks", set._totalChunksBuffer);
-		set.bucketSortCompute.setParameter("tileListCounts", set._tileListCountsBuffer);
-		set.bucketSortCompute.setParameter("bufferCapacity", maxEntries);
-		set.bucketSortCompute.setParameter("maxChunks", numTiles * MAX_CHUNKS_PER_TILE);
-		set.bucketSortCompute.setupIndirectDispatch(indirectSlot + 1);
-		device.computeDispatch([set.bucketSortCompute], pickMode ? "GSplatPickBucketSort" : "GSplatLocalBucketSort");
-		set.copyCompute.setParameter("totalChunks", set._totalChunksBuffer);
-		set.copyCompute.setParameter("chunkSortIndirect", set._chunkSortIndirectBuffer);
-		set.copyCompute.setParameter("maxChunks", numTiles * MAX_CHUNKS_PER_TILE);
-		set.copyCompute.setParameter("maxWorkgroupsPerDim", device.limits.maxComputeWorkgroupsPerDimension || 65535);
-		set.copyCompute.setupDispatch(1, 1, 1);
-		device.computeDispatch([set.copyCompute], pickMode ? "GSplatPickCopy" : "GSplatLocalCopy");
-		set.sortCompute.setParameter("tileEntries", this._tileEntriesBuffer);
-		set.sortCompute.setParameter("tileSplatCounts", set._tileSplatCountsBuffer);
-		set.sortCompute.setParameter("depthBuffer", this._depthBuffer);
-		set.sortCompute.setParameter("smallTileList", set._smallTileListBuffer);
-		set.sortCompute.setParameter("tileListCounts", set._tileListCountsBuffer);
-		set.sortCompute.setupIndirectDispatch(indirectSlot);
-		device.computeDispatch([set.sortCompute], pickMode ? "GSplatPickTileSort" : "GSplatLocalTileSort");
-		set.chunkSortCompute.setParameter("tileEntries", this._tileEntriesBuffer);
-		set.chunkSortCompute.setParameter("depthBuffer", this._depthBuffer);
-		set.chunkSortCompute.setParameter("chunkRanges", set._chunkRangesBuffer);
-		set.chunkSortCompute.setParameter("totalChunks", set._totalChunksBuffer);
-		set.chunkSortCompute.setParameter("maxChunks", numTiles * MAX_CHUNKS_PER_TILE);
-		set.chunkSortCompute.setupIndirectDispatch(0, set._chunkSortIndirectBuffer);
-		device.computeDispatch([set.chunkSortCompute], pickMode ? "GSplatPickChunkSort" : "GSplatLocalChunkSort");
-		const hasLinearDepth = cam.shaderParams.sceneDepthMapLinear;
-		const sceneDepthMap = hasLinearDepth ? device.scope.resolve("uSceneDepthMap").value : null;
-		const useDepth = !pickMode && sceneDepthMap;
-		const fogParams = this._fogParams;
-		const fogType = fogParams && fogParams.type !== FOG_NONE ? fogParams.type : "none";
-		const heatmap = !pickMode && this._debugMode === GSPLAT_DEBUG_HEATMAP;
-		const rasterizeCompute = set.getRasterizeCompute(pickMode, useDepth, fogType, heatmap);
-		rasterizeCompute.setParameter("screenWidth", width);
-		rasterizeCompute.setParameter("screenHeight", height);
-		rasterizeCompute.setParameter("numTilesX", numTilesX);
-		rasterizeCompute.setParameter("nearClip", cam.nearClip);
-		rasterizeCompute.setParameter("farClip", cam.farClip);
-		rasterizeCompute.setParameter("alphaClip", alphaClip);
-		if (fogType !== "none") {
-			_fogColorLinear.linear(fogParams.color);
-			_fogColorArray[0] = _fogColorLinear.r;
-			_fogColorArray[1] = _fogColorLinear.g;
-			_fogColorArray[2] = _fogColorLinear.b;
-			rasterizeCompute.setParameter("fog_color", _fogColorArray);
-			rasterizeCompute.setParameter("fog_start", fogParams.start);
-			rasterizeCompute.setParameter("fog_end", fogParams.end);
-			rasterizeCompute.setParameter("fog_density", fogParams.density);
-		}
-		rasterizeCompute.setParameter("tileEntries", this._tileEntriesBuffer);
-		rasterizeCompute.setParameter("tileSplatCounts", set._tileSplatCountsBuffer);
-		rasterizeCompute.setParameter("projCache", this._projCacheBuffer);
-		rasterizeCompute.setParameter("rasterizeTileList", set._rasterizeTileListBuffer);
-		rasterizeCompute.setParameter("tileListCounts", set._tileListCountsBuffer);
-		rasterizeCompute.setParameter("depthBuffer", this._depthBuffer);
-		if (pickMode) {
-			rasterizeCompute.setParameter("pickIdTexture", set.pickIdTexture);
-			rasterizeCompute.setParameter("pickDepthTexture", set.pickDepthTexture);
 		} else {
-			rasterizeCompute.setParameter("outputTexture", set.outputTexture);
-			if (useDepth) {
-				rasterizeCompute.setParameter("sceneDepthMap", sceneDepthMap);
+			this.numBoundsEntries = 1;
+			this.intervalAllocIds.push(this.allocId);
+			const totalCapacity = resource.maxSplats;
+			if (totalCapacity && this.activeSplats < totalCapacity) {
+				this.intervals[0] = 0;
+				this.intervals[1] = this.activeSplats;
 			}
 		}
-		rasterizeCompute.setupIndirectDispatch(indirectSlot + 2);
-		device.computeDispatch([rasterizeCompute], pickMode ? "GSplatPickRasterize" : "GSplatLocalRasterize");
-		this._lastDrawSlot = drawSlot;
-		this._lastNumTilesX = numTilesX;
-		this._scheduleReadback(numSplats, numTiles, set);
 	}
-	_scheduleReadback(numSplats, numTiles, set) {
-		if (numSplats === 0) return;
-		const capturedNumSplats = numSplats;
-		const readback1 = set._tileSplatCountsBuffer.read(numTiles * 4, 4);
-		const readback2 = set._tileListCountsBuffer.read(3 * 4, 4);
-		const readback3 = this._countersBuffer.read(4, 4);
-		Promise.all([readback1, readback2, readback3]).then(([r1, r2, r3]) => {
-			const totalEntries = new Uint32Array(r1.buffer, r1.byteOffset, 1)[0];
-			const totalOverflow = new Uint32Array(r2.buffer, r2.byteOffset, 1)[0];
-			const needed = totalEntries + totalOverflow;
-			if (capturedNumSplats > 0) {
-				this._tileEntryMultiplier = Math.max(this._tileEntryMultiplier, needed / capturedNumSplats * ENTRY_HEADROOM_MULTIPLIER);
-				this._tileEntryMultiplier = Math.max(this._tileEntryMultiplier, INITIAL_TILE_ENTRY_MULTIPLIER);
-			}
-			this._lastReadbackEntryCount = needed;
-			const largeSplatDemand = new Uint32Array(r3.buffer, r3.byteOffset, 1)[0];
-			if (largeSplatDemand > this._largeSplatIdsCapacity) {
-				this._largeSplatIdsCapacity = Math.ceil(largeSplatDemand * 1.2);
-			}
-		}).catch(() => {
-		});
+	appendSubDraws(subDrawData, subDrawCount, sourceBase, size, targetOffset, textureWidth) {
+		let remaining = size;
+		let row = targetOffset / textureWidth | 0;
+		const col = targetOffset % textureWidth;
+		if (col > 0) {
+			const count = Math.min(remaining, textureWidth - col);
+			const idx = subDrawCount * 4;
+			subDrawData[idx] = row | 1 << 16;
+			subDrawData[idx + 1] = col;
+			subDrawData[idx + 2] = col + count;
+			subDrawData[idx + 3] = sourceBase;
+			subDrawCount++;
+			sourceBase += count;
+			remaining -= count;
+			row++;
+		}
+		const fullRows = remaining / textureWidth | 0;
+		if (fullRows > 0) {
+			const idx = subDrawCount * 4;
+			subDrawData[idx] = row | fullRows << 16;
+			subDrawData[idx + 1] = 0;
+			subDrawData[idx + 2] = textureWidth;
+			subDrawData[idx + 3] = sourceBase;
+			subDrawCount++;
+			sourceBase += fullRows * textureWidth;
+			remaining -= fullRows * textureWidth;
+			row += fullRows;
+		}
+		if (remaining > 0) {
+			const idx = subDrawCount * 4;
+			subDrawData[idx] = row | 1 << 16;
+			subDrawData[idx + 1] = 0;
+			subDrawData[idx + 2] = remaining;
+			subDrawData[idx + 3] = sourceBase;
+			subDrawCount++;
+		}
+		return subDrawCount;
 	}
-	_invalidateCountCompute() {
-		this._mainSet.destroyCountResources();
-		this._pickSet?.destroyCountResources();
-	}
-	// ---- Shader / BindGroupFormat creation ----
-	_createCommonIncludes() {
-		const cincludes = /* @__PURE__ */ new Map();
-		cincludes.set("gsplatCommonCS", computeGsplatCommonSource);
-		cincludes.set("gsplatTileIntersectCS", computeGsplatTileIntersectSource);
-		return cincludes;
-	}
-	_createBitonicIncludes() {
-		const cincludes = /* @__PURE__ */ new Map();
-		cincludes.set("gsplatLocalBitonicCS", computeGsplatLocalBitonicSource);
-		return cincludes;
-	}
-	_createSharedShaders() {
-		const device = this.device;
-		this._placeEntriesBindGroupFormat = new BindGroupFormat(device, [
-			new BindStorageBufferFormat("pairBuffer", SHADERSTAGE_COMPUTE, true),
-			new BindStorageBufferFormat("splatPairStart", SHADERSTAGE_COMPUTE, true),
-			new BindStorageBufferFormat("splatPairCount", SHADERSTAGE_COMPUTE, true),
-			new BindStorageBufferFormat("tileSplatCounts", SHADERSTAGE_COMPUTE, true),
-			new BindStorageBufferFormat("tileEntries", SHADERSTAGE_COMPUTE),
-			new BindStorageBufferFormat("sortElementCount", SHADERSTAGE_COMPUTE, true)
-		]);
-		this._placeEntriesShader = new Shader(device, {
-			name: "GSplatLocalPlaceEntries",
-			shaderLanguage: SHADERLANGUAGE_WGSL,
-			cshader: computeGsplatLocalPlaceEntriesSource,
-			computeBindGroupFormat: this._placeEntriesBindGroupFormat
-		});
-		{
-			const maxDim = device.limits.maxComputeWorkgroupsPerDimension || 65535;
-			const prepDefines = /* @__PURE__ */ new Map();
-			prepDefines.set("{MAX_DIM}", maxDim.toString());
-			prepDefines.set("{SPLATS_PER_WG}", "256");
-			prepDefines.set("{SPLATS_PER_WG_MINUS_1}", "255");
-			this._placeEntryPrepBindGroupFormat = new BindGroupFormat(device, [
-				new BindStorageBufferFormat("sortElementCount", SHADERSTAGE_COMPUTE, true),
-				new BindStorageBufferFormat("dispatchArgs", SHADERSTAGE_COMPUTE)
-			]);
-			this._placeEntryPrepShader = new Shader(device, {
-				name: "GSplatLocalPlaceEntryPrep",
-				shaderLanguage: SHADERLANGUAGE_WGSL,
-				cshader: computeGsplatLocalDispatchPrepSource,
-				cdefines: prepDefines,
-				computeBindGroupFormat: this._placeEntryPrepBindGroupFormat
-			});
-			this._placeEntryPrepDispatchBuffer = new StorageBuffer(device, 6 * 4, BUFFERUSAGE_INDIRECT);
-			this._placeEntryPrepCompute = new Compute(device, this._placeEntryPrepShader);
+	updateSubDraws(textureWidth) {
+		let intervals = this.intervals;
+		let numIntervals = intervals.length / 2;
+		if (numIntervals === 0) {
+			_fullRangeInterval[0] = 0;
+			_fullRangeInterval[1] = this.activeSplats;
+			intervals = _fullRangeInterval;
+			numIntervals = 1;
 		}
-		{
-			const cincludes = this._createCommonIncludes();
-			const ubf = new UniformBufferFormat(device, [
-				new UniformFormat("numTilesX", UNIFORMTYPE_UINT),
-				new UniformFormat("numTilesY", UNIFORMTYPE_UINT),
-				new UniformFormat("viewportWidth", UNIFORMTYPE_FLOAT),
-				new UniformFormat("viewportHeight", UNIFORMTYPE_FLOAT),
-				new UniformFormat("alphaClip", UNIFORMTYPE_FLOAT)
-			]);
-			this._largeSplatBindGroupFormat = new BindGroupFormat(device, [
-				new BindStorageBufferFormat("projCache", SHADERSTAGE_COMPUTE, true),
-				new BindStorageBufferFormat("tileSplatCounts", SHADERSTAGE_COMPUTE),
-				new BindStorageBufferFormat("pairBuffer", SHADERSTAGE_COMPUTE),
-				new BindStorageBufferFormat("countersBuffer", SHADERSTAGE_COMPUTE),
-				new BindStorageBufferFormat("splatPairStart", SHADERSTAGE_COMPUTE),
-				new BindStorageBufferFormat("splatPairCount", SHADERSTAGE_COMPUTE),
-				new BindStorageBufferFormat("largeSplatIds", SHADERSTAGE_COMPUTE, true),
-				new BindUniformBufferFormat("uniforms", SHADERSTAGE_COMPUTE)
-			]);
-			const cdefines = /* @__PURE__ */ new Map();
-			cdefines.set("{CACHE_STRIDE}", CACHE_STRIDE.toString());
-			this._largeSplatShader = new Shader(device, {
-				name: "GSplatLocalTileCountLarge",
-				shaderLanguage: SHADERLANGUAGE_WGSL,
-				cshader: computeGsplatLocalTileCountLargeSource,
-				cincludes,
-				cdefines,
-				computeBindGroupFormat: this._largeSplatBindGroupFormat,
-				computeUniformBufferFormats: { uniforms: ubf }
-			});
+		const maxSubDraws = numIntervals * 3;
+		const requiredSize = maxSubDraws * 4;
+		if (subDrawDataArray.length < requiredSize) {
+			subDrawDataArray = new Uint32Array(requiredSize);
 		}
-		{
-			const maxDim = device.limits.maxComputeWorkgroupsPerDimension || 65535;
-			const largePrepDefines = /* @__PURE__ */ new Map();
-			largePrepDefines.set("{MAX_DIM}", maxDim.toString());
-			this._largeSplatPrepBindGroupFormat = new BindGroupFormat(device, [
-				new BindStorageBufferFormat("countersBuffer", SHADERSTAGE_COMPUTE, true),
-				new BindStorageBufferFormat("dispatchArgs", SHADERSTAGE_COMPUTE),
-				new BindStorageBufferFormat("largeSplatIds", SHADERSTAGE_COMPUTE, true)
-			]);
-			this._largeSplatPrepShader = new Shader(device, {
-				name: "GSplatLocalLargeSplatPrep",
-				shaderLanguage: SHADERLANGUAGE_WGSL,
-				cshader: computeGsplatLocalDispatchPrepLargeSource,
-				cdefines: largePrepDefines,
-				computeBindGroupFormat: this._largeSplatPrepBindGroupFormat
-			});
-			this._largeSplatDispatchBuffer = new StorageBuffer(device, 3 * 4, BUFFERUSAGE_INDIRECT);
-			this._largeSplatPrepCompute = new Compute(device, this._largeSplatPrepShader);
-		}
-		this._largePlaceEntriesBindGroupFormat = new BindGroupFormat(device, [
-			new BindStorageBufferFormat("pairBuffer", SHADERSTAGE_COMPUTE, true),
-			new BindStorageBufferFormat("splatPairStart", SHADERSTAGE_COMPUTE, true),
-			new BindStorageBufferFormat("splatPairCount", SHADERSTAGE_COMPUTE, true),
-			new BindStorageBufferFormat("tileSplatCounts", SHADERSTAGE_COMPUTE, true),
-			new BindStorageBufferFormat("tileEntries", SHADERSTAGE_COMPUTE),
-			new BindStorageBufferFormat("largeSplatIds", SHADERSTAGE_COMPUTE, true),
-			new BindStorageBufferFormat("countersBuffer", SHADERSTAGE_COMPUTE, true)
-		]);
-		this._largePlaceEntriesShader = new Shader(device, {
-			name: "GSplatLocalPlaceEntriesLarge",
-			shaderLanguage: SHADERLANGUAGE_WGSL,
-			cshader: computeGsplatLocalPlaceEntriesLargeSource,
-			computeBindGroupFormat: this._largePlaceEntriesBindGroupFormat
-		});
-		{
-			const ubf = new UniformBufferFormat(device, [
-				new UniformFormat("numTiles", UNIFORMTYPE_UINT),
-				new UniformFormat("dispatchSlotOffset", UNIFORMTYPE_UINT),
-				new UniformFormat("bufferCapacity", UNIFORMTYPE_UINT),
-				new UniformFormat("maxWorkgroupsPerDim", UNIFORMTYPE_UINT),
-				new UniformFormat("drawSlot", UNIFORMTYPE_UINT)
-			]);
-			this._classifyBindGroupFormat = new BindGroupFormat(device, [
-				new BindStorageBufferFormat("tileSplatCounts", SHADERSTAGE_COMPUTE, true),
-				new BindStorageBufferFormat("smallTileList", SHADERSTAGE_COMPUTE),
-				new BindStorageBufferFormat("largeTileList", SHADERSTAGE_COMPUTE),
-				new BindStorageBufferFormat("rasterizeTileList", SHADERSTAGE_COMPUTE),
-				new BindStorageBufferFormat("tileListCounts", SHADERSTAGE_COMPUTE),
-				new BindStorageBufferFormat("indirectDispatchArgs", SHADERSTAGE_COMPUTE),
-				new BindStorageBufferFormat("largeTileOverflowBases", SHADERSTAGE_COMPUTE),
-				new BindUniformBufferFormat("uniforms", SHADERSTAGE_COMPUTE),
-				new BindStorageBufferFormat("indirectDrawArgs", SHADERSTAGE_COMPUTE)
-			]);
-			this._classifyShader = new Shader(device, {
-				name: "GSplatLocalClassify",
-				shaderLanguage: SHADERLANGUAGE_WGSL,
-				cshader: computeGsplatLocalClassifySource,
-				computeBindGroupFormat: this._classifyBindGroupFormat,
-				computeUniformBufferFormats: { uniforms: ubf }
-			});
-		}
-		this._sortBindGroupFormat = new BindGroupFormat(device, [
-			new BindStorageBufferFormat("tileEntries", SHADERSTAGE_COMPUTE),
-			new BindStorageBufferFormat("tileSplatCounts", SHADERSTAGE_COMPUTE, true),
-			new BindStorageBufferFormat("depthBuffer", SHADERSTAGE_COMPUTE, true),
-			new BindStorageBufferFormat("smallTileList", SHADERSTAGE_COMPUTE, true),
-			new BindStorageBufferFormat("tileListCounts", SHADERSTAGE_COMPUTE, true)
-		]);
-		this._sortShader = new Shader(device, {
-			name: "GSplatLocalTileSort",
-			shaderLanguage: SHADERLANGUAGE_WGSL,
-			cshader: computeGsplatLocalTileSortSource,
-			cincludes: this._createBitonicIncludes(),
-			computeBindGroupFormat: this._sortBindGroupFormat
-		});
-		{
-			const ubf = new UniformBufferFormat(device, [
-				new UniformFormat("bufferCapacity", UNIFORMTYPE_UINT),
-				new UniformFormat("maxChunks", UNIFORMTYPE_UINT)
-			]);
-			this._bucketSortBindGroupFormat = new BindGroupFormat(device, [
-				new BindStorageBufferFormat("tileEntries", SHADERSTAGE_COMPUTE),
-				new BindStorageBufferFormat("largeTileOverflowBases", SHADERSTAGE_COMPUTE, true),
-				new BindStorageBufferFormat("tileSplatCounts", SHADERSTAGE_COMPUTE, true),
-				new BindStorageBufferFormat("depthBuffer", SHADERSTAGE_COMPUTE, true),
-				new BindStorageBufferFormat("largeTileList", SHADERSTAGE_COMPUTE, true),
-				new BindStorageBufferFormat("chunkRanges", SHADERSTAGE_COMPUTE),
-				new BindStorageBufferFormat("totalChunks", SHADERSTAGE_COMPUTE),
-				new BindStorageBufferFormat("tileListCounts", SHADERSTAGE_COMPUTE, true),
-				new BindUniformBufferFormat("uniforms", SHADERSTAGE_COMPUTE)
-			]);
-			this._bucketSortShader = new Shader(device, {
-				name: "GSplatLocalBucketSort",
-				shaderLanguage: SHADERLANGUAGE_WGSL,
-				cshader: computeGsplatLocalBucketSortSource,
-				computeBindGroupFormat: this._bucketSortBindGroupFormat,
-				computeUniformBufferFormats: { uniforms: ubf }
-			});
-		}
-		{
-			const ubf = new UniformBufferFormat(device, [
-				new UniformFormat("maxChunks", UNIFORMTYPE_UINT),
-				new UniformFormat("maxWorkgroupsPerDim", UNIFORMTYPE_UINT)
-			]);
-			this._copyBindGroupFormat = new BindGroupFormat(device, [
-				new BindStorageBufferFormat("totalChunks", SHADERSTAGE_COMPUTE, true),
-				new BindStorageBufferFormat("chunkSortIndirect", SHADERSTAGE_COMPUTE),
-				new BindUniformBufferFormat("uniforms", SHADERSTAGE_COMPUTE)
-			]);
-			this._copyShader = new Shader(device, {
-				name: "GSplatLocalCopy",
-				shaderLanguage: SHADERLANGUAGE_WGSL,
-				cshader: computeGsplatLocalCopySource,
-				computeBindGroupFormat: this._copyBindGroupFormat,
-				computeUniformBufferFormats: { uniforms: ubf }
-			});
-		}
-		{
-			const ubf = new UniformBufferFormat(device, [
-				new UniformFormat("maxChunks", UNIFORMTYPE_UINT)
-			]);
-			this._chunkSortBindGroupFormat = new BindGroupFormat(device, [
-				new BindStorageBufferFormat("tileEntries", SHADERSTAGE_COMPUTE),
-				new BindStorageBufferFormat("depthBuffer", SHADERSTAGE_COMPUTE, true),
-				new BindStorageBufferFormat("chunkRanges", SHADERSTAGE_COMPUTE, true),
-				new BindStorageBufferFormat("totalChunks", SHADERSTAGE_COMPUTE, true),
-				new BindUniformBufferFormat("uniforms", SHADERSTAGE_COMPUTE)
-			]);
-			this._chunkSortShader = new Shader(device, {
-				name: "GSplatLocalChunkSort",
-				shaderLanguage: SHADERLANGUAGE_WGSL,
-				cshader: computeGsplatLocalChunkSortSource,
-				cincludes: this._createBitonicIncludes(),
-				computeBindGroupFormat: this._chunkSortBindGroupFormat,
-				computeUniformBufferFormats: { uniforms: ubf }
-			});
-		}
-	}
-	_createCountShaderAndFormat(pickMode, fisheyeEnabled) {
-		const device = this.device;
-		const uniforms = [
-			new UniformFormat("splatTextureSize", UNIFORMTYPE_UINT),
-			new UniformFormat("numTilesX", UNIFORMTYPE_UINT),
-			new UniformFormat("numTilesY", UNIFORMTYPE_UINT),
-			new UniformFormat("viewProj", UNIFORMTYPE_MAT4),
-			new UniformFormat("viewMatrix", UNIFORMTYPE_MAT4),
-			new UniformFormat("focal", UNIFORMTYPE_FLOAT),
-			new UniformFormat("viewportWidth", UNIFORMTYPE_FLOAT),
-			new UniformFormat("viewportHeight", UNIFORMTYPE_FLOAT),
-			new UniformFormat("nearClip", UNIFORMTYPE_FLOAT),
-			new UniformFormat("farClip", UNIFORMTYPE_FLOAT),
-			new UniformFormat("minPixelSize", UNIFORMTYPE_FLOAT),
-			new UniformFormat("isOrtho", UNIFORMTYPE_UINT),
-			new UniformFormat("exposure", UNIFORMTYPE_FLOAT),
-			new UniformFormat("alphaClip", UNIFORMTYPE_FLOAT),
-			new UniformFormat("minContribution", UNIFORMTYPE_FLOAT)
-		];
-		if (fisheyeEnabled) {
-			uniforms.push(
-				new UniformFormat("fisheye_k", UNIFORMTYPE_FLOAT),
-				new UniformFormat("fisheye_inv_k", UNIFORMTYPE_FLOAT),
-				new UniformFormat("fisheye_projMat00", UNIFORMTYPE_FLOAT),
-				new UniformFormat("fisheye_projMat11", UNIFORMTYPE_FLOAT)
+		const subDrawData = subDrawDataArray;
+		let subDrawCount = 0;
+		for (let i = 0; i < numIntervals; i++) {
+			subDrawCount = this.appendSubDraws(
+				subDrawData,
+				subDrawCount,
+				intervals[i * 2],
+				intervals[i * 2 + 1] - intervals[i * 2],
+				this.intervalOffsets[i],
+				textureWidth
 			);
 		}
-		const uniformBufferFormat = new UniformBufferFormat(device, uniforms);
-		const wbFormat = this._dataSource.format;
-		const fixedBindings = [
-			new BindStorageBufferFormat("compactedSplatIds", SHADERSTAGE_COMPUTE, true),
-			new BindStorageBufferFormat("sortElementCount", SHADERSTAGE_COMPUTE, true),
-			new BindStorageBufferFormat("projCache", SHADERSTAGE_COMPUTE),
-			new BindStorageBufferFormat("tileSplatCounts", SHADERSTAGE_COMPUTE),
-			new BindUniformBufferFormat("uniforms", SHADERSTAGE_COMPUTE),
-			new BindStorageBufferFormat("pairBuffer", SHADERSTAGE_COMPUTE),
-			new BindStorageBufferFormat("countersBuffer", SHADERSTAGE_COMPUTE),
-			new BindStorageBufferFormat("splatPairStart", SHADERSTAGE_COMPUTE),
-			new BindStorageBufferFormat("splatPairCount", SHADERSTAGE_COMPUTE),
-			new BindStorageBufferFormat("largeSplatIds", SHADERSTAGE_COMPUTE),
-			new BindStorageBufferFormat("depthBuffer", SHADERSTAGE_COMPUTE)
-		];
-		const bindGroupFormat = new BindGroupFormat(device, [
-			...fixedBindings,
-			...wbFormat.getComputeBindFormats()
-		]);
-		const cincludes = this._createCommonIncludes();
-		cincludes.set("gsplatComputeSplatCS", gsplatComputeSplat_default);
-		cincludes.set("gsplatFormatDeclCS", wbFormat.getComputeInputDeclarations(fixedBindings.length));
-		cincludes.set("gsplatFormatReadCS", wbFormat.getReadCode());
-		cincludes.set("gsplatProjectCommonCS", computeGsplatProjectCommonSource);
-		const cdefines = /* @__PURE__ */ new Map();
-		cdefines.set("{CACHE_STRIDE}", CACHE_STRIDE.toString());
-		if (fisheyeEnabled) {
-			cdefines.set("GSPLAT_FISHEYE", "");
+		this.subDrawCount = subDrawCount;
+		const { x: texWidth, y: texHeight } = TextureUtils.calcTextureSize(subDrawCount, tmpSize);
+		this.subDrawTexture = Texture.createDataTexture2D(this.device, "subDrawData", texWidth, texHeight, PIXELFORMAT_RGBA32U);
+		const texData = this.subDrawTexture.lock();
+		texData.set(subDrawData.subarray(0, subDrawCount * 4));
+		this.subDrawTexture.unlock();
+	}
+	update() {
+		const worldMatrix = this.node.getWorldTransform();
+		const worldMatrixChanged = !this.previousWorldTransform.equals(worldMatrix);
+		if (worldMatrixChanged) {
+			this.previousWorldTransform.copy(worldMatrix);
 		}
-		if (pickMode) {
-			cdefines.set("PICK_MODE", "");
-		}
-		const colorStream = wbFormat.getStream("dataColor");
-		if (colorStream && colorStream.format !== PIXELFORMAT_RGBA16U) {
-			cdefines.set("GSPLAT_COLOR_FLOAT", "");
-		}
-		const suffix = fisheyeEnabled ? "Fisheye" : "";
-		const shader = new Shader(device, {
-			name: pickMode ? `GSplatLocalTileCountPick${suffix}` : `GSplatLocalTileCount${suffix}`,
-			shaderLanguage: SHADERLANGUAGE_WGSL,
-			cshader: computeGsplatLocalTileCountSource,
-			cincludes,
-			cdefines,
-			computeBindGroupFormat: bindGroupFormat,
-			computeUniformBufferFormats: { uniforms: uniformBufferFormat }
-		});
-		return { shader, bindGroupFormat };
+		const renderDirty = this._consumeRenderDirty ? this._consumeRenderDirty() : false;
+		return worldMatrixChanged || renderDirty;
 	}
-	_createDispatchSet(pickMode) {
-		const device = this.device;
-		const set = new GSplatLocalDispatchSet(device, pickMode);
-		set.placeEntriesCompute = new Compute(device, this._placeEntriesShader, pickMode ? "GSplatPickPlaceEntries" : "GSplatLocalPlaceEntries");
-		set.largeSplatCompute = new Compute(device, this._largeSplatShader, pickMode ? "GSplatPickLargeTileCount" : "GSplatLocalLargeTileCount");
-		set.largePlaceEntriesCompute = new Compute(device, this._largePlaceEntriesShader, pickMode ? "GSplatPickLargePlaceEntries" : "GSplatLocalLargePlaceEntries");
-		set.classifyCompute = new Compute(device, this._classifyShader, pickMode ? "GSplatPickClassify" : "GSplatLocalClassify");
-		set.sortCompute = new Compute(device, this._sortShader, pickMode ? "GSplatPickTileSort" : "GSplatLocalTileSort");
-		set.bucketSortCompute = new Compute(device, this._bucketSortShader, pickMode ? "GSplatPickBucketSort" : "GSplatLocalBucketSort");
-		set.copyCompute = new Compute(device, this._copyShader, pickMode ? "GSplatPickCopy" : "GSplatLocalCopy");
-		set.chunkSortCompute = new Compute(device, this._chunkSortShader, pickMode ? "GSplatPickChunkSort" : "GSplatLocalChunkSort");
-		return set;
-	}
-}
-
-const computeGsplatProjectorSource = `
-#include "gsplatCommonCS"
-#include "gsplatTileIntersectCS"
-@group(0) @binding(0) var<storage, read> compactedSplatIds: array<u32>;
-@group(0) @binding(1) var<storage, read> sortElementCount: array<u32>;
-@group(0) @binding(2) var<storage, read_write> projCache: array<u32>;
-@group(0) @binding(3) var<storage, read_write> sortKeys: array<u32>;
-@group(0) @binding(4) var<storage, read_write> renderCounter: array<atomic<u32>>;
-struct BinWeight {
-	base: f32,
-	divider: f32
-}
-@group(0) @binding(5) var<storage, read> binWeights: array<BinWeight>;
-struct ProjectorUniforms {
-	splatTextureSize: u32,
-	numBins: u32,
-	isOrtho: u32,
-	pad0: u32,
-	viewProj: mat4x4f,
-	viewMatrix: mat4x4f,
-	cameraPosition: vec3f,
-	minPixelSize: f32,
-	cameraDirection: vec3f,
-	focal: f32,
-	viewportWidth: f32,
-	viewportHeight: f32,
-	nearClip: f32,
-	farClip: f32,
-	alphaClip: f32,
-	minContribution: f32,
-	minDist: f32,
-	invRange: f32,
-	#ifdef GSPLAT_FISHEYE
-		fisheye_k: f32,
-		fisheye_inv_k: f32,
-		fisheye_projMat00: f32,
-		fisheye_projMat11: f32,
-	#endif
-}
-@group(0) @binding(6) var<uniform> uniforms: ProjectorUniforms;
-#include "gsplatComputeSplatCS"
-#include "gsplatFormatDeclCS"
-#include "gsplatFormatReadCS"
-#include "gsplatProjectCommonCS"
-var<workgroup> wgCount: atomic<u32>;
-var<workgroup> wgBase: u32;
-@compute @workgroup_size(256)
-fn main(
-	@builtin(global_invocation_id) gid: vec3u,
-	@builtin(num_workgroups) numWorkgroups: vec3u,
-	@builtin(local_invocation_index) localIdx: u32
-) {
-	if (localIdx == 0u) {
-		atomicStore(&wgCount, 0u);
-	}
-	workgroupBarrier();
-	let threadIdx = gid.y * (numWorkgroups.x * 256u) + gid.x;
-	let numVisible = sortElementCount[0];
-	var valid = false;
-	var clipPos: vec4f = vec4f(0.0);
-	var v1: vec2f = vec2f(0.0);
-	var v2: vec2f = vec2f(0.0);
-	var rgb: vec3f = vec3f(0.0);
-	var alpha: f32 = 0.0;
-	var pcId: u32 = 0u;
-	var sortKey: u32 = 0u;
-	let projected = projectSplatCommon(
-		threadIdx,
-		numVisible,
-		uniforms.alphaClip,
-		uniforms.minPixelSize,
-		uniforms.minContribution,
-		uniforms.viewMatrix,
-		uniforms.viewProj,
-		uniforms.focal,
-		uniforms.viewportWidth,
-		uniforms.viewportHeight,
-		uniforms.nearClip,
-		uniforms.farClip,
-		uniforms.isOrtho,
-		#ifdef GSPLAT_FISHEYE
-			uniforms.fisheye_k,
-			uniforms.fisheye_inv_k,
-			uniforms.fisheye_projMat00,
-			uniforms.fisheye_projMat11,
-		#endif
-	);
-	if (projected.valid) {
-		let center = projected.center;
-		let opacity = projected.opacity;
-		let proj = projected.proj;
-		let mid = 0.5 * (proj.a + proj.c);
-		let radius = length(vec2f(0.5 * (proj.a - proj.c), proj.b));
-		let lambda1 = mid + radius;
-		let lambda2 = max(mid - radius, 0.1);
-		let vmin = min(1024.0, min(uniforms.viewportWidth, uniforms.viewportHeight));
-		let l1 = 2.0 * min(sqrt(2.0 * lambda1), vmin);
-		let l2 = 2.0 * min(sqrt(2.0 * lambda2), vmin);
-		let dir = normalize(vec2f(proj.b, lambda1 - proj.a));
-		v1 = l1 * dir;
-		v2 = l2 * vec2f(dir.y, -dir.x);
-		#ifdef GSPLAT_FISHEYE
-			let viewCenter = uniforms.viewMatrix * vec4f(center, 1.0);
-			let neg_z = -viewCenter.z;
-			let ndcX = proj.screen.x / uniforms.viewportWidth * 2.0 - 1.0;
-			let ndcY = proj.screen.y / uniforms.viewportHeight * 2.0 - 1.0;
-			let depthNdc = clamp(
-				(neg_z - uniforms.nearClip) / (uniforms.farClip - uniforms.nearClip),
-				0.0, 1.0
-			);
-			clipPos = vec4f(ndcX, ndcY, depthNdc, 1.0);
-		#else
-			clipPos = uniforms.viewProj * vec4f(center, 1.0);
-			clipPos.z = clamp(clipPos.z, 0.0, abs(clipPos.w));
-		#endif
-		#ifdef RADIAL_SORT
-			let delta = center - uniforms.cameraPosition;
-			let radialDist = length(delta);
-			let dist = (1.0 / uniforms.invRange) - radialDist - uniforms.minDist;
-		#else
-			let toSplat = center - uniforms.cameraPosition;
-			let dist = dot(toSplat, uniforms.cameraDirection) - uniforms.minDist;
-		#endif
-		let d = dist * uniforms.invRange * f32(uniforms.numBins);
-		let binFloat = clamp(d, 0.0, f32(uniforms.numBins) - 0.001);
-		let bin = u32(binFloat);
-		let binFrac = binFloat - f32(bin);
-		sortKey = u32(binWeights[bin].base + binWeights[bin].divider * binFrac);
-		#ifdef PICK_MODE
-			pcId = loadPcId().r;
-			alpha = opacity;
-		#else
-			let color = getColor();
-			rgb = max(color, vec3f(0.0));
-			#if GSPLAT_AA
-				alpha = opacity * proj.aaFactor;
-			#else
-				alpha = opacity;
-			#endif
-		#endif
-		valid = true;
-	}
-	var localDst: u32 = 0u;
-	if (valid) {
-		localDst = atomicAdd(&wgCount, 1u);
-	}
-	workgroupBarrier();
-	if (localIdx == 0u) {
-		let total = atomicLoad(&wgCount);
-		wgBase = atomicAdd(&renderCounter[0], total);
-	}
-	workgroupBarrier();
-	if (valid) {
-		let dst = wgBase + localDst;
-		let base = dst * {CACHE_STRIDE}u;
-		projCache[base + 0u] = bitcast<u32>(clipPos.x);
-		projCache[base + 1u] = bitcast<u32>(clipPos.y);
-		projCache[base + 2u] = bitcast<u32>(clipPos.z);
-		projCache[base + 3u] = bitcast<u32>(clipPos.w);
-		projCache[base + 4u] = pack2x16float(v1);
-		projCache[base + 5u] = pack2x16float(v2);
-		#ifdef PICK_MODE
-			projCache[base + 6u] = pcId;
-			projCache[base + 7u] = pack2x16float(vec2f(0.0, alpha));
-		#else
-			projCache[base + 6u] = pack2x16float(vec2f(rgb.x, rgb.y));
-			projCache[base + 7u] = pack2x16float(vec2f(rgb.z, alpha));
-		#endif
-		sortKeys[dst] = sortKey;
-	}
-}
-`;
-
-const computeGsplatProjectorWriteIndirectArgsSource = `
-${indirect_core_default}
-${dispatch_core_default}
-${sort_indirect_args_default}
-@group(0) @binding(0) var<storage, read> renderCounter: array<u32>;
-@group(0) @binding(1) var<storage, read_write> indirectDrawArgs: array<DrawIndexedIndirectArgs>;
-@group(0) @binding(2) var<storage, read_write> numSplatsBuf: array<u32>;
-@group(0) @binding(3) var<storage, read_write> indirectDispatchArgs: array<u32>;
-@group(0) @binding(4) var<storage, read_write> sortElementCountBuf: array<u32>;
-struct WriteArgsUniforms {
-	drawSlot: u32,
-	indexCount: u32,
-	sortSlotBase: u32,
-	pad0: u32,
-	sortIndirectInfo: vec4<u32>
-};
-@group(0) @binding(5) var<uniform> uniforms: WriteArgsUniforms;
-@compute @workgroup_size(1)
-fn main() {
-	let count = renderCounter[0];
-	let instanceCount = (count + {INSTANCE_SIZE}u - 1u) / {INSTANCE_SIZE}u;
-	indirectDrawArgs[uniforms.drawSlot] = DrawIndexedIndirectArgs(
-		uniforms.indexCount,
-		instanceCount,
-		0u,
-		0,
-		0u
-	);
-	numSplatsBuf[0] = count;
-	sortElementCountBuf[0] = count;
-	writeSortIndirectArgs(uniforms.sortSlotBase, count, uniforms.sortIndirectInfo);
-}
-`;
-
-const INDEX_COUNT$1 = 6 * GSplatResourceBase.instanceSize;
-const PROJECTOR_WORKGROUP_SIZE = 256;
-const _cameraDir = new Vec3();
-const _dispatchSize = new Vec2();
-const _viewProjMat = new Mat4();
-const _viewProjData = new Float32Array(16);
-const _viewData = new Float32Array(16);
-const _shaderProjMat = new Mat4();
-class GSplatProjector {
-	device;
-	projCache = null;
-	sortKeys = null;
-	renderCounter = null;
-	binWeightsBuffer = null;
-	binWeightsUtil;
-	_projectorComputes = /* @__PURE__ */ new Map();
-	_projectorBindGroupFormat = null;
-	_projectorUniformBufferFormat = null;
-	_projectorUniformBufferFormatFisheye = null;
-	_writeIndirectArgsCompute = null;
-	_writeArgsBindGroupFormat = null;
-	_writeArgsUniformBufferFormat = null;
-	_formatVersion = -1;
-	_allocatedCacheCount = 0;
-	cameraPositionData = new Float32Array(3);
-	cameraDirectionData = new Float32Array(3);
-	constructor(device) {
-		this.device = device;
-		this.binWeightsUtil = new GSplatSortBinWeights$1();
-		this.binWeightsBuffer = new StorageBuffer(
-			device,
-			GSplatSortBinWeights$1.NUM_BINS * 2 * 4,
-			BUFFERUSAGE_COPY_SRC | BUFFERUSAGE_COPY_DST
-		);
-		this.renderCounter = new StorageBuffer(device, 4, BUFFERUSAGE_COPY_SRC | BUFFERUSAGE_COPY_DST);
-		this._createUniformBufferFormats();
-		this._createWriteIndirectArgsCompute();
-	}
-	destroy() {
-		this.projCache?.destroy();
-		this.sortKeys?.destroy();
-		this.renderCounter?.destroy();
-		this.binWeightsBuffer?.destroy();
-		for (const compute of this._projectorComputes.values()) {
-			compute.shader?.destroy();
-		}
-		this._projectorComputes.clear();
-		this._projectorBindGroupFormat?.destroy();
-		this._writeIndirectArgsCompute?.shader?.destroy();
-		this._writeArgsBindGroupFormat?.destroy();
-		this.projCache = null;
-		this.sortKeys = null;
-		this.renderCounter = null;
-		this.binWeightsBuffer = null;
-		this._projectorBindGroupFormat = null;
-		this._projectorUniformBufferFormat = null;
-		this._projectorUniformBufferFormatFisheye = null;
-		this._writeIndirectArgsCompute = null;
-		this._writeArgsBindGroupFormat = null;
-		this._writeArgsUniformBufferFormat = null;
-	}
-	_createUniformBufferFormats() {
-		const device = this.device;
-		const baseFields = [
-			new UniformFormat("splatTextureSize", UNIFORMTYPE_UINT),
-			new UniformFormat("numBins", UNIFORMTYPE_UINT),
-			new UniformFormat("isOrtho", UNIFORMTYPE_UINT),
-			new UniformFormat("pad0", UNIFORMTYPE_UINT),
-			new UniformFormat("viewProj", UNIFORMTYPE_MAT4),
-			new UniformFormat("viewMatrix", UNIFORMTYPE_MAT4),
-			new UniformFormat("cameraPosition", UNIFORMTYPE_VEC3),
-			new UniformFormat("minPixelSize", UNIFORMTYPE_FLOAT),
-			new UniformFormat("cameraDirection", UNIFORMTYPE_VEC3),
-			new UniformFormat("focal", UNIFORMTYPE_FLOAT),
-			new UniformFormat("viewportWidth", UNIFORMTYPE_FLOAT),
-			new UniformFormat("viewportHeight", UNIFORMTYPE_FLOAT),
-			new UniformFormat("nearClip", UNIFORMTYPE_FLOAT),
-			new UniformFormat("farClip", UNIFORMTYPE_FLOAT),
-			new UniformFormat("alphaClip", UNIFORMTYPE_FLOAT),
-			new UniformFormat("minContribution", UNIFORMTYPE_FLOAT),
-			new UniformFormat("minDist", UNIFORMTYPE_FLOAT),
-			new UniformFormat("invRange", UNIFORMTYPE_FLOAT)
-		];
-		this._projectorUniformBufferFormat = new UniformBufferFormat(device, baseFields);
-		this._projectorUniformBufferFormatFisheye = new UniformBufferFormat(device, [
-			...baseFields.map((f) => new UniformFormat(f.name, f.type)),
-			new UniformFormat("fisheye_k", UNIFORMTYPE_FLOAT),
-			new UniformFormat("fisheye_inv_k", UNIFORMTYPE_FLOAT),
-			new UniformFormat("fisheye_projMat00", UNIFORMTYPE_FLOAT),
-			new UniformFormat("fisheye_projMat11", UNIFORMTYPE_FLOAT)
-		]);
-		this._writeArgsUniformBufferFormat = new UniformBufferFormat(device, [
-			new UniformFormat("drawSlot", UNIFORMTYPE_UINT),
-			new UniformFormat("indexCount", UNIFORMTYPE_UINT),
-			new UniformFormat("sortSlotBase", UNIFORMTYPE_UINT),
-			new UniformFormat("pad0", UNIFORMTYPE_UINT),
-			new UniformFormat("sortIndirectInfo", UNIFORMTYPE_UVEC4)
-		]);
-	}
-	_createWriteIndirectArgsCompute() {
-		const device = this.device;
-		this._writeArgsBindGroupFormat = new BindGroupFormat(device, [
-			new BindStorageBufferFormat("renderCounter", SHADERSTAGE_COMPUTE, true),
-			new BindStorageBufferFormat("indirectDrawArgs", SHADERSTAGE_COMPUTE, false),
-			new BindStorageBufferFormat("numSplatsBuf", SHADERSTAGE_COMPUTE, false),
-			new BindStorageBufferFormat("indirectDispatchArgs", SHADERSTAGE_COMPUTE, false),
-			new BindStorageBufferFormat("sortElementCountBuf", SHADERSTAGE_COMPUTE, false),
-			new BindUniformBufferFormat("uniforms", SHADERSTAGE_COMPUTE)
-		]);
-		const cdefines = /* @__PURE__ */ new Map([
-			["{INSTANCE_SIZE}", GSplatResourceBase.instanceSize.toString()]
-		]);
-		const shader = new Shader(device, {
-			name: "GSplatProjectorWriteIndirectArgs",
-			shaderLanguage: SHADERLANGUAGE_WGSL,
-			cshader: computeGsplatProjectorWriteIndirectArgsSource,
-			cdefines,
-			computeBindGroupFormat: this._writeArgsBindGroupFormat,
-			computeUniformBufferFormats: { uniforms: this._writeArgsUniformBufferFormat }
-		});
-		this._writeIndirectArgsCompute = new Compute(device, shader, "GSplatProjectorWriteIndirectArgs");
-	}
-	_destroyProjectorComputes() {
-		for (const compute of this._projectorComputes.values()) {
-			compute.shader?.destroy();
-		}
-		this._projectorComputes.clear();
-		this._projectorBindGroupFormat?.destroy();
-		this._projectorBindGroupFormat = null;
-	}
-	_projectorKey(radialSort, pickMode, fisheyeMode, antiAlias) {
-		return `${radialSort ? "r" : "l"}${pickMode ? "p" : ""}${fisheyeMode ? "f" : ""}${antiAlias ? "a" : ""}`;
-	}
-	_createProjectorCompute(workBuffer, radialSort, pickMode, fisheyeMode, antiAlias) {
-		const device = this.device;
-		const wbFormat = workBuffer.format;
-		const fixedBindings = [
-			new BindStorageBufferFormat("compactedSplatIds", SHADERSTAGE_COMPUTE, true),
-			new BindStorageBufferFormat("sortElementCount", SHADERSTAGE_COMPUTE, true),
-			new BindStorageBufferFormat("projCache", SHADERSTAGE_COMPUTE),
-			new BindStorageBufferFormat("sortKeys", SHADERSTAGE_COMPUTE),
-			new BindStorageBufferFormat("renderCounter", SHADERSTAGE_COMPUTE),
-			new BindStorageBufferFormat("binWeights", SHADERSTAGE_COMPUTE, true),
-			new BindUniformBufferFormat("uniforms", SHADERSTAGE_COMPUTE)
-		];
-		if (!this._projectorBindGroupFormat) {
-			this._projectorBindGroupFormat = new BindGroupFormat(device, [
-				...fixedBindings,
-				...wbFormat.getComputeBindFormats()
-			]);
-		}
-		const cincludes = /* @__PURE__ */ new Map();
-		cincludes.set("gsplatCommonCS", computeGsplatCommonSource);
-		cincludes.set("gsplatTileIntersectCS", computeGsplatTileIntersectSource);
-		cincludes.set("gsplatComputeSplatCS", gsplatComputeSplat_default);
-		cincludes.set("gsplatFormatDeclCS", wbFormat.getComputeInputDeclarations(fixedBindings.length));
-		cincludes.set("gsplatFormatReadCS", wbFormat.getReadCode());
-		cincludes.set("gsplatProjectCommonCS", computeGsplatProjectCommonSource);
-		const cdefines = /* @__PURE__ */ new Map();
-		cdefines.set("{CACHE_STRIDE}", CACHE_STRIDE$1.toString());
-		if (radialSort) {
-			cdefines.set("RADIAL_SORT", "");
-		}
-		if (pickMode) {
-			cdefines.set("PICK_MODE", "");
-		}
-		if (fisheyeMode) {
-			cdefines.set("GSPLAT_FISHEYE", "");
-		}
-		if (antiAlias) {
-			cdefines.set("GSPLAT_AA", "");
-		}
-		const colorStream = wbFormat.getStream("dataColor");
-		if (colorStream && colorStream.format !== PIXELFORMAT_RGBA16U) {
-			cdefines.set("GSPLAT_COLOR_FLOAT", "");
-		}
-		const name = `GSplatProjector${radialSort ? "Radial" : "Linear"}${pickMode ? "Pick" : ""}${fisheyeMode ? "Fisheye" : ""}${antiAlias ? "Aa" : ""}`;
-		const ubFormat = fisheyeMode ? this._projectorUniformBufferFormatFisheye : this._projectorUniformBufferFormat;
-		const shader = new Shader(device, {
-			name,
-			shaderLanguage: SHADERLANGUAGE_WGSL,
-			cshader: computeGsplatProjectorSource,
-			cincludes,
-			cdefines,
-			computeBindGroupFormat: this._projectorBindGroupFormat,
-			computeUniformBufferFormats: { uniforms: ubFormat }
-		});
-		return new Compute(device, shader, name);
-	}
-	_getProjectorCompute(workBuffer, radialSort, pickMode = false, fisheyeMode = false, antiAlias = false) {
-		const wbFormat = workBuffer.format;
-		if (this._formatVersion !== wbFormat.extraStreamsVersion) {
-			this._destroyProjectorComputes();
-			this._formatVersion = wbFormat.extraStreamsVersion;
-		}
-		const key = this._projectorKey(radialSort, pickMode, fisheyeMode, antiAlias);
-		let compute = this._projectorComputes.get(key);
-		if (!compute) {
-			compute = this._createProjectorCompute(workBuffer, radialSort, pickMode, fisheyeMode, antiAlias);
-			this._projectorComputes.set(key, compute);
-		}
-		return compute;
-	}
-	_ensureCapacity(capacity) {
-		if (capacity > this._allocatedCacheCount) {
-			this.projCache?.destroy();
-			this.sortKeys?.destroy();
-			this._allocatedCacheCount = capacity;
-			this.projCache = new StorageBuffer(this.device, capacity * CACHE_STRIDE$1 * 4);
-			this.sortKeys = new StorageBuffer(this.device, capacity * 4, BUFFERUSAGE_COPY_SRC);
-		}
-	}
-	dispatch(params) {
-		const {
-			workBuffer,
-			cameraNode,
-			compactedSplatIds,
-			sortElementCountBuffer,
-			totalCapacity,
-			radialSort,
-			numBits,
-			minDist,
-			maxDist,
-			alphaClip,
-			minPixelSize,
-			minContribution,
-			viewportWidth,
-			viewportHeight,
-			flipY,
-			pickMode = false,
-			fisheyeProj,
-			antiAlias = false
-		} = params;
-		const fisheyeMode = !!fisheyeProj?.enabled;
-		const aaMode = antiAlias && !pickMode;
-		this._ensureCapacity(totalCapacity);
-		this.renderCounter.clear();
-		const compute = this._getProjectorCompute(workBuffer, radialSort, pickMode, fisheyeMode, aaMode);
-		const cameraPos = cameraNode.getPosition();
-		const cameraMat = cameraNode.getWorldTransform();
-		const cameraDir = cameraMat.getZ(_cameraDir).normalize();
-		const range = maxDist - minDist;
-		const invRange = range > 0 ? 1 / range : 1;
-		const bucketCount = 1 << numBits;
-		const cameraBin = GSplatSortBinWeights$1.computeCameraBin(radialSort, minDist, range);
-		const binWeights = this.binWeightsUtil.compute(cameraBin, bucketCount);
-		this.binWeightsBuffer.write(0, binWeights);
-		compute.setParameter("compactedSplatIds", compactedSplatIds);
-		compute.setParameter("sortElementCount", sortElementCountBuffer);
-		compute.setParameter("projCache", this.projCache);
-		compute.setParameter("sortKeys", this.sortKeys);
-		compute.setParameter("renderCounter", this.renderCounter);
-		compute.setParameter("binWeights", this.binWeightsBuffer);
-		for (const stream of workBuffer.format.resourceStreams) {
-			const texture = workBuffer.getTexture(stream.name);
-			if (texture) {
-				compute.setParameter(stream.name, texture);
+	writeBoundsSpheres(data, offset) {
+		if (this.octreeNodes) {
+			for (let i = 0; i < this.octreeNodes.length; i++) {
+				const s = this.octreeNodes[i].boundingSphere;
+				data[offset++] = s.x;
+				data[offset++] = s.y;
+				data[offset++] = s.z;
+				data[offset++] = s.w;
 			}
+		} else {
+			const aabb = this.resource.aabb;
+			const he = aabb.halfExtents;
+			const r = Math.sqrt(he.x * he.x + he.y * he.y + he.z * he.z);
+			data[offset++] = aabb.center.x;
+			data[offset++] = aabb.center.y;
+			data[offset++] = aabb.center.z;
+			data[offset++] = r;
 		}
-		const cameraComponent = cameraNode.camera;
-		const cam = cameraComponent.camera;
-		const view = cam.viewMatrix;
-		const webgpu = this.device.isWebGPU;
-		_viewProjMat.mul2(Camera$1.applyShaderProjectionTransform(cam.projectionMatrix, _shaderProjMat, flipY, webgpu), view);
-		_viewProjData.set(_viewProjMat.data);
-		_viewData.set(view.data);
-		const focal = viewportWidth * _shaderProjMat.data[0];
-		this.cameraPositionData[0] = cameraPos.x;
-		this.cameraPositionData[1] = cameraPos.y;
-		this.cameraPositionData[2] = cameraPos.z;
-		compute.setParameter("cameraPosition", this.cameraPositionData);
-		this.cameraDirectionData[0] = cameraDir.x;
-		this.cameraDirectionData[1] = cameraDir.y;
-		this.cameraDirectionData[2] = cameraDir.z;
-		compute.setParameter("cameraDirection", this.cameraDirectionData);
-		compute.setParameter("viewMatrix", _viewData);
-		compute.setParameter("viewProj", _viewProjData);
-		compute.setParameter("focal", focal);
-		compute.setParameter("viewportWidth", viewportWidth);
-		compute.setParameter("viewportHeight", viewportHeight);
-		compute.setParameter("nearClip", cam.nearClip);
-		compute.setParameter("farClip", cam.farClip);
-		compute.setParameter("alphaClip", alphaClip);
-		compute.setParameter("minPixelSize", minPixelSize);
-		compute.setParameter("minContribution", minContribution);
-		compute.setParameter("isOrtho", cam.projection === PROJECTION_ORTHOGRAPHIC ? 1 : 0);
-		compute.setParameter("splatTextureSize", workBuffer.textureSize);
-		compute.setParameter("numBins", GSplatSortBinWeights$1.NUM_BINS);
-		compute.setParameter("minDist", minDist);
-		compute.setParameter("invRange", invRange);
-		compute.setParameter("pad0", 0);
-		if (fisheyeMode) {
-			compute.setParameter("fisheye_k", fisheyeProj.k);
-			compute.setParameter("fisheye_inv_k", fisheyeProj.invK);
-			compute.setParameter("fisheye_projMat00", fisheyeProj.projMat00);
-			compute.setParameter("fisheye_projMat11", fisheyeProj.projMat11);
-		}
-		const workgroupCount = Math.ceil(totalCapacity / PROJECTOR_WORKGROUP_SIZE);
-		Compute.calcDispatchSize(
-			workgroupCount,
-			_dispatchSize,
-			this.device.limits.maxComputeWorkgroupsPerDimension || 65535
-		);
-		compute.setupDispatch(_dispatchSize.x, _dispatchSize.y, 1);
-		this.device.computeDispatch([compute], "GSplatProjector");
 	}
-	writeIndirectArgs(drawSlot, sortSlotBase, numSplatsBuffer, sortElementCountBuffer, sortIndirectInfo) {
-		const compute = this._writeIndirectArgsCompute;
-		compute.setParameter("renderCounter", this.renderCounter);
-		compute.setParameter("indirectDrawArgs", this.device.indirectDrawBuffer);
-		compute.setParameter("numSplatsBuf", numSplatsBuffer);
-		compute.setParameter("indirectDispatchArgs", this.device.indirectDispatchBuffer);
-		compute.setParameter("sortElementCountBuf", sortElementCountBuffer);
-		compute.setParameter("drawSlot", drawSlot);
-		compute.setParameter("indexCount", INDEX_COUNT$1);
-		compute.setParameter("sortSlotBase", sortSlotBase);
-		compute.setParameter("pad0", 0);
-		compute.setParameter("sortIndirectInfo", sortIndirectInfo);
-		compute.setupDispatch(1);
-		this.device.computeDispatch([compute], "GSplatProjectorWriteIndirectArgs");
+	get hasSphericalHarmonics() {
+		return this.resource.gsplatData?.shBands > 0;
 	}
 }
 
@@ -60053,6 +57167,26 @@ class GSplatPlacement {
 	}
 	get lodMultiplier() {
 		return this._lodMultiplier;
+	}
+	_lodRangeMin = 0;
+	_lodRangeMax = 99;
+	set lodRangeMin(value) {
+		if (this._lodRangeMin !== value) {
+			this._lodRangeMin = value;
+			this.lodDirty = true;
+		}
+	}
+	get lodRangeMin() {
+		return this._lodRangeMin;
+	}
+	set lodRangeMax(value) {
+		if (this._lodRangeMax !== value) {
+			this._lodRangeMax = value;
+			this.lodDirty = true;
+		}
+	}
+	get lodRangeMax() {
+		return this._lodRangeMax;
 	}
 	_aabb = null;
 	parameters = null;
@@ -60137,6 +57271,9 @@ class GSplatPlacement {
 		}
 	}
 }
+
+const ALPHA_VISIBILITY_THRESHOLD = 1 / 255;
+const NUM_BUCKETS = 64;
 
 const _invWorldMat = new Mat4();
 const _localCameraPos = new Vec3();
@@ -60320,7 +57457,7 @@ class GSplatOctreeInstance {
 	updateLod(cameraNode, params) {
 		const maxLod = this.octree.lodLevels - 1;
 		const { lodBaseDistance, lodMultiplier } = this.placement;
-		const { lodRangeMin, lodRangeMax } = params;
+		const { lodRangeMin, lodRangeMax } = this.placement;
 		const rangeMin = Math.max(0, Math.min(lodRangeMin ?? 0, maxLod));
 		const rangeMax = Math.max(rangeMin, Math.min(lodRangeMax ?? maxLod, maxLod));
 		const uniformScale = this.placement.node.getWorldTransform().getScale().x;
@@ -60433,7 +57570,7 @@ class GSplatOctreeInstance {
 	evaluateOptimalLods(cameraNode, params, budgetScale = 1, globalMaxDistanceForBuckets = 0) {
 		const maxLod = this.octree.lodLevels - 1;
 		const { lodBaseDistance, lodMultiplier } = this.placement;
-		const { lodRangeMin, lodRangeMax } = params;
+		const { lodRangeMin, lodRangeMax } = this.placement;
 		const rangeMin = Math.max(0, Math.min(lodRangeMin ?? 0, maxLod));
 		const rangeMax = Math.max(rangeMin, Math.min(lodRangeMax ?? maxLod, maxLod));
 		this.rangeMin = rangeMin;
@@ -60835,6 +57972,9 @@ class GSplatOctree {
 		}
 	}
 	ensureFileResource(fileIndex) {
+		if (!this.assetLoader) {
+			return;
+		}
 		if (this.fileResources.has(fileIndex)) {
 			return;
 		}
@@ -61136,6 +58276,2163 @@ class GSplatPlacementStateTracker {
 	}
 }
 
+class GSplatBudgetBalancer {
+	_buckets = null;
+	_initBuckets() {
+		if (!this._buckets) {
+			this._buckets = new Array(NUM_BUCKETS);
+			for (let i = 0; i < NUM_BUCKETS; i++) {
+				this._buckets[i] = [];
+			}
+		}
+	}
+	balance(octreeInstances, budget) {
+		this._initBuckets();
+		for (let i = 0; i < NUM_BUCKETS; i++) {
+			this._buckets[i].length = 0;
+		}
+		let totalOptimalSplats = 0;
+		for (const [, inst] of octreeInstances) {
+			const nodes = inst.octree.nodes;
+			const nodeInfos = inst.nodeInfos;
+			for (let nodeIndex = 0, len = nodes.length; nodeIndex < len; nodeIndex++) {
+				const nodeInfo = nodeInfos[nodeIndex];
+				const optimalLod = nodeInfo.optimalLod;
+				if (optimalLod < 0) continue;
+				const lods = nodes[nodeIndex].lods;
+				nodeInfo.lods = lods;
+				this._buckets[nodeInfo.budgetBucket].push(nodeInfo);
+				totalOptimalSplats += lods[optimalLod].count;
+			}
+		}
+		let currentSplats = totalOptimalSplats;
+		if (currentSplats === budget) {
+			return;
+		}
+		const isOverBudget = currentSplats > budget;
+		let done = false;
+		while (!done && (isOverBudget ? currentSplats > budget : currentSplats < budget)) {
+			let modified = false;
+			if (isOverBudget) {
+				for (let b = NUM_BUCKETS - 1; b >= 0 && !done; b--) {
+					const bucket = this._buckets[b];
+					for (let i = 0, len = bucket.length; i < len; i++) {
+						const nodeInfo = bucket[i];
+						if (nodeInfo.optimalLod < nodeInfo.inst.rangeMax) {
+							const lods = nodeInfo.lods;
+							const optimalLod = nodeInfo.optimalLod;
+							currentSplats -= lods[optimalLod].count - lods[optimalLod + 1].count;
+							nodeInfo.optimalLod = optimalLod + 1;
+							modified = true;
+							if (currentSplats <= budget) {
+								done = true;
+								break;
+							}
+						}
+					}
+				}
+			} else {
+				for (let b = 0; b < NUM_BUCKETS && !done; b++) {
+					const bucket = this._buckets[b];
+					for (let i = 0, len = bucket.length; i < len; i++) {
+						const nodeInfo = bucket[i];
+						if (nodeInfo.optimalLod > nodeInfo.inst.rangeMin) {
+							const lods = nodeInfo.lods;
+							const optimalLod = nodeInfo.optimalLod;
+							const splatsAdded = lods[optimalLod - 1].count - lods[optimalLod].count;
+							if (currentSplats + splatsAdded <= budget) {
+								nodeInfo.optimalLod = optimalLod - 1;
+								currentSplats += splatsAdded;
+								modified = true;
+								if (currentSplats >= budget) {
+									done = true;
+									break;
+								}
+							} else {
+								done = true;
+								break;
+							}
+						}
+					}
+				}
+			}
+			if (!modified) {
+				break;
+			}
+		}
+	}
+}
+
+const cameraPosition$1 = new Vec3();
+const _tempVec3 = new Vec3();
+const invModelMat$1 = new Mat4();
+const _localCamPos = new Vec3();
+const _closestPt = new Vec3();
+const _meshInstanceAabb = new BoundingBox();
+const _tempPlacementAabb = new BoundingBox();
+const _cameraDeltas = { translationDelta: 0 };
+const tempOctreesTicked = /* @__PURE__ */ new Set();
+const _queuedSplats = /* @__PURE__ */ new Set();
+const _updatedSplats = [];
+const _splatsWithSH = [];
+const _changedColorAllocIds = /* @__PURE__ */ new Set();
+const tempNonOctreePlacements = /* @__PURE__ */ new Set();
+const tempOctreePlacements = /* @__PURE__ */ new Set();
+const _lodColorsRaw = [
+	[1, 0, 0],
+	// red
+	[0, 1, 0],
+	// green
+	[0, 0, 1],
+	// blue
+	[1, 1, 0],
+	// yellow
+	[1, 0, 1],
+	// magenta
+	[0, 1, 1],
+	// cyan
+	[1, 0.5, 0],
+	// orange
+	[0.5, 0, 1]
+	// purple
+];
+let _randomColorRaw = null;
+const ALLOCATOR_GROW_MULTIPLIER = 1.15;
+class GSplatWorld {
+	_device;
+	_scene;
+	_workBuffer;
+	_worldStates = /* @__PURE__ */ new Map();
+	_lastWorldStateVersion = 0;
+	_currentVersion = 0;
+	_worldStateDirty = false;
+	_workBufferFormatVersion = -1;
+	_workBufferRebuildRequired = false;
+	_bufferCopyUploaded = 0;
+	_bufferCopyTotal = 0;
+	_stateTracker = new GSplatPlacementStateTracker();
+	_framesTillFullUpdate = 0;
+	_lodUpdateRequested = false;
+	_lastLodCameraPos = new Vec3(Infinity, Infinity, Infinity);
+	_lastLodCameraFwd = new Vec3(Infinity, Infinity, Infinity);
+	_lastLodCameraFov = -1;
+	_budgetBalancer = new GSplatBudgetBalancer();
+	_budgetScale = 1;
+	_allocator;
+	_allocationMap = /* @__PURE__ */ new Map();
+	_lastColorUpdateCameraPos = new Vec3(Infinity, Infinity, Infinity);
+	_layerPlacements = [];
+	_layerPlacementsDirty = false;
+	_placementSetChanged = false;
+	_octreeInstances = /* @__PURE__ */ new Map();
+	_octreeInstancesToDestroy = [];
+	_hasNewOctreeInstances = false;
+	_awaitingLodUpdate = false;
+	constructor(device, scene) {
+		this._device = device;
+		this._scene = scene;
+		const budget = scene.gsplat.splatBudget;
+		this._allocator = new BlockAllocator(budget > 0 ? Math.ceil(budget * ALLOCATOR_GROW_MULTIPLIER) : 0, ALLOCATOR_GROW_MULTIPLIER);
+		this._workBuffer = new GSplatWorkBuffer(device, scene.gsplat.format);
+		this._workBufferFormatVersion = this._workBuffer.format.extraStreamsVersion;
+	}
+	destroy() {
+		for (const [, worldState] of this._worldStates) {
+			for (const splat of worldState.splats) {
+				splat.resource.decRefCount();
+			}
+			worldState.destroy();
+		}
+		this._worldStates.clear();
+		for (const [, instance] of this._octreeInstances) {
+			instance.destroy();
+		}
+		this._octreeInstances.clear();
+		for (const instance of this._octreeInstancesToDestroy) {
+			instance.destroy();
+		}
+		this._octreeInstancesToDestroy.length = 0;
+		this._workBuffer.destroy();
+	}
+	// --- read-only accessors (the one-way contract: manager reads, never reassigns) ---
+	get workBuffer() {
+		return this._workBuffer;
+	}
+	get currentVersion() {
+		return this._currentVersion;
+	}
+	get lastWorldStateVersion() {
+		return this._lastWorldStateVersion;
+	}
+	get bufferCopyUploaded() {
+		return this._bufferCopyUploaded;
+	}
+	get bufferCopyTotal() {
+		return this._bufferCopyTotal;
+	}
+	get awaitingLodUpdate() {
+		return this._awaitingLodUpdate;
+	}
+	get hasOctreeInstances() {
+		return this._octreeInstances.size > 0;
+	}
+	get pendingLoadCount() {
+		let loadingCount = 0;
+		for (const [, inst] of this._octreeInstances) {
+			loadingCount += inst.pendingLoadCount;
+		}
+		return loadingCount;
+	}
+	get currentState() {
+		return this._worldStates.get(this._currentVersion);
+	}
+	getState(version) {
+		return this._worldStates.get(version);
+	}
+	get hasBounds() {
+		return this._workBuffer.frustumCuller.totalBoundsEntries > 0;
+	}
+	// --- mutation entry points (manager-driven) ---
+	resetFrameStats() {
+		this._bufferCopyUploaded = 0;
+		this._bufferCopyTotal = 0;
+	}
+	invalidate({ worldState = false, workBuffer = false } = {}) {
+		if (worldState) this._worldStateDirty = true;
+		if (workBuffer) this._workBufferRebuildRequired = true;
+	}
+	invalidateSortState() {
+		const currentState = this._worldStates.get(this._currentVersion);
+		if (!currentState) return null;
+		currentState.sortParametersSet = false;
+		currentState.sortedBefore = false;
+		return currentState.splats;
+	}
+	syncFormat(result) {
+		result.bufferRecreated = false;
+		result.sortNeeded = false;
+		const currentFormat = this._scene.gsplat.format;
+		if (this._workBuffer.format !== currentFormat) {
+			this._workBuffer.destroy();
+			this._workBuffer = new GSplatWorkBuffer(this._device, currentFormat);
+			this._workBufferFormatVersion = this._workBuffer.format.extraStreamsVersion;
+			this._workBufferRebuildRequired = true;
+			result.bufferRecreated = true;
+			result.sortNeeded = true;
+		}
+		const wbFormatVersion = this._workBuffer.format.extraStreamsVersion;
+		if (this._workBufferFormatVersion !== wbFormatVersion) {
+			this._workBufferFormatVersion = wbFormatVersion;
+			this._workBuffer.syncWithFormat();
+			this._workBufferRebuildRequired = true;
+			result.sortNeeded = true;
+		}
+		return result;
+	}
+	reconcile(placements) {
+		tempNonOctreePlacements.clear();
+		for (const p of placements) {
+			if (p.resource instanceof GSplatOctreeResource) {
+				if (!this._octreeInstances.has(p)) {
+					this._octreeInstances.set(p, new GSplatOctreeInstance(this._device, p.resource.octree, p));
+					this._hasNewOctreeInstances = true;
+				}
+				tempOctreePlacements.add(p);
+			} else {
+				tempNonOctreePlacements.add(p);
+			}
+		}
+		for (const [placement, inst] of this._octreeInstances) {
+			if (!tempOctreePlacements.has(placement)) {
+				this._octreeInstances.delete(placement);
+				this._layerPlacementsDirty = true;
+				this._placementSetChanged = true;
+				this._octreeInstancesToDestroy.push(inst);
+			}
+		}
+		this._layerPlacementsDirty || (this._layerPlacementsDirty = this._layerPlacements.length !== tempNonOctreePlacements.size);
+		if (!this._layerPlacementsDirty) {
+			for (let i = 0; i < this._layerPlacements.length; i++) {
+				const existing = this._layerPlacements[i];
+				if (!tempNonOctreePlacements.has(existing)) {
+					this._layerPlacementsDirty = true;
+					break;
+				}
+			}
+		}
+		this._placementSetChanged || (this._placementSetChanged = this._layerPlacementsDirty);
+		this._layerPlacements.length = 0;
+		for (const p of tempNonOctreePlacements) {
+			this._layerPlacements.push(p);
+		}
+		tempNonOctreePlacements.clear();
+		tempOctreePlacements.clear();
+	}
+	update(camera, allowLodUpdate, requireCenters, result) {
+		result.newVersion = false;
+		result.overdrawDirty = false;
+		result.sortNeeded = false;
+		for (const [placement, inst] of this._octreeInstances) {
+			if (inst.octree.destroyed) {
+				this._octreeInstances.delete(placement);
+				this._layerPlacementsDirty = true;
+				this._placementSetChanged = true;
+				this._octreeInstancesToDestroy.push(inst);
+			}
+		}
+		if (--this._framesTillFullUpdate <= 0) {
+			this._framesTillFullUpdate = 10;
+			this._lodUpdateRequested = true;
+		}
+		let fullUpdate = false;
+		if (this._lodUpdateRequested && allowLodUpdate) {
+			fullUpdate = true;
+			this._lodUpdateRequested = false;
+		}
+		const hasNewInstances = this._hasNewOctreeInstances && allowLodUpdate;
+		if (hasNewInstances) this._hasNewOctreeInstances = false;
+		let anyInstanceNeedsLodUpdate = false;
+		let anyOctreeMoved = false;
+		let cameraMovedOrRotatedForLod = false;
+		if (fullUpdate) {
+			for (const [, inst] of this._octreeInstances) {
+				const isDirty = inst.update();
+				this._layerPlacementsDirty || (this._layerPlacementsDirty = isDirty);
+				this._placementSetChanged || (this._placementSetChanged = inst.consumePlacementSetChanged());
+				const instNeeds = inst.consumeNeedsLodUpdate();
+				anyInstanceNeedsLodUpdate || (anyInstanceNeedsLodUpdate = instNeeds);
+			}
+			const threshold = this._scene.gsplat.lodUpdateDistance;
+			for (const [, inst] of this._octreeInstances) {
+				const moved = inst.testMoved(threshold);
+				anyOctreeMoved || (anyOctreeMoved = moved);
+			}
+			cameraMovedOrRotatedForLod = this.testCameraMovedForLod(camera);
+			this._awaitingLodUpdate = false;
+		}
+		if (this._scene.gsplat.dirty) {
+			this._layerPlacementsDirty = true;
+			result.overdrawDirty = true;
+			this._workBufferRebuildRequired = true;
+			result.sortNeeded = true;
+			if (this._octreeInstances.size > 0) {
+				this._awaitingLodUpdate = true;
+			}
+		}
+		if (cameraMovedOrRotatedForLod || anyOctreeMoved || this._scene.gsplat.dirty || anyInstanceNeedsLodUpdate || hasNewInstances) {
+			for (const [, inst] of this._octreeInstances) {
+				inst.updateMoved();
+			}
+			this._lastLodCameraPos.copy(camera.getPosition());
+			this._lastLodCameraFwd.copy(camera.forward);
+			this._lastLodCameraFov = camera.camera.fov;
+			const budget = this._scene.gsplat.splatBudget;
+			if (budget > 0) {
+				this._enforceBudget(budget, camera);
+			} else {
+				this._budgetScale = 1;
+				for (const [, inst] of this._octreeInstances) {
+					inst.updateLod(camera, this._scene.gsplat);
+				}
+			}
+		}
+		if (this._updateWorldState(requireCenters)) {
+			result.newVersion = true;
+			result.sortNeeded = true;
+		}
+		return result;
+	}
+	_updateWorldState(requireCenters) {
+		let stateChanged = this._stateTracker.hasChanges(this._layerPlacements);
+		for (const [, inst] of this._octreeInstances) {
+			if (this._stateTracker.hasChanges(inst.activePlacements)) {
+				stateChanged = true;
+			}
+		}
+		const placementsChanged = this._layerPlacementsDirty;
+		const worldChanged = placementsChanged || stateChanged || this._worldStates.size === 0 || this._worldStateDirty;
+		if (!worldChanged) {
+			return false;
+		}
+		this._lastWorldStateVersion++;
+		const splats = [];
+		for (const p of this._layerPlacements) {
+			if (requireCenters && !p.resource.hasCenters) {
+				continue;
+			}
+			p.ensureInstanceStreams(this._device);
+			const splatInfo = new GSplatInfo(this._device, p.resource, p, p.consumeRenderDirty.bind(p));
+			splats.push(splatInfo);
+		}
+		for (const [, inst] of this._octreeInstances) {
+			inst.activePlacements.forEach((p) => {
+				if (p.resource) {
+					const leafResource = p.resource;
+					if (requireCenters && !leafResource.hasCenters) {
+						return;
+					}
+					p.ensureInstanceStreams(this._device);
+					const octreeNodes = p.intervals.size > 0 ? inst.octree.nodes : null;
+					const nodeInfos = octreeNodes ? inst.nodeInfos : null;
+					const splatInfo = new GSplatInfo(this._device, p.resource, p, p.consumeRenderDirty.bind(p), octreeNodes, nodeInfos);
+					splats.push(splatInfo);
+				}
+			});
+		}
+		const newState = new GSplatWorldState(
+			this._device,
+			this._lastWorldStateVersion,
+			splats,
+			this._allocator,
+			this._allocationMap
+		);
+		for (const splat of newState.splats) {
+			splat.resource.incRefCount();
+		}
+		for (const [, inst] of this._octreeInstances) {
+			if (inst.removedCandidates && inst.removedCandidates.size) {
+				for (const fileIndex of inst.removedCandidates) {
+					newState.pendingReleases.push([inst.octree, fileIndex]);
+				}
+				inst.removedCandidates.clear();
+			}
+		}
+		if (this._octreeInstancesToDestroy.length) {
+			for (const inst of this._octreeInstancesToDestroy) {
+				if (inst.removedCandidates && inst.removedCandidates.size) {
+					for (const fileIndex of inst.removedCandidates) {
+						newState.pendingReleases.push([inst.octree, fileIndex]);
+					}
+					inst.removedCandidates.clear();
+				}
+				const toRelease = inst.getFileDecrements();
+				for (const fileIndex of toRelease) {
+					newState.pendingReleases.push([inst.octree, fileIndex]);
+				}
+				inst.destroy(true);
+			}
+			this._octreeInstancesToDestroy.length = 0;
+		}
+		if (this._placementSetChanged) {
+			newState.fullRebuild = true;
+		}
+		this._worldStates.set(this._lastWorldStateVersion, newState);
+		this._layerPlacementsDirty = false;
+		this._placementSetChanged = false;
+		this._worldStateDirty = false;
+		return true;
+	}
+	markSorted(version, count, camera, updateBounds, result) {
+		result.rebuilt = false;
+		result.count = 0;
+		result.textureSize = 0;
+		this.cleanupOldWorldStates(version);
+		this._currentVersion = version;
+		const worldState = this._worldStates.get(version);
+		if (worldState && !worldState.sortedBefore) {
+			worldState.sortedBefore = true;
+			this.rebuildWorkBuffer(worldState, count, false, camera, updateBounds);
+			result.rebuilt = true;
+			result.count = count;
+			result.textureSize = worldState.textureSize;
+		}
+		return result;
+	}
+	onSorted(version, count, orderData, camera, updateBounds, result) {
+		this.markSorted(version, count, camera, updateBounds, result);
+		if (this._worldStates.get(version)) {
+			this._workBuffer.setOrderData(orderData);
+		}
+		return result;
+	}
+	bake(version, camera, updateBounds, result) {
+		result.rebuilt = false;
+		result.count = 0;
+		result.textureSize = 0;
+		result.sortNeeded = false;
+		const sortedState = this._worldStates.get(version);
+		if (sortedState?.sortedBefore) {
+			if (this._workBufferRebuildRequired) {
+				const count = sortedState.totalActiveSplats;
+				this.rebuildWorkBuffer(sortedState, count, true, camera, updateBounds);
+				this._workBufferRebuildRequired = false;
+				result.rebuilt = true;
+				result.count = count;
+				result.textureSize = sortedState.textureSize;
+			} else {
+				result.sortNeeded = this.applyWorkBufferUpdates(sortedState, camera);
+			}
+			this.updateColorCameraTracking(camera);
+		}
+		return result;
+	}
+	rebuildWorkBuffer(worldState, count, forceFullRebuild, camera, updateBounds) {
+		const textureSize = worldState.textureSize;
+		if (textureSize !== this._workBuffer.textureSize) {
+			this._workBuffer.resize(textureSize);
+		}
+		if (updateBounds) {
+			this._workBuffer.frustumCuller.updateBoundsData(worldState.boundsGroups);
+			this._workBuffer.frustumCuller.updateTransformsData(worldState.boundsGroups);
+		}
+		const renderAll = forceFullRebuild || worldState.fullRebuild;
+		const splatsToRender = renderAll ? worldState.splats : worldState.needsUpload;
+		const changedAllocIds = renderAll ? null : worldState.needsUploadIds;
+		if (splatsToRender.length > 0) {
+			const totalBlocks = this._allocationMap.size;
+			const uploadBlocks = renderAll ? totalBlocks : worldState.needsUploadIds.size;
+			this._bufferCopyUploaded += uploadBlocks;
+			this._bufferCopyTotal = totalBlocks;
+			this._workBuffer.render(splatsToRender, camera, this.getDebugColors(), changedAllocIds);
+		}
+		for (let i = 0; i < worldState.splats.length; i++) {
+			worldState.splats[i].update();
+		}
+		this.updateColorCameraTracking(camera);
+		if (worldState.pendingReleases && worldState.pendingReleases.length) {
+			const cooldownTicks = this._scene.gsplat.cooldownTicks;
+			for (const [octree, fileIndex] of worldState.pendingReleases) {
+				octree.decRefCount(fileIndex, cooldownTicks);
+			}
+			worldState.pendingReleases.length = 0;
+		}
+	}
+	cleanupOldWorldStates(newVersion) {
+		const activeState = this._worldStates.get(newVersion);
+		if (!activeState.fullRebuild) {
+			for (let v = this._currentVersion + 1; v < newVersion; v++) {
+				if (this._worldStates.get(v)?.fullRebuild) {
+					activeState.fullRebuild = true;
+					break;
+				}
+			}
+		}
+		if (!activeState.fullRebuild) {
+			const activeIds = activeState.needsUploadIds;
+			const lookup = activeState.allocIdToSplat;
+			for (let v = this._currentVersion + 1; v < newVersion; v++) {
+				const oldState = this._worldStates.get(v);
+				if (oldState) {
+					for (const allocId of oldState.needsUploadIds) {
+						if (!activeIds.has(allocId)) {
+							activeIds.add(allocId);
+							const splat = lookup.get(allocId);
+							if (splat && !_queuedSplats.has(splat)) {
+								activeState.needsUpload.push(splat);
+								_queuedSplats.add(splat);
+							}
+						}
+					}
+				}
+			}
+			_queuedSplats.clear();
+		}
+		for (let v = this._currentVersion; v < newVersion; v++) {
+			const oldState = this._worldStates.get(v);
+			if (oldState) {
+				for (const splat of oldState.splats) {
+					splat.resource.decRefCount();
+				}
+				this._worldStates.delete(v);
+				oldState.destroy();
+			}
+		}
+	}
+	applyWorkBufferUpdates(state, camera) {
+		const { colorUpdateAngle } = this._scene.gsplat;
+		const ratio = Math.tan(colorUpdateAngle * math.DEG_TO_RAD);
+		const cameraPos = camera.getPosition();
+		const { translationDelta } = this.calculateColorCameraDeltas(camera);
+		const hasCameraMovement = translationDelta > 0;
+		let movedAny = false;
+		let uploadedBlocks = 0;
+		state.splats.forEach((splat) => {
+			if (splat.update()) {
+				_updatedSplats.push(splat);
+				uploadedBlocks += splat.intervalAllocIds.length;
+				if (splat.nodeInfos) {
+					for (const ni of splat.intervalNodeIndices) {
+						splat.nodeInfos[ni].colorAccumulatedTranslation = 0;
+					}
+				} else {
+					splat.colorAccumulatedTranslation = 0;
+				}
+				movedAny = true;
+			} else if (hasCameraMovement && splat.hasSphericalHarmonics) {
+				_splatsWithSH.push(splat);
+				if (splat.nodeInfos) {
+					const nodeIndices = splat.intervalNodeIndices;
+					for (let j = 0; j < nodeIndices.length; j++) {
+						const nodeInfo = splat.nodeInfos[nodeIndices[j]];
+						nodeInfo.colorAccumulatedTranslation += translationDelta;
+						const threshold = ratio * Math.max(1, nodeInfo.worldDistance);
+						if (nodeInfo.colorAccumulatedTranslation >= threshold) {
+							_changedColorAllocIds.add(splat.intervalAllocIds[j]);
+							nodeInfo.colorAccumulatedTranslation = 0;
+							uploadedBlocks++;
+						}
+					}
+				} else {
+					splat.colorAccumulatedTranslation += translationDelta;
+					invModelMat$1.copy(splat.node.getWorldTransform()).invert();
+					invModelMat$1.transformPoint(cameraPos, _localCamPos);
+					splat.aabb.closestPoint(_localCamPos, _closestPt);
+					const dist = _localCamPos.distance(_closestPt) * splat.node.getWorldTransform().getScale().x;
+					const threshold = ratio * Math.max(1, dist);
+					if (splat.colorAccumulatedTranslation >= threshold) {
+						_changedColorAllocIds.add(splat.allocId);
+						uploadedBlocks += splat.intervalAllocIds.length;
+						splat.colorAccumulatedTranslation = 0;
+					}
+				}
+			}
+		});
+		this._bufferCopyUploaded += uploadedBlocks;
+		this._bufferCopyTotal = this._allocationMap.size;
+		if (_updatedSplats.length > 0) {
+			this._workBuffer.render(_updatedSplats, camera, this.getDebugColors());
+			_updatedSplats.length = 0;
+		}
+		if (_changedColorAllocIds.size > 0) {
+			this._workBuffer.renderColor(
+				_splatsWithSH,
+				camera,
+				this.getDebugColors(),
+				_changedColorAllocIds
+			);
+			_changedColorAllocIds.clear();
+		}
+		_splatsWithSH.length = 0;
+		return movedAny;
+	}
+	testCameraMovedForLod(camera) {
+		const distanceThreshold = this._scene.gsplat.lodUpdateDistance;
+		const currentCameraPos = camera.getPosition();
+		const cameraMoved = this._lastLodCameraPos.distance(currentCameraPos) > distanceThreshold;
+		if (cameraMoved) {
+			return true;
+		}
+		let cameraRotated = false;
+		const lodUpdateAngleDeg = this._scene.gsplat.lodUpdateAngle;
+		if (lodUpdateAngleDeg > 0) {
+			if (Number.isFinite(this._lastLodCameraFwd.x)) {
+				const currentCameraFwd = camera.forward;
+				const dot = Math.min(1, Math.max(-1, this._lastLodCameraFwd.dot(currentCameraFwd)));
+				const angle = Math.acos(dot);
+				const rotThreshold = lodUpdateAngleDeg * math.DEG_TO_RAD;
+				cameraRotated = angle > rotThreshold;
+			} else {
+				cameraRotated = true;
+			}
+		}
+		const currentFov = camera.camera.fov;
+		const fovChanged = this._lastLodCameraFov < 0 || Math.abs(currentFov - this._lastLodCameraFov) > this._lastLodCameraFov * 0.02;
+		return cameraMoved || cameraRotated || fovChanged;
+	}
+	updateColorCameraTracking(camera) {
+		this._lastColorUpdateCameraPos.copy(camera.getPosition());
+	}
+	getDebugColors() {
+		const debug = this._scene.gsplat.debug;
+		if (debug === GSPLAT_DEBUG_SH_UPDATE) {
+			_randomColorRaw ?? (_randomColorRaw = []);
+			const r = Math.random();
+			const g = Math.random();
+			const b = Math.random();
+			for (let i = 0; i < _lodColorsRaw.length; i++) {
+				_randomColorRaw[i] ?? (_randomColorRaw[i] = [0, 0, 0]);
+				_randomColorRaw[i][0] = r;
+				_randomColorRaw[i][1] = g;
+				_randomColorRaw[i][2] = b;
+			}
+			return _randomColorRaw;
+		} else if (debug === GSPLAT_DEBUG_LOD) {
+			return _lodColorsRaw;
+		}
+		return void 0;
+	}
+	calculateColorCameraDeltas(camera) {
+		_cameraDeltas.translationDelta = 0;
+		if (isFinite(this._lastColorUpdateCameraPos.x)) {
+			const currentCameraPos = camera.getPosition();
+			_cameraDeltas.translationDelta = this._lastColorUpdateCameraPos.distance(currentCameraPos);
+		}
+		return _cameraDeltas;
+	}
+	computeGlobalMaxDistance(camera) {
+		let maxDist = 0;
+		cameraPosition$1.copy(camera.getPosition());
+		for (const [, inst] of this._octreeInstances) {
+			const worldTransform = inst.placement.node.getWorldTransform();
+			const aabb = inst.placement.aabb;
+			worldTransform.transformPoint(aabb.center, _tempVec3);
+			const scale = worldTransform.getScale().x;
+			const dist = _tempVec3.distance(cameraPosition$1) + aabb.halfExtents.length() * scale;
+			if (dist > maxDist) maxDist = dist;
+		}
+		return Math.max(maxDist, 1);
+	}
+	_enforceBudget(budget, camera) {
+		const textureWidth = this._workBuffer.textureSize;
+		let fixedSplats = 0;
+		let paddingEstimate = 0;
+		for (const p of this._layerPlacements) {
+			const resource = p.resource;
+			if (resource) {
+				const numSplats = resource.numSplats ?? 0;
+				fixedSplats += numSplats;
+				paddingEstimate += (textureWidth - numSplats % textureWidth) % textureWidth;
+			}
+		}
+		const octreeBudget = Math.max(1, budget - fixedSplats);
+		const globalMaxDistance = this.computeGlobalMaxDistance(camera);
+		let totalOptimalSplats = 0;
+		for (const [, inst] of this._octreeInstances) {
+			totalOptimalSplats += inst.evaluateOptimalLods(camera, this._scene.gsplat, this._budgetScale, globalMaxDistance);
+			for (const placement of inst.activePlacements) {
+				const resource = placement.resource;
+				const numSplats = resource?.numSplats ?? 0;
+				paddingEstimate += (textureWidth - numSplats % textureWidth) % textureWidth;
+			}
+		}
+		const adjustedBudget = Math.max(1, octreeBudget - paddingEstimate);
+		if (totalOptimalSplats > 0) {
+			const ratio = totalOptimalSplats / adjustedBudget;
+			const budgetScaleDeadZone = 0.4;
+			const budgetScaleBlendRate = 0.3;
+			if (ratio > 1 + budgetScaleDeadZone || ratio < 1 - budgetScaleDeadZone) {
+				const invCorrection = 1 / Math.sqrt(ratio);
+				this._budgetScale *= 1 + (invCorrection - 1) * budgetScaleBlendRate;
+				this._budgetScale = Math.max(0.01, Math.min(this._budgetScale, 100));
+			}
+		}
+		this._budgetBalancer.balance(this._octreeInstances, adjustedBudget);
+		for (const [, inst] of this._octreeInstances) {
+			const maxLod = inst.octree.lodLevels - 1;
+			inst.applyLodChanges(maxLod, this._scene.gsplat);
+		}
+	}
+	computeAggregateAabb() {
+		let initialized = false;
+		const layerPlacements = this._layerPlacements;
+		for (let i = 0; i < layerPlacements.length; i++) {
+			initialized = this._accumulatePlacementAabb(layerPlacements[i], initialized);
+		}
+		for (const [, inst] of this._octreeInstances) {
+			initialized = this._accumulatePlacementAabb(inst.placement, initialized);
+		}
+		return initialized ? _meshInstanceAabb : null;
+	}
+	_accumulatePlacementAabb(placement, initialized) {
+		const a = placement.aabb;
+		if (!a) return initialized;
+		_tempPlacementAabb.setFromTransformedAabb(a, placement.node.getWorldTransform());
+		if (initialized) {
+			_meshInstanceAabb.add(_tempPlacementAabb);
+		} else {
+			_meshInstanceAabb.copy(_tempPlacementAabb);
+		}
+		return true;
+	}
+	tickCooldowns() {
+		if (this._octreeInstances.size) {
+			const cooldownTicks = this._scene.gsplat.cooldownTicks;
+			for (const [, inst] of this._octreeInstances) {
+				const octree = inst.octree;
+				if (!tempOctreesTicked.has(octree)) {
+					tempOctreesTicked.add(octree);
+					octree.updateCooldownTick(cooldownTicks);
+				}
+			}
+			tempOctreesTicked.clear();
+		}
+	}
+	markInstancesNeedLodUpdate() {
+		for (const [, inst] of this._octreeInstances) {
+			inst.needsLodUpdate = true;
+		}
+	}
+	prepareSortParameters(worldState) {
+		return {
+			command: "intervals",
+			textureSize: worldState.textureSize,
+			totalActiveSplats: worldState.totalActiveSplats,
+			version: worldState.version,
+			ids: worldState.splats.map((splat) => splat.resource.id),
+			pixelOffsets: worldState.splats.map((splat) => splat.intervalOffsets),
+			// TODO: consider storing this in typed array and transfer it to sorter worker
+			intervals: worldState.splats.map((splat) => splat.intervals)
+		};
+	}
+}
+
+class GSplatRenderer {
+	device;
+	node;
+	cameraNode;
+	layer;
+	workBuffer;
+	renderMode;
+	_workBufferFormatVersion = -1;
+	fisheyeProj = new FisheyeProjection();
+	constructor(device, node, cameraNode, layer, workBuffer) {
+		this.device = device;
+		this.node = node;
+		this.cameraNode = cameraNode;
+		this.layer = layer;
+		this.workBuffer = workBuffer;
+		this._workBufferFormatVersion = workBuffer?.format.extraStreamsVersion ?? -1;
+	}
+	destroy() {
+	}
+	resolveFisheye(fisheye) {
+		const xrActive = !!this.cameraNode.camera?.camera?.xrActive;
+		if (xrActive && fisheye > 0) {
+			return 0;
+		}
+		return fisheye;
+	}
+	setRenderMode(renderMode) {
+		this.renderMode = renderMode;
+	}
+	get usesGpuSort() {
+		return false;
+	}
+	get requiresBounds() {
+		return false;
+	}
+	get requiresCpuSort() {
+		return !this.usesGpuSort;
+	}
+	get material() {
+		return null;
+	}
+	setDataSource(source) {
+		this.workBuffer = source;
+		this.onWorkBufferFormatChanged();
+	}
+	onWorkBufferFormatChanged() {
+	}
+	update(count, textureSize) {
+	}
+	setGpuSortedRendering(drawSlot, sortedIds, numSplatsBuffer, textureSize) {
+	}
+	setCpuSortedRendering() {
+	}
+	setOrderData() {
+	}
+	frameUpdate(params, exposure, fogParams) {
+	}
+	updateOverdrawMode(params) {
+	}
+	invalidateCullUpload() {
+	}
+	prepareRenderView(world, worldState, params) {
+		return false;
+	}
+	preparePickingView(world, worldState, pickParams) {
+		return null;
+	}
+}
+
+class GSplatQuadRenderer extends GSplatRenderer {
+	_material;
+	meshInstance;
+	originalBlendType = BLEND_ADDITIVE;
+	_internalDefines = /* @__PURE__ */ new Set();
+	forceCopyMaterial = true;
+	_lastFisheyeEnabled = false;
+	_lastSourceChunksKey = "";
+	constructor(device, node, cameraNode, layer, workBuffer) {
+		super(device, node, cameraNode, layer, workBuffer);
+		this._material = new ShaderMaterial({
+			uniqueName: "UnifiedSplatMaterial",
+			vertexGLSL: '#include "gsplatVS"',
+			fragmentGLSL: '#include "gsplatPS"',
+			vertexWGSL: '#include "gsplatVS"',
+			fragmentWGSL: '#include "gsplatPS"',
+			attributes: {
+				vertex_position: SEMANTIC_POSITION
+			}
+		});
+		this._material.setDefine("{GSPLAT_INSTANCE_SIZE}", GSplatResourceBase.instanceSize);
+		this.configureMaterial();
+		this._material.defines.forEach((value, key) => {
+			this._internalDefines.add(key);
+		});
+		this._internalDefines.add("{GSPLAT_INSTANCE_SIZE}");
+		this._internalDefines.add("GSPLAT_UNIFIED_ID");
+		this._internalDefines.add("PICK_CUSTOM_ID");
+		this._internalDefines.add("GSPLAT_INDIRECT_DRAW");
+		this._internalDefines.add("GSPLAT_SEPARATE_OPACITY");
+		this._internalDefines.add("GSPLAT_FISHEYE");
+		this.meshInstance = this.createMeshInstance();
+	}
+	setRenderMode(renderMode) {
+		const oldRenderMode = this.renderMode ?? 0;
+		const wasForward = (oldRenderMode & GSPLAT_FORWARD) !== 0;
+		const wasShadow = (oldRenderMode & GSPLAT_SHADOW) !== 0;
+		const isForward = (renderMode & GSPLAT_FORWARD) !== 0;
+		const isShadow = (renderMode & GSPLAT_SHADOW) !== 0;
+		this.meshInstance.castShadow = isShadow;
+		if (wasForward && !isForward) {
+			this.layer.removeMeshInstances([this.meshInstance], true);
+		}
+		if (wasShadow && !isShadow) {
+			this.layer.removeShadowCasters([this.meshInstance]);
+		}
+		if (!wasForward && isForward) {
+			this.layer.addMeshInstances([this.meshInstance], true);
+		}
+		if (!wasShadow && isShadow) {
+			this.layer.addShadowCasters([this.meshInstance]);
+		}
+		super.setRenderMode(renderMode);
+	}
+	destroy() {
+		if (this.renderMode) {
+			if (this.renderMode & GSPLAT_FORWARD) {
+				this.layer.removeMeshInstances([this.meshInstance], true);
+			}
+			if (this.renderMode & GSPLAT_SHADOW) {
+				this.layer.removeShadowCasters([this.meshInstance]);
+			}
+		}
+		this._material.destroy();
+		this.meshInstance.destroy();
+		super.destroy();
+	}
+	get material() {
+		return this._material;
+	}
+	onWorkBufferFormatChanged() {
+		this.configureMaterial();
+	}
+	configureMaterial() {
+		const { workBuffer } = this;
+		this._injectFormatChunks();
+		this._material.setDefine("SH_BANDS", "0");
+		this._material.setDefine("GSPLAT_SEPARATE_OPACITY", "");
+		const colorStream = workBuffer.format.getStream("dataColor");
+		if (colorStream && colorStream.format !== PIXELFORMAT_RGBA16U) {
+			this._material.setDefine("GSPLAT_COLOR_FLOAT", "");
+		}
+		this._updateIdDefines();
+		this._bindWorkBufferTextures();
+		this._material.setParameter("numSplats", 0);
+		this.setOrderData();
+		this._material.setDefine(`DITHER_${"NONE"}`, "");
+		this._material.cull = CULLFACE_NONE;
+		this._material.blendType = BLEND_PREMULTIPLIED;
+		this._material.depthWrite = false;
+		this._material.update();
+	}
+	_bindWorkBufferTextures() {
+		const { workBuffer } = this;
+		for (const stream of workBuffer.format.resourceStreams) {
+			const texture = workBuffer.getTexture(stream.name);
+			if (texture) {
+				this._material.setParameter(stream.name, texture);
+			}
+		}
+	}
+	_injectFormatChunks() {
+		const chunks = this.device.isWebGPU ? this._material.shaderChunks.wgsl : this._material.shaderChunks.glsl;
+		const wbFormat = this.workBuffer.format;
+		chunks.set("gsplatDeclarationsVS", wbFormat.getInputDeclarations());
+		chunks.set("gsplatReadVS", wbFormat.getReadCode());
+	}
+	update(count, textureSize) {
+		this.meshInstance.instancingCount = Math.ceil(count / GSplatResourceBase.instanceSize);
+		this._material.setParameter("numSplats", count);
+		this._material.setParameter("splatTextureSize", textureSize);
+		this.meshInstance.visible = count > 0;
+	}
+	setGpuSortedRendering(drawSlot, sortedIds, numSplatsBuffer, textureSize) {
+		this.meshInstance.setIndirect(null, drawSlot, 1);
+		this._material.setParameter("compactedSplatIds", sortedIds);
+		this._material.setParameter("numSplatsStorage", numSplatsBuffer);
+		if (!this._material.getDefine("GSPLAT_INDIRECT_DRAW")) {
+			this._material.setDefine("GSPLAT_INDIRECT_DRAW", true);
+			this._material.update();
+		}
+		this._material.setParameter("splatTextureSize", textureSize);
+		this.meshInstance.visible = true;
+		if (this.meshInstance.instancingCount <= 0) {
+			this.meshInstance.instancingCount = 1;
+		}
+	}
+	setCpuSortedRendering() {
+		this.meshInstance.setIndirect(null, -1);
+		if (this._material.getDefine("GSPLAT_INDIRECT_DRAW")) {
+			this._material.setDefine("GSPLAT_INDIRECT_DRAW", false);
+			this._material.update();
+		}
+		this.setOrderData();
+		this.meshInstance.visible = false;
+	}
+	setOrderData() {
+		if (this.device.isWebGPU) {
+			this._material.setParameter("splatOrder", this.workBuffer.orderBuffer);
+		} else {
+			this._material.setParameter("splatOrder", this.workBuffer.orderTexture);
+		}
+	}
+	frameUpdate(params) {
+		if (params.colorRamp) {
+			this._material.setParameter("colorRampIntensity", params.colorRampIntensity);
+		}
+		const cam = this.cameraNode.camera;
+		this.fisheyeProj.update(this.resolveFisheye(params.fisheye), cam.fov, cam.projectionMatrix);
+		const fisheyeEnabled = this.fisheyeProj.enabled;
+		if (fisheyeEnabled !== this._lastFisheyeEnabled) {
+			this._lastFisheyeEnabled = fisheyeEnabled;
+			this._material.setDefine("GSPLAT_FISHEYE", fisheyeEnabled);
+			this._material.update();
+		}
+		if (fisheyeEnabled) {
+			const fp = this.fisheyeProj;
+			this._material.setParameter("fisheye_k", fp.k);
+			this._material.setParameter("fisheye_inv_k", fp.invK);
+			this._material.setParameter("fisheye_projMat00", fp.projMat00);
+			this._material.setParameter("fisheye_projMat11", fp.projMat11);
+		}
+		const noFog = !params.useFog;
+		if (noFog !== this._lastNoFog) {
+			this._lastNoFog = noFog;
+			this._material.setDefine("GSPLAT_NO_FOG", noFog);
+			this._material.update();
+		}
+		this._syncWithWorkBufferFormat();
+		if (this.forceCopyMaterial || params.material.dirty) {
+			this.copyMaterialSettings(params.material);
+			this.forceCopyMaterial = false;
+		}
+	}
+	_updateIdDefines() {
+		const hasPcId = !!this.workBuffer.format.getStream("pcId");
+		this._material.setDefine("GSPLAT_UNIFIED_ID", hasPcId);
+		this._material.setDefine("PICK_CUSTOM_ID", hasPcId);
+	}
+	_syncWithWorkBufferFormat() {
+		const wbFormat = this.workBuffer.format;
+		if (this._workBufferFormatVersion !== wbFormat.extraStreamsVersion) {
+			this._workBufferFormatVersion = wbFormat.extraStreamsVersion;
+			this.workBuffer.syncWithFormat();
+			this._injectFormatChunks();
+			this._bindWorkBufferTextures();
+			this._updateIdDefines();
+			this._material.update();
+		}
+	}
+	copyMaterialSettings(sourceMaterial) {
+		const keysToDelete = [];
+		this._material.defines.forEach((value, key) => {
+			if (!this._internalDefines.has(key) && !sourceMaterial.defines.has(key)) {
+				keysToDelete.push(key);
+			}
+		});
+		keysToDelete.forEach((key) => this._material.setDefine(key, void 0));
+		sourceMaterial.defines.forEach((value, key) => {
+			this._material.setDefine(key, value);
+		});
+		const srcParams = sourceMaterial.parameters;
+		for (const paramName in srcParams) {
+			if (srcParams.hasOwnProperty(paramName)) {
+				this._material.setParameter(paramName, srcParams[paramName].data);
+			}
+		}
+		if (sourceMaterial.hasShaderChunks) {
+			const sourceChunksKey = sourceMaterial.shaderChunks.key;
+			if (sourceChunksKey !== this._lastSourceChunksKey) {
+				this._material.shaderChunks.copy(sourceMaterial.shaderChunks);
+				this._injectFormatChunks();
+				this._lastSourceChunksKey = sourceChunksKey;
+			}
+		}
+		this._material.update();
+	}
+	updateOverdrawMode(params) {
+		const overdrawEnabled = !!params.colorRamp;
+		const wasOverdrawEnabled = this._material.getDefine("GSPLAT_OVERDRAW");
+		if (overdrawEnabled) {
+			this._material.setParameter("colorRamp", params.colorRamp);
+			this._material.setParameter("colorRampIntensity", params.colorRampIntensity);
+		}
+		if (overdrawEnabled !== wasOverdrawEnabled) {
+			this._material.setDefine("GSPLAT_OVERDRAW", overdrawEnabled);
+			if (overdrawEnabled) {
+				this.originalBlendType = this._material.blendType;
+				this._material.blendType = BLEND_ADDITIVE;
+			} else {
+				this._material.blendType = this.originalBlendType;
+			}
+			this._material.update();
+		}
+	}
+	createMeshInstance() {
+		const mesh = GSplatResourceBase.createMesh(this.device);
+		const meshInstance = new MeshInstance(mesh, this._material);
+		meshInstance.node = this.node;
+		meshInstance.setInstancing(true, true);
+		meshInstance.instancingCount = 0;
+		const thisCamera = this.cameraNode.camera;
+		meshInstance.isVisibleFunc = (camera) => {
+			const renderMode = this.renderMode ?? 0;
+			if (thisCamera.camera === camera && renderMode & GSPLAT_FORWARD) {
+				return true;
+			}
+			if (renderMode & GSPLAT_SHADOW) {
+				return camera.node?.name === SHADOWCAMERA_NAME;
+			}
+			return false;
+		};
+		return meshInstance;
+	}
+}
+
+const computeGsplatProjectorSource = `
+#include "gsplatCommonCS"
+#include "gsplatTileIntersectCS"
+@group(0) @binding(0) var<storage, read> compactedSplatIds: array<u32>;
+@group(0) @binding(1) var<storage, read> sortElementCount: array<u32>;
+@group(0) @binding(2) var<storage, read_write> projCache: array<u32>;
+@group(0) @binding(3) var<storage, read_write> sortKeys: array<u32>;
+@group(0) @binding(4) var<storage, read_write> renderCounter: array<atomic<u32>>;
+struct BinWeight {
+	base: f32,
+	divider: f32
+}
+@group(0) @binding(5) var<storage, read> binWeights: array<BinWeight>;
+struct ProjectorUniforms {
+	splatTextureSize: u32,
+	numBins: u32,
+	isOrtho: u32,
+	pad0: u32,
+	viewProj: mat4x4f,
+	viewMatrix: mat4x4f,
+	cameraPosition: vec3f,
+	minPixelSize: f32,
+	cameraDirection: vec3f,
+	focal: f32,
+	viewportWidth: f32,
+	viewportHeight: f32,
+	nearClip: f32,
+	farClip: f32,
+	alphaClip: f32,
+	minContribution: f32,
+	minDist: f32,
+	invRange: f32,
+	foveationStrength: f32,
+	foveationCenter: f32,
+	#ifdef GSPLAT_XR
+		viewProj1: mat4x4f,
+	#endif
+	#ifdef GSPLAT_FISHEYE
+		fisheye_k: f32,
+		fisheye_inv_k: f32,
+		fisheye_projMat00: f32,
+		fisheye_projMat11: f32,
+	#endif
+}
+@group(0) @binding(6) var<uniform> uniforms: ProjectorUniforms;
+#include "gsplatComputeSplatCS"
+#include "gsplatFormatDeclCS"
+#include "gsplatFormatReadCS"
+#include "gsplatHelpersVS"
+#ifdef GSPLAT_USER_VARYINGS
+	#include "gsplatUserVaryingsCS"
+#endif
+#include "gsplatModifyVS"
+#include "gsplatProjectCommonCS"
+var<workgroup> wgCount: atomic<u32>;
+var<workgroup> wgBase: u32;
+@compute @workgroup_size(256)
+fn main(
+	@builtin(global_invocation_id) gid: vec3u,
+	@builtin(num_workgroups) numWorkgroups: vec3u,
+	@builtin(local_invocation_index) localIdx: u32
+) {
+	if (localIdx == 0u) {
+		atomicStore(&wgCount, 0u);
+	}
+	workgroupBarrier();
+	let threadIdx = gid.y * (numWorkgroups.x * 256u) + gid.x;
+	let numVisible = sortElementCount[0];
+	var valid = false;
+	var clipPos: vec4f = vec4f(0.0);
+	var v1: vec2f = vec2f(0.0);
+	var v2: vec2f = vec2f(0.0);
+	var rgb: vec3f = vec3f(0.0);
+	var alpha: f32 = 0.0;
+	var pcId: u32 = 0u;
+	var sortKey: u32 = 0u;
+	#ifdef GSPLAT_XR
+		var ndc1: vec2f = vec2f(0.0);
+	#endif
+	let projected = projectSplatCommon(
+		threadIdx,
+		numVisible,
+		uniforms.alphaClip,
+		uniforms.minPixelSize,
+		uniforms.minContribution,
+		uniforms.foveationStrength,
+		uniforms.foveationCenter,
+		uniforms.viewMatrix,
+		uniforms.viewProj,
+		uniforms.focal,
+		uniforms.viewportWidth,
+		uniforms.viewportHeight,
+		uniforms.nearClip,
+		uniforms.farClip,
+		uniforms.isOrtho,
+		#ifdef GSPLAT_FISHEYE
+			uniforms.fisheye_k,
+			uniforms.fisheye_inv_k,
+			uniforms.fisheye_projMat00,
+			uniforms.fisheye_projMat11,
+		#endif
+		#ifdef GSPLAT_XR
+			uniforms.viewProj1,
+		#endif
+	);
+	if (projected.valid) {
+		let center = projected.center;
+		let opacity = projected.opacity;
+		let proj = projected.proj;
+		let mid = 0.5 * (proj.a + proj.c);
+		let radius = length(vec2f(0.5 * (proj.a - proj.c), proj.b));
+		let lambda1 = mid + radius;
+		let lambda2 = max(mid - radius, 0.1);
+		let vmin = min(1024.0, min(uniforms.viewportWidth, uniforms.viewportHeight));
+		let l1 = 2.0 * min(sqrt(2.0 * lambda1), vmin);
+		let l2 = 2.0 * min(sqrt(2.0 * lambda2), vmin);
+		let dir = normalize(vec2f(proj.b, lambda1 - proj.a));
+		v1 = l1 * dir;
+		v2 = l2 * vec2f(dir.y, -dir.x);
+		#ifdef GSPLAT_FISHEYE
+			let viewCenter = uniforms.viewMatrix * vec4f(center, 1.0);
+			let neg_z = -viewCenter.z;
+			let ndcX = proj.screen.x / uniforms.viewportWidth * 2.0 - 1.0;
+			let ndcY = proj.screen.y / uniforms.viewportHeight * 2.0 - 1.0;
+			let depthNdc = clamp(
+				(neg_z - uniforms.nearClip) / (uniforms.farClip - uniforms.nearClip),
+				0.0, 1.0
+			);
+			clipPos = vec4f(ndcX, ndcY, depthNdc, 1.0);
+		#else
+			clipPos = uniforms.viewProj * vec4f(center, 1.0);
+			clipPos.z = clamp(clipPos.z, 0.0, abs(clipPos.w));
+		#endif
+		#ifdef GSPLAT_XR
+			ndc1 = proj.ndc1;
+		#endif
+		#ifdef RADIAL_SORT
+			let delta = center - uniforms.cameraPosition;
+			let radialDist = length(delta);
+			let dist = (1.0 / uniforms.invRange) - radialDist - uniforms.minDist;
+		#else
+			let toSplat = center - uniforms.cameraPosition;
+			let dist = dot(toSplat, uniforms.cameraDirection) - uniforms.minDist;
+		#endif
+		let d = dist * uniforms.invRange * f32(uniforms.numBins);
+		let binFloat = clamp(d, 0.0, f32(uniforms.numBins) - 0.001);
+		let bin = u32(binFloat);
+		let binFrac = binFloat - f32(bin);
+		sortKey = u32(binWeights[bin].base + binWeights[bin].divider * binFrac);
+		#ifdef PICK_MODE
+			var clr = vec4f(getColor(), opacity);
+			modifySplatColor(center, &clr);
+			pcId = loadPcId().r;
+			alpha = clr.a;
+		#else
+			var clr = vec4f(getColor(), opacity);
+			#if GSPLAT_AA
+				clr.a = clr.a * proj.aaFactor;
+			#endif
+			modifySplatColor(center, &clr);
+			rgb = max(clr.rgb, vec3f(0.0));
+			alpha = clr.a;
+		#endif
+		valid = true;
+	}
+	var localDst: u32 = 0u;
+	if (valid) {
+		localDst = atomicAdd(&wgCount, 1u);
+	}
+	workgroupBarrier();
+	if (localIdx == 0u) {
+		let total = atomicLoad(&wgCount);
+		wgBase = atomicAdd(&renderCounter[0], total);
+	}
+	workgroupBarrier();
+	if (valid) {
+		let dst = wgBase + localDst;
+		let base = dst * {CACHE_STRIDE}u;
+		#ifdef GSPLAT_XR
+			let ndc0 = clipPos.xy / clipPos.w;
+			projCache[base + 0u] = bitcast<u32>(ndc0.x);
+			projCache[base + 1u] = bitcast<u32>(ndc0.y);
+			projCache[base + 2u] = bitcast<u32>(ndc1.x);
+			projCache[base + 3u] = bitcast<u32>(ndc1.y);
+			projCache[base + 4u] = bitcast<u32>(clipPos.w);
+			projCache[base + 5u] = pack2x16float(v1);
+			projCache[base + 6u] = pack2x16float(v2);
+			projCache[base + 7u] = pack4x8unorm(vec4f(rgb, alpha));
+		#else
+			projCache[base + 0u] = bitcast<u32>(clipPos.x);
+			projCache[base + 1u] = bitcast<u32>(clipPos.y);
+			projCache[base + 2u] = bitcast<u32>(clipPos.z);
+			projCache[base + 3u] = bitcast<u32>(clipPos.w);
+			projCache[base + 4u] = pack2x16float(v1);
+			projCache[base + 5u] = pack2x16float(v2);
+			#ifdef PICK_MODE
+				projCache[base + 6u] = pcId;
+				projCache[base + 7u] = pack2x16float(vec2f(0.0, alpha));
+			#else
+				projCache[base + 6u] = pack2x16float(vec2f(rgb.x, rgb.y));
+				projCache[base + 7u] = pack2x16float(vec2f(rgb.z, alpha));
+			#endif
+		#endif
+		#ifdef GSPLAT_USER_VARYINGS
+			#include "gsplatUserCacheWriteCS"
+		#endif
+		sortKeys[dst] = sortKey;
+	}
+}
+`;
+
+var dispatch_core_default = `
+fn calcDispatch2D(count: u32, maxDim: u32) -> vec2u {
+	if (count <= maxDim) {
+		return vec2u(count, 1u);
+	}
+	let y = (count + maxDim - 1u) / maxDim;
+	let x = (count + y - 1u) / y;
+	return vec2u(x, y);
+}
+`;
+
+const computeGsplatProjectorWriteIndirectArgsSource = `
+${indirect_core_default}
+${dispatch_core_default}
+${sort_indirect_args_default}
+@group(0) @binding(0) var<storage, read> renderCounter: array<u32>;
+@group(0) @binding(1) var<storage, read_write> indirectDrawArgs: array<DrawIndexedIndirectArgs>;
+@group(0) @binding(2) var<storage, read_write> numSplatsBuf: array<u32>;
+@group(0) @binding(3) var<storage, read_write> indirectDispatchArgs: array<u32>;
+@group(0) @binding(4) var<storage, read_write> sortElementCountBuf: array<u32>;
+struct WriteArgsUniforms {
+	drawSlot: u32,
+	indexCount: u32,
+	sortSlotBase: u32,
+	pad0: u32,
+	sortIndirectInfo: vec4<u32>
+};
+@group(0) @binding(5) var<uniform> uniforms: WriteArgsUniforms;
+@compute @workgroup_size(1)
+fn main() {
+	let count = renderCounter[0];
+	let instanceCount = (count + {INSTANCE_SIZE}u - 1u) / {INSTANCE_SIZE}u;
+	indirectDrawArgs[uniforms.drawSlot] = DrawIndexedIndirectArgs(
+		uniforms.indexCount,
+		instanceCount,
+		0u,
+		0,
+		0u
+	);
+	numSplatsBuf[0] = count;
+	sortElementCountBuf[0] = count;
+	writeSortIndirectArgs(uniforms.sortSlotBase, count, uniforms.sortIndirectInfo);
+}
+`;
+
+const computeGsplatProjectCommonSource = `
+struct ProjectedSplatCommon {
+	valid: bool,
+	splatId: u32,
+	center: vec3f,
+	opacity: f32,
+	proj: SplatCov2D
+}
+fn invalidProjectedSplatCommon() -> ProjectedSplatCommon {
+	var cov: SplatCov2D;
+	cov.screen = vec2f(0.0);
+	cov.a = 0.0;
+	cov.b = 0.0;
+	cov.c = 0.0;
+	cov.viewDepth = 0.0;
+	cov.valid = false;
+	return ProjectedSplatCommon(false, 0u, vec3f(0.0), 0.0, cov);
+}
+fn projectSplatCommon(
+	threadIdx: u32,
+	numVisible: u32,
+	alphaClip: f32,
+	minPixelSize: f32,
+	minContribution: f32,
+	foveationStrength: f32,
+	foveationCenter: f32,
+	viewMatrix: mat4x4f,
+	viewProj: mat4x4f,
+	focal: f32,
+	viewportWidth: f32,
+	viewportHeight: f32,
+	nearClip: f32,
+	farClip: f32,
+	isOrtho: u32,
+	#ifdef GSPLAT_FISHEYE
+		fisheye_k: f32,
+		fisheye_inv_k: f32,
+		fisheye_projMat00: f32,
+		fisheye_projMat11: f32,
+	#endif
+	#ifdef GSPLAT_XR
+		viewProj1: mat4x4f,
+	#endif
+) -> ProjectedSplatCommon {
+	if (threadIdx >= numVisible) {
+		return invalidProjectedSplatCommon();
+	}
+	let splatId = compactedSplatIds[threadIdx];
+	setSplat(splatId);
+	let originalCenter = getCenter();
+	var center = originalCenter;
+	modifySplatCenter(&center);
+	let opacity = getOpacity();
+	if (opacity <= alphaClip) {
+		return invalidProjectedSplatCommon();
+	}
+	var rotation: vec4f = getRotation().yzwx;
+	var scale: vec3f = getScale();
+	modifySplatRotationScale(originalCenter, center, &rotation, &scale);
+	let proj = computeSplatCov(
+		center, half4(rotation.wxyz), half3(scale),
+		viewMatrix, viewProj,
+		focal, viewportWidth, viewportHeight,
+		nearClip, farClip, opacity, minPixelSize,
+		isOrtho, alphaClip, minContribution,
+		foveationStrength, foveationCenter,
+		#ifdef GSPLAT_FISHEYE
+			fisheye_k, fisheye_inv_k,
+			fisheye_projMat00, fisheye_projMat11,
+		#endif
+		#ifdef GSPLAT_XR
+			viewProj1,
+		#endif
+	);
+	if (!proj.valid) {
+		return invalidProjectedSplatCommon();
+	}
+	return ProjectedSplatCommon(true, splatId, center, opacity, proj);
+}
+`;
+
+const computeGsplatCommonSource = `
+#include "halfTypesCS"
+const TILE_SIZE: u32 = 16u;
+fn quatToMat3(r: half4) -> half3x3 {
+	let r2: half4 = r + r;
+	let x: half   = r2.x * r.w;
+	let y: half4  = r2.y * r;
+	let z: half4  = r2.z * r;
+	let w: half   = r2.w * r.w;
+	return half3x3(
+		half(1.0) - z.z - w,  y.z + x,			  y.w - z.x,
+		y.z - x,			  half(1.0) - y.y - w,   z.w + y.x,
+		y.w + z.x,			z.w - y.x,			 half(1.0) - y.y - z.z
+	);
+}
+struct SplatCov2D {
+	screen: vec2f,
+	a: f32,
+	b: f32,
+	c: f32,
+	viewDepth: f32,
+	valid: bool,
+	#if GSPLAT_AA
+		aaFactor: f32,
+	#endif
+	#ifdef GSPLAT_XR
+		ndc1: vec2f,
+	#endif
+}
+fn computeSplatCov(
+	worldCenter: vec3f,
+	rotation: half4,
+	scale: half3,
+	viewMatrix: mat4x4f,
+	viewProj: mat4x4f,
+	focal: f32,
+	viewportWidth: f32,
+	viewportHeight: f32,
+	nearClip: f32,
+	farClip: f32,
+	opacity: f32,
+	minPixelSize: f32,
+	isOrtho: u32,
+	alphaClip: f32,
+	minContribution: f32,
+	foveationStrength: f32,
+	foveationCenter: f32,
+	#ifdef GSPLAT_FISHEYE
+		fisheye_k: f32,
+		fisheye_inv_k: f32,
+		fisheye_projMat00: f32,
+		fisheye_projMat11: f32,
+	#endif
+	#ifdef GSPLAT_XR
+		viewProj1: mat4x4f,
+	#endif
+) -> SplatCov2D {
+	var result: SplatCov2D;
+	result.valid = false;
+	let viewCenter = (viewMatrix * vec4f(worldCenter, 1.0)).xyz;
+	#ifdef GSPLAT_FISHEYE
+		let fv = viewCenter;
+		let r_xy = length(fv.xy);
+		let neg_z = -fv.z;
+		let theta = atan2(r_xy, neg_z);
+		let maxTheta = min(fisheye_k * 1.5707963, 3.13);
+		if (theta > maxTheta - 0.01 || dot(fv, fv) < 0.0001) {
+			return result;
+		}
+		let tk = theta * fisheye_inv_k;
+		let sin_tk = sin(tk);
+		let cos_tk = cos(tk);
+		let g_theta = fisheye_k * sin_tk / cos_tk;
+		let fisheye_s = select(select(0.0, 1.0 / neg_z, neg_z > 0.0), g_theta / r_xy, r_xy > 1e-4);
+		let fndc = vec2f(fisheye_projMat00 * fisheye_s * fv.x, fisheye_projMat11 * fisheye_s * fv.y);
+		let screen = vec2f(
+			(fndc.x * 0.5 + 0.5) * viewportWidth,
+			(fndc.y * 0.5 + 0.5) * viewportHeight
+		);
+	#else
+		if (viewCenter.z > 0.0) {
+			return result;
+		}
+		let clip = viewProj * vec4f(worldCenter, 1.0);
+		let ndc = clip.xy / clip.w;
+		let screen = vec2f(
+			(ndc.x * 0.5 + 0.5) * viewportWidth,
+			(ndc.y * 0.5 + 0.5) * viewportHeight
+		);
+	#endif
+	#ifdef GSPLAT_XR
+		let clip1 = viewProj1 * vec4f(worldCenter, 1.0);
+		let ndc1 = clip1.xy / clip1.w;
+		let screen1 = vec2f(
+			(ndc1.x * 0.5 + 0.5) * viewportWidth,
+			(ndc1.y * 0.5 + 0.5) * viewportHeight
+		);
+	#endif
+	let rot: half3x3 = quatToMat3(rotation);
+	let s: vec3f = vec3f(scale);
+	let M: mat3x3f = transpose(mat3x3f(
+		s.x * vec3f(rot[0]),
+		s.y * vec3f(rot[1]),
+		s.z * vec3f(rot[2])
+	));
+	let w0 = vec3f(viewMatrix[0].x, viewMatrix[1].x, viewMatrix[2].x);
+	let w1 = vec3f(viewMatrix[0].y, viewMatrix[1].y, viewMatrix[2].y);
+	let w2 = vec3f(viewMatrix[0].z, viewMatrix[1].z, viewMatrix[2].z);
+	#ifdef GSPLAT_FISHEYE
+		let fisheyeFocal = viewportWidth * fisheye_projMat00;
+		let g_prime = 1.0 / (cos_tk * cos_tk);
+		let d2 = dot(fv, fv);
+		let r_sq = max(r_xy * r_xy, 1e-8);
+		let K_coeff = select(0.0, (g_prime * neg_z / d2 - fisheye_s) / r_sq, r_xy > 1e-4);
+		let Jxx = fisheyeFocal * (fisheye_s + K_coeff * fv.x * fv.x);
+		let Jxy = fisheyeFocal * K_coeff * fv.x * fv.y;
+		let Jyy = fisheyeFocal * (fisheye_s + K_coeff * fv.y * fv.y);
+		let Jzx = fisheyeFocal * g_prime * fv.x / d2;
+		let Jzy = fisheyeFocal * g_prime * fv.y / d2;
+		let tt0 = Jxx * w0 + Jxy * w1 + Jzx * w2;
+		let tt1 = Jxy * w0 + Jyy * w1 + Jzy * w2;
+	#else
+		let ortho = isOrtho == 1u;
+		let v = select(viewCenter.xyz, vec3f(0.0, 0.0, 1.0), ortho);
+		let vz = select(min(v.z, -0.001), v.z, ortho);
+		let J1 = focal / vz;
+		let J2 = -J1 / vz * v.xy;
+		let tt0 = J1 * w0 + J2.x * w2;
+		let tt1 = J1 * w1 + J2.y * w2;
+	#endif
+	let b0 = M * tt0;
+	let b1 = M * tt1;
+	let aRaw = dot(b0, b0);
+	let b = dot(b0, b1);
+	let cRaw = dot(b1, b1);
+	let a = aRaw + 0.3;
+	let c = cRaw + 0.3;
+	let det = a * c - b * b;
+	if (det <= 0.0) {
+		return result;
+	}
+	#if GSPLAT_AA
+		let detOrig = aRaw * cRaw - b * b;
+		result.aaFactor = sqrt(max(detOrig / det, 0.0));
+	#endif
+	let fovNdc = screen * vec2f(2.0 / viewportWidth, 2.0 / viewportHeight) - vec2f(1.0);
+	#ifdef GSPLAT_XR
+		let fovR = min(length(fovNdc), length(ndc1));
+	#else
+		let fovR = length(fovNdc);
+	#endif
+	let fovT = saturate((fovR - foveationCenter) / max(1.0 - foveationCenter, 1e-4));
+	let effMinContribution = minContribution + foveationStrength * fovT * fovT * (3.0 - 2.0 * fovT);
+	let totalContribution = opacity * 6.283185 * sqrt(det);
+	if (totalContribution < effMinContribution) {
+		return result;
+	}
+	let radiusFactor = computeRadiusFactor(half(opacity), alphaClip);
+	let vmin = min(1024.0, min(viewportWidth, viewportHeight));
+	let maxRadius = vmin;
+	let radiusXUncapped = sqrt(2.0 * a);
+	let radiusYUncapped = sqrt(2.0 * c);
+	let radiusX = min(radiusXUncapped, maxRadius);
+	let radiusY = min(radiusYUncapped, maxRadius);
+	if (max(radiusX, radiusY) < minPixelSize) {
+		return result;
+	}
+	#ifdef GSPLAT_XR
+		if ((screen.x + radiusX < 0.0 || screen.x - radiusX > viewportWidth ||
+			 screen.y + radiusY < 0.0 || screen.y - radiusY > viewportHeight) &&
+			(screen1.x + radiusX < 0.0 || screen1.x - radiusX > viewportWidth ||
+			 screen1.y + radiusY < 0.0 || screen1.y - radiusY > viewportHeight)) {
+			return result;
+		}
+	#else
+		if (screen.x + radiusX < 0.0 || screen.x - radiusX > viewportWidth ||
+			screen.y + radiusY < 0.0 || screen.y - radiusY > viewportHeight) {
+			return result;
+		}
+	#endif
+	let capScale = max(1.0, max(radiusXUncapped, radiusYUncapped) / maxRadius);
+	let invCapScale2 = 1.0 / (capScale * capScale);
+	result.screen = screen;
+	let scaledCov = vec3f(a, b, c) * invCapScale2;
+	result.a = scaledCov.x;
+	result.b = scaledCov.y;
+	result.c = scaledCov.z;
+	#ifdef GSPLAT_FISHEYE
+		result.viewDepth = sqrt(d2);
+	#else
+		result.viewDepth = -viewCenter.z;
+	#endif
+	#ifdef GSPLAT_XR
+		result.ndc1 = ndc1;
+	#endif
+	result.valid = true;
+	return result;
+}
+`;
+
+const computeGsplatTileIntersectSource = `
+struct SplatTileEval {
+	radiusFactor: f32,
+	splatMin: vec2f,
+	splatMax: vec2f,
+}
+fn computeRadiusFactor(opacity: half, alphaClip: f32) -> f32 {
+	return min(8.0, 2.0 * log(f32(opacity) / alphaClip));
+}
+fn computeSplatTileEval(
+	screen: vec2f,
+	cx: f32, cy: f32, cz: f32,
+	opacity: half,
+	viewportWidth: f32, viewportHeight: f32,
+	alphaClip: f32
+) -> SplatTileEval {
+	let K = cx * cz - cy * cy;
+	let a = 4.0 * cz / K;
+	let c = 4.0 * cx / K;
+	let radiusFactor = computeRadiusFactor(opacity, alphaClip);
+	let vmin = min(1024.0, min(viewportWidth, viewportHeight));
+	let radius = vec2f(min(sqrt(2.0 * a), vmin), min(sqrt(2.0 * c), vmin));
+	var result: SplatTileEval;
+	result.radiusFactor = radiusFactor;
+	result.splatMin = screen - radius;
+	result.splatMax = screen + radius;
+	return result;
+}
+fn segmentIntersectsEllipse(a: f32, b: f32, c: f32, d: f32, l: f32, r: f32) -> bool {
+	let delta = b * b - 4.0 * a * c;
+	let t1 = (l - d) * (2.0 * a) + b;
+	let t2 = (r - d) * (2.0 * a) + b;
+	return delta >= 0.0 && (t1 <= 0.0 || t1 * t1 <= delta) && (t2 >= 0.0 || t2 * t2 <= delta);
+}
+fn tileIntersectsEllipse(
+	tileMin: vec2f, tileMax: vec2f, center: vec2f,
+	cx: f32, cy: f32, cz: f32,
+	radiusFactor: f32
+) -> bool {
+	if (center.x >= tileMin.x && center.x <= tileMax.x &&
+		center.y >= tileMin.y && center.y <= tileMax.y) {
+		return true;
+	}
+	let w = radiusFactor;
+	var dx: f32;
+	if (center.x * 2.0 < tileMin.x + tileMax.x) {
+		dx = center.x - tileMin.x;
+	} else {
+		dx = center.x - tileMax.x;
+	}
+	if (segmentIntersectsEllipse(cz, -2.0 * cy * dx, cx * dx * dx - w, center.y, tileMin.y, tileMax.y)) {
+		return true;
+	}
+	var dy: f32;
+	if (center.y * 2.0 < tileMin.y + tileMax.y) {
+		dy = center.y - tileMin.y;
+	} else {
+		dy = center.y - tileMax.y;
+	}
+	if (segmentIntersectsEllipse(cx, -2.0 * cy * dy, cz * dy * dy - w, center.x, tileMin.x, tileMax.x)) {
+		return true;
+	}
+	return false;
+}
+`;
+
+var gsplatComputeSplat_default = `
+struct Splat {
+	index: u32,
+	uv: vec2i
+}
+var<private> splat: Splat;
+fn setSplat(idx: u32) {
+	splat.index = idx;
+	splat.uv = vec2i(i32(idx % uniforms.splatTextureSize), i32(idx / uniforms.splatTextureSize));
+}
+`;
+
+var gsplatModify_default$3 = `
+fn modifySplatCenter(center: ptr<function, vec3f>) {
+}
+fn modifySplatRotationScale(originalCenter: vec3f, modifiedCenter: vec3f, rotation: ptr<function, vec4f>, scale: ptr<function, vec3f>) {
+}
+fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
+}
+`;
+
+var gsplatHelpers_default$1 = `
+fn gsplatMakeSpherical(scale: ptr<function, vec3f>, size: f32) {
+	*scale = vec3f(size);
+}
+fn gsplatGetSizeFromScale(scale: vec3f) -> f32 {
+	return sqrt((scale.x * scale.x + scale.y * scale.y + scale.z * scale.z) / 3.0);
+}
+`;
+
+const INDEX_COUNT$2 = 6 * GSplatResourceBase.instanceSize;
+const PROJECTOR_WORKGROUP_SIZE = 256;
+const PROJECTOR_INTERNAL_DEFINES = /* @__PURE__ */ new Set([
+	"{CACHE_STRIDE}",
+	"RADIAL_SORT",
+	"PICK_MODE",
+	"GSPLAT_FISHEYE",
+	"GSPLAT_AA",
+	"GSPLAT_COLOR_FLOAT",
+	"GSPLAT_XR"
+]);
+const _cameraDir = new Vec3();
+const _dispatchSize = new Vec2();
+const _viewProjMat = new Mat4();
+const _viewProjData = new Float32Array(16);
+const _viewProj1Data = new Float32Array(16);
+const _viewData = new Float32Array(16);
+const _shaderProjMat$1 = new Mat4();
+class GSplatProjector {
+	device;
+	projCache = null;
+	sortKeys = null;
+	renderCounter = null;
+	binWeightsBuffer = null;
+	binWeightsUtil;
+	_projectorComputes = /* @__PURE__ */ new Map();
+	_projectorBindGroupFormat = null;
+	_projectorUniformBufferFormat = null;
+	_projectorUniformBufferFormatFisheye = null;
+	_projectorUniformBufferFormatStereo = null;
+	_writeIndirectArgsCompute = null;
+	_writeArgsBindGroupFormat = null;
+	_writeArgsUniformBufferFormat = null;
+	_formatVersion = -1;
+	_materialKey = "";
+	_userModifySource = null;
+	_userVaryingsSource = null;
+	_userCacheWriteSource = null;
+	_userDefines = null;
+	_userCacheWords = 0;
+	_allocatedCacheCount = 0;
+	_allocatedCacheStride = 0;
+	cameraPositionData = new Float32Array(3);
+	cameraDirectionData = new Float32Array(3);
+	constructor(device) {
+		this.device = device;
+		this.binWeightsUtil = new GSplatSortBinWeights$1();
+		this.binWeightsBuffer = new StorageBuffer(
+			device,
+			GSplatSortBinWeights$1.NUM_BINS * 2 * 4,
+			BUFFERUSAGE_COPY_SRC | BUFFERUSAGE_COPY_DST
+		);
+		this.renderCounter = new StorageBuffer(device, 4, BUFFERUSAGE_COPY_SRC | BUFFERUSAGE_COPY_DST);
+		this._createUniformBufferFormats();
+		this._createWriteIndirectArgsCompute();
+	}
+	destroy() {
+		this.projCache?.destroy();
+		this.sortKeys?.destroy();
+		this.renderCounter?.destroy();
+		this.binWeightsBuffer?.destroy();
+		for (const compute of this._projectorComputes.values()) {
+			compute.shader?.destroy();
+		}
+		this._projectorComputes.clear();
+		this._projectorBindGroupFormat?.destroy();
+		this._writeIndirectArgsCompute?.shader?.destroy();
+		this._writeArgsBindGroupFormat?.destroy();
+		this.projCache = null;
+		this.sortKeys = null;
+		this.renderCounter = null;
+		this.binWeightsBuffer = null;
+		this._projectorBindGroupFormat = null;
+		this._projectorUniformBufferFormat = null;
+		this._projectorUniformBufferFormatFisheye = null;
+		this._projectorUniformBufferFormatStereo = null;
+		this._writeIndirectArgsCompute = null;
+		this._writeArgsBindGroupFormat = null;
+		this._writeArgsUniformBufferFormat = null;
+	}
+	_createUniformBufferFormats() {
+		const device = this.device;
+		const baseFields = [
+			new UniformFormat("splatTextureSize", UNIFORMTYPE_UINT),
+			new UniformFormat("numBins", UNIFORMTYPE_UINT),
+			new UniformFormat("isOrtho", UNIFORMTYPE_UINT),
+			new UniformFormat("pad0", UNIFORMTYPE_UINT),
+			new UniformFormat("viewProj", UNIFORMTYPE_MAT4),
+			new UniformFormat("viewMatrix", UNIFORMTYPE_MAT4),
+			new UniformFormat("cameraPosition", UNIFORMTYPE_VEC3),
+			new UniformFormat("minPixelSize", UNIFORMTYPE_FLOAT),
+			new UniformFormat("cameraDirection", UNIFORMTYPE_VEC3),
+			new UniformFormat("focal", UNIFORMTYPE_FLOAT),
+			new UniformFormat("viewportWidth", UNIFORMTYPE_FLOAT),
+			new UniformFormat("viewportHeight", UNIFORMTYPE_FLOAT),
+			new UniformFormat("nearClip", UNIFORMTYPE_FLOAT),
+			new UniformFormat("farClip", UNIFORMTYPE_FLOAT),
+			new UniformFormat("alphaClip", UNIFORMTYPE_FLOAT),
+			new UniformFormat("minContribution", UNIFORMTYPE_FLOAT),
+			new UniformFormat("minDist", UNIFORMTYPE_FLOAT),
+			new UniformFormat("invRange", UNIFORMTYPE_FLOAT),
+			new UniformFormat("foveationStrength", UNIFORMTYPE_FLOAT),
+			new UniformFormat("foveationCenter", UNIFORMTYPE_FLOAT)
+		];
+		this._projectorUniformBufferFormat = new UniformBufferFormat(device, baseFields);
+		this._projectorUniformBufferFormatFisheye = new UniformBufferFormat(device, [
+			...baseFields.map((f) => new UniformFormat(f.name, f.type)),
+			new UniformFormat("fisheye_k", UNIFORMTYPE_FLOAT),
+			new UniformFormat("fisheye_inv_k", UNIFORMTYPE_FLOAT),
+			new UniformFormat("fisheye_projMat00", UNIFORMTYPE_FLOAT),
+			new UniformFormat("fisheye_projMat11", UNIFORMTYPE_FLOAT)
+		]);
+		this._projectorUniformBufferFormatStereo = new UniformBufferFormat(device, [
+			...baseFields.map((f) => new UniformFormat(f.name, f.type)),
+			new UniformFormat("viewProj1", UNIFORMTYPE_MAT4)
+		]);
+		this._writeArgsUniformBufferFormat = new UniformBufferFormat(device, [
+			new UniformFormat("drawSlot", UNIFORMTYPE_UINT),
+			new UniformFormat("indexCount", UNIFORMTYPE_UINT),
+			new UniformFormat("sortSlotBase", UNIFORMTYPE_UINT),
+			new UniformFormat("pad0", UNIFORMTYPE_UINT),
+			new UniformFormat("sortIndirectInfo", UNIFORMTYPE_UVEC4)
+		]);
+	}
+	_createWriteIndirectArgsCompute() {
+		const device = this.device;
+		this._writeArgsBindGroupFormat = new BindGroupFormat(device, [
+			new BindStorageBufferFormat("renderCounter", SHADERSTAGE_COMPUTE, true),
+			new BindStorageBufferFormat("indirectDrawArgs", SHADERSTAGE_COMPUTE, false),
+			new BindStorageBufferFormat("numSplatsBuf", SHADERSTAGE_COMPUTE, false),
+			new BindStorageBufferFormat("indirectDispatchArgs", SHADERSTAGE_COMPUTE, false),
+			new BindStorageBufferFormat("sortElementCountBuf", SHADERSTAGE_COMPUTE, false),
+			new BindUniformBufferFormat("uniforms", SHADERSTAGE_COMPUTE)
+		]);
+		const cdefines = /* @__PURE__ */ new Map([
+			["{INSTANCE_SIZE}", GSplatResourceBase.instanceSize.toString()]
+		]);
+		const shader = new Shader(device, {
+			name: "GSplatProjectorWriteIndirectArgs",
+			shaderLanguage: SHADERLANGUAGE_WGSL,
+			cshader: computeGsplatProjectorWriteIndirectArgsSource,
+			cdefines,
+			computeBindGroupFormat: this._writeArgsBindGroupFormat,
+			computeUniformBufferFormats: { uniforms: this._writeArgsUniformBufferFormat }
+		});
+		this._writeIndirectArgsCompute = new Compute(device, shader, "GSplatProjectorWriteIndirectArgs");
+	}
+	_destroyProjectorComputes() {
+		for (const compute of this._projectorComputes.values()) {
+			compute.shader?.destroy();
+		}
+		this._projectorComputes.clear();
+		this._projectorBindGroupFormat?.destroy();
+		this._projectorBindGroupFormat = null;
+	}
+	_projectorKey(radialSort, pickMode, fisheyeMode, antiAlias, stereo) {
+		return `${radialSort ? "r" : "l"}${pickMode ? "p" : ""}${fisheyeMode ? "f" : ""}${antiAlias ? "a" : ""}${stereo ? "s" : ""}`;
+	}
+	_createProjectorCompute(workBuffer, radialSort, pickMode, fisheyeMode, antiAlias, stereo) {
+		const device = this.device;
+		const wbFormat = workBuffer.format;
+		const fixedBindings = [
+			new BindStorageBufferFormat("compactedSplatIds", SHADERSTAGE_COMPUTE, true),
+			new BindStorageBufferFormat("sortElementCount", SHADERSTAGE_COMPUTE, true),
+			new BindStorageBufferFormat("projCache", SHADERSTAGE_COMPUTE),
+			new BindStorageBufferFormat("sortKeys", SHADERSTAGE_COMPUTE),
+			new BindStorageBufferFormat("renderCounter", SHADERSTAGE_COMPUTE),
+			new BindStorageBufferFormat("binWeights", SHADERSTAGE_COMPUTE, true),
+			new BindUniformBufferFormat("uniforms", SHADERSTAGE_COMPUTE)
+		];
+		if (!this._projectorBindGroupFormat) {
+			this._projectorBindGroupFormat = new BindGroupFormat(device, [
+				...fixedBindings,
+				...wbFormat.getComputeBindFormats()
+			]);
+		}
+		const cincludes = /* @__PURE__ */ new Map();
+		cincludes.set("gsplatCommonCS", computeGsplatCommonSource);
+		cincludes.set("gsplatTileIntersectCS", computeGsplatTileIntersectSource);
+		cincludes.set("gsplatComputeSplatCS", gsplatComputeSplat_default);
+		cincludes.set("gsplatFormatDeclCS", wbFormat.getComputeInputDeclarations(fixedBindings.length));
+		cincludes.set("gsplatFormatReadCS", wbFormat.getReadCode());
+		cincludes.set("gsplatHelpersVS", gsplatHelpers_default$1);
+		cincludes.set("gsplatModifyVS", this._userModifySource ?? gsplatModify_default$3);
+		cincludes.set("gsplatUserVaryingsCS", this._userVaryingsSource ?? "");
+		cincludes.set("gsplatUserCacheWriteCS", this._userCacheWriteSource ?? "");
+		cincludes.set("gsplatProjectCommonCS", computeGsplatProjectCommonSource);
+		const cdefines = /* @__PURE__ */ new Map();
+		cdefines.set("{CACHE_STRIDE}", (CACHE_STRIDE + this._userCacheWords).toString());
+		if (radialSort) {
+			cdefines.set("RADIAL_SORT", "");
+		}
+		if (pickMode) {
+			cdefines.set("PICK_MODE", "");
+		}
+		if (fisheyeMode) {
+			cdefines.set("GSPLAT_FISHEYE", "");
+		}
+		if (antiAlias) {
+			cdefines.set("GSPLAT_AA", "");
+		}
+		if (stereo) {
+			cdefines.set("GSPLAT_XR", "");
+		}
+		const colorStream = wbFormat.getStream("dataColor");
+		if (colorStream && colorStream.format !== PIXELFORMAT_RGBA16U) {
+			cdefines.set("GSPLAT_COLOR_FLOAT", "");
+		}
+		if (this._userDefines) {
+			this._userDefines.forEach((value, key) => {
+				if (!PROJECTOR_INTERNAL_DEFINES.has(key)) {
+					cdefines.set(key, value);
+				}
+			});
+		}
+		const name = `GSplatProjector${radialSort ? "Radial" : "Linear"}${pickMode ? "Pick" : ""}${fisheyeMode ? "Fisheye" : ""}${antiAlias ? "Aa" : ""}${stereo ? "Stereo" : ""}`;
+		const ubFormat = stereo ? this._projectorUniformBufferFormatStereo : fisheyeMode ? this._projectorUniformBufferFormatFisheye : this._projectorUniformBufferFormat;
+		const shader = new Shader(device, {
+			name,
+			shaderLanguage: SHADERLANGUAGE_WGSL,
+			cshader: computeGsplatProjectorSource,
+			cincludes,
+			cdefines,
+			computeBindGroupFormat: this._projectorBindGroupFormat,
+			computeUniformBufferFormats: { uniforms: ubFormat }
+		});
+		return new Compute(device, shader, name);
+	}
+	_getProjectorCompute(workBuffer, radialSort, pickMode = false, fisheyeMode = false, antiAlias = false, stereo = false) {
+		const wbFormat = workBuffer.format;
+		if (this._formatVersion !== wbFormat.extraStreamsVersion) {
+			this._destroyProjectorComputes();
+			this._formatVersion = wbFormat.extraStreamsVersion;
+		}
+		const key = this._projectorKey(radialSort, pickMode, fisheyeMode, antiAlias, stereo);
+		let compute = this._projectorComputes.get(key);
+		if (!compute) {
+			compute = this._createProjectorCompute(workBuffer, radialSort, pickMode, fisheyeMode, antiAlias, stereo);
+			this._projectorComputes.set(key, compute);
+		}
+		return compute;
+	}
+	_updateMaterial(material, userCacheWords = 0) {
+		const chunksKey = material?.shaderChunks?.key ?? "";
+		const definesKey = material?.definesKey ?? "";
+		const materialKey = `${chunksKey}|${definesKey}|${userCacheWords}`;
+		if (materialKey !== this._materialKey) {
+			this._materialKey = materialKey;
+			this._userDefines = material?.defines ?? null;
+			this._userCacheWords = userCacheWords;
+			const wgslChunks = material?.getShaderChunks?.(SHADERLANGUAGE_WGSL);
+			this._userModifySource = wgslChunks?.get("gsplatModifyVS") ?? null;
+			this._userVaryingsSource = wgslChunks?.get("gsplatUserVaryingsCS") ?? null;
+			this._userCacheWriteSource = wgslChunks?.get("gsplatUserCacheWriteCS") ?? null;
+			this._destroyProjectorComputes();
+		}
+	}
+	_ensureCapacity(capacity) {
+		const cacheStride = CACHE_STRIDE + this._userCacheWords;
+		if (capacity > this._allocatedCacheCount || cacheStride !== this._allocatedCacheStride) {
+			this.projCache?.destroy();
+			this.sortKeys?.destroy();
+			this._allocatedCacheCount = capacity;
+			this._allocatedCacheStride = cacheStride;
+			this.projCache = new StorageBuffer(this.device, capacity * cacheStride * 4);
+			this.sortKeys = new StorageBuffer(this.device, capacity * 4, BUFFERUSAGE_COPY_SRC);
+		}
+	}
+	dispatch(params) {
+		const {
+			workBuffer,
+			cameraNode,
+			compactedSplatIds,
+			sortElementCountBuffer,
+			totalCapacity,
+			radialSort,
+			numBits,
+			minDist,
+			maxDist,
+			alphaClip,
+			minPixelSize,
+			minContribution,
+			foveationStrength = 0,
+			foveationCenter = 0.3,
+			viewportWidth,
+			viewportHeight,
+			flipY,
+			pickMode = false,
+			fisheyeProj,
+			antiAlias = false,
+			isStereo = false,
+			material,
+			userCacheWords = 0
+		} = params;
+		const fisheyeMode = !!fisheyeProj?.enabled;
+		const stereoMode = !!isStereo && !pickMode && !fisheyeMode;
+		const aaMode = antiAlias && !pickMode;
+		this._updateMaterial(material, userCacheWords);
+		this._ensureCapacity(totalCapacity);
+		this.renderCounter.clear();
+		const compute = this._getProjectorCompute(workBuffer, radialSort, pickMode, fisheyeMode, aaMode, stereoMode);
+		if (material) {
+			const srcParams = material.parameters;
+			for (const name in srcParams) {
+				if (srcParams.hasOwnProperty(name)) {
+					compute.setParameter(name, srcParams[name].data);
+				}
+			}
+		}
+		const cameraPos = cameraNode.getPosition();
+		const cameraMat = cameraNode.getWorldTransform();
+		const cameraDir = cameraMat.getZ(_cameraDir).normalize();
+		const range = maxDist - minDist;
+		const invRange = range > 0 ? 1 / range : 1;
+		const bucketCount = 1 << numBits;
+		const cameraBin = GSplatSortBinWeights$1.computeCameraBin(radialSort, minDist, range);
+		const binWeights = this.binWeightsUtil.compute(cameraBin, bucketCount);
+		this.binWeightsBuffer.write(0, binWeights);
+		compute.setParameter("compactedSplatIds", compactedSplatIds);
+		compute.setParameter("sortElementCount", sortElementCountBuffer);
+		compute.setParameter("projCache", this.projCache);
+		compute.setParameter("sortKeys", this.sortKeys);
+		compute.setParameter("renderCounter", this.renderCounter);
+		compute.setParameter("binWeights", this.binWeightsBuffer);
+		for (const stream of workBuffer.format.resourceStreams) {
+			const texture = workBuffer.getTexture(stream.name);
+			if (texture) {
+				compute.setParameter(stream.name, texture);
+			}
+		}
+		const cameraComponent = cameraNode.camera;
+		const cam = cameraComponent.camera;
+		const webgpu = this.device.isWebGPU;
+		let focal;
+		if (stereoMode) {
+			const views = cam.xrViews;
+			cam.updateViewTransforms();
+			_viewProjData.set(views[0].projViewOffMat.data);
+			_viewProj1Data.set(views[1].projViewOffMat.data);
+			_viewData.set(views[0].viewOffMat.data);
+			focal = viewportWidth * views[0].projMat.data[0];
+		} else {
+			const view = cam.viewMatrix;
+			_viewProjMat.mul2(Camera$1.applyShaderProjectionTransform(cam.projectionMatrix, _shaderProjMat$1, flipY, webgpu), view);
+			_viewProjData.set(_viewProjMat.data);
+			_viewData.set(view.data);
+			focal = viewportWidth * _shaderProjMat$1.data[0];
+		}
+		this.cameraPositionData[0] = cameraPos.x;
+		this.cameraPositionData[1] = cameraPos.y;
+		this.cameraPositionData[2] = cameraPos.z;
+		compute.setParameter("cameraPosition", this.cameraPositionData);
+		this.cameraDirectionData[0] = cameraDir.x;
+		this.cameraDirectionData[1] = cameraDir.y;
+		this.cameraDirectionData[2] = cameraDir.z;
+		compute.setParameter("cameraDirection", this.cameraDirectionData);
+		compute.setParameter("viewMatrix", _viewData);
+		compute.setParameter("viewProj", _viewProjData);
+		if (stereoMode) {
+			compute.setParameter("viewProj1", _viewProj1Data);
+		}
+		compute.setParameter("focal", focal);
+		compute.setParameter("viewportWidth", viewportWidth);
+		compute.setParameter("viewportHeight", viewportHeight);
+		compute.setParameter("nearClip", cam.nearClip);
+		compute.setParameter("farClip", cam.farClip);
+		compute.setParameter("alphaClip", alphaClip);
+		compute.setParameter("minPixelSize", minPixelSize);
+		compute.setParameter("minContribution", minContribution);
+		compute.setParameter("foveationStrength", foveationStrength);
+		compute.setParameter("foveationCenter", foveationCenter);
+		compute.setParameter("isOrtho", cam.projection === PROJECTION_ORTHOGRAPHIC ? 1 : 0);
+		compute.setParameter("splatTextureSize", workBuffer.textureSize);
+		compute.setParameter("numBins", GSplatSortBinWeights$1.NUM_BINS);
+		compute.setParameter("minDist", minDist);
+		compute.setParameter("invRange", invRange);
+		compute.setParameter("pad0", 0);
+		if (fisheyeMode) {
+			compute.setParameter("fisheye_k", fisheyeProj.k);
+			compute.setParameter("fisheye_inv_k", fisheyeProj.invK);
+			compute.setParameter("fisheye_projMat00", fisheyeProj.projMat00);
+			compute.setParameter("fisheye_projMat11", fisheyeProj.projMat11);
+		}
+		const workgroupCount = Math.ceil(totalCapacity / PROJECTOR_WORKGROUP_SIZE);
+		Compute.calcDispatchSize(
+			workgroupCount,
+			_dispatchSize,
+			this.device.limits.maxComputeWorkgroupsPerDimension || 65535
+		);
+		compute.setupDispatch(_dispatchSize.x, _dispatchSize.y, 1);
+		this.device.computeDispatch([compute], "GSplatProjector");
+	}
+	writeIndirectArgs(drawSlot, sortSlotBase, numSplatsBuffer, sortElementCountBuffer, sortIndirectInfo) {
+		const compute = this._writeIndirectArgsCompute;
+		compute.setParameter("renderCounter", this.renderCounter);
+		compute.setParameter("indirectDrawArgs", this.device.indirectDrawBuffer);
+		compute.setParameter("numSplatsBuf", numSplatsBuffer);
+		compute.setParameter("indirectDispatchArgs", this.device.indirectDispatchBuffer);
+		compute.setParameter("sortElementCountBuf", sortElementCountBuffer);
+		compute.setParameter("drawSlot", drawSlot);
+		compute.setParameter("indexCount", INDEX_COUNT$2);
+		compute.setParameter("sortSlotBase", sortSlotBase);
+		compute.setParameter("pad0", 0);
+		compute.setParameter("sortIndirectInfo", sortIndirectInfo);
+		compute.setupDispatch(1);
+		this.device.computeDispatch([compute], "GSplatProjectorWriteIndirectArgs");
+	}
+}
+
 const computeGsplatIntervalCullSource = `
 struct Interval {
 	workBufferBase: u32,
@@ -61294,18 +60591,44 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
 }
 `;
 
-const WORKGROUP_SIZE = 256;
-const INDEX_COUNT = 6 * GSplatResourceBase.instanceSize;
 const INTERVAL_STRIDE = 4;
+function buildGSplatIntervalData(worldState) {
+	const splats = worldState.splats;
+	const numIntervals = worldState.totalIntervals;
+	const data = new Uint32Array(numIntervals * INTERVAL_STRIDE);
+	let writeIdx = 0;
+	for (let s = 0; s < splats.length; s++) {
+		const splat = splats[s];
+		if (splat.intervals.length > 0) {
+			const nodeIndices = splat.intervalNodeIndices;
+			for (let i = 0; i < splat.intervals.length; i += 2) {
+				const count = splat.intervals[i + 1] - splat.intervals[i];
+				data[writeIdx++] = splat.intervalOffsets[i / 2];
+				data[writeIdx++] = count;
+				data[writeIdx++] = splat.boundsBaseIndex + (nodeIndices.length > 0 ? nodeIndices[i / 2] : 0);
+				data[writeIdx++] = 0;
+			}
+		} else {
+			data[writeIdx++] = splat.intervalOffsets[0];
+			data[writeIdx++] = splat.activeSplats;
+			data[writeIdx++] = splat.boundsBaseIndex;
+			data[writeIdx++] = 0;
+		}
+	}
+	return data;
+}
+
+const WORKGROUP_SIZE$1 = 256;
+const INDEX_COUNT$1 = 6 * GSplatResourceBase.instanceSize;
 class GSplatIntervalCompaction {
 	device;
+	_scratch;
 	compactedSplatIds = null;
 	intervalsBuffer = null;
 	countBuffer = null;
 	prefixSumKernel = null;
 	numSplatsBuffer = null;
 	sortElementCountBuffer = null;
-	allocatedCompactedCount = 0;
 	allocatedIntervalCount = 0;
 	allocatedCountBufferSize = 0;
 	_uploadedVersion = -1;
@@ -61320,8 +60643,9 @@ class GSplatIntervalCompaction {
 	_writeArgsBindGroupFormat = null;
 	_scatterUniformBufferFormat = null;
 	_writeArgsUniformBufferFormat = null;
-	constructor(device) {
+	constructor(device, scratch) {
 		this.device = device;
+		this._scratch = scratch;
 		this.numSplatsBuffer = new StorageBuffer(device, 4, BUFFERUSAGE_COPY_SRC | BUFFERUSAGE_COPY_DST);
 		this.sortElementCountBuffer = new StorageBuffer(device, 4, BUFFERUSAGE_COPY_SRC | BUFFERUSAGE_COPY_DST);
 		this.prefixSumKernel = new PrefixSumKernel(device);
@@ -61330,7 +60654,6 @@ class GSplatIntervalCompaction {
 		this._createWriteIndirectArgsCompute();
 	}
 	destroy() {
-		this.compactedSplatIds?.destroy();
 		this.intervalsBuffer?.destroy();
 		this.countBuffer?.destroy();
 		this.prefixSumKernel?.destroy();
@@ -61390,7 +60713,7 @@ class GSplatIntervalCompaction {
 			new BindStorageBufferFormat("boundsBuffer", SHADERSTAGE_COMPUTE, true),
 			new BindStorageBufferFormat("transformsBuffer", SHADERSTAGE_COMPUTE, true)
 		]);
-		const cdefines = /* @__PURE__ */ new Map([["{WORKGROUP_SIZE}", WORKGROUP_SIZE.toString()]]);
+		const cdefines = /* @__PURE__ */ new Map([["{WORKGROUP_SIZE}", WORKGROUP_SIZE$1.toString()]]);
 		if (fisheye) {
 			cdefines.set("GSPLAT_FISHEYE", "");
 		}
@@ -61439,7 +60762,7 @@ class GSplatIntervalCompaction {
 			new BindStorageBufferFormat("compactedOutput", SHADERSTAGE_COMPUTE, false)
 		]);
 		const cdefines = /* @__PURE__ */ new Map([
-			["{WORKGROUP_SIZE}", WORKGROUP_SIZE.toString()]
+			["{WORKGROUP_SIZE}", WORKGROUP_SIZE$1.toString()]
 		]);
 		const shader = new Shader(device, {
 			name: "GSplatIntervalScatter",
@@ -61477,11 +60800,7 @@ class GSplatIntervalCompaction {
 		this._writeIndirectArgsCompute = new Compute(device, shader, "GSplatIntervalWriteIndirectArgs");
 	}
 	_ensureCapacity(numIntervals, totalActiveSplats) {
-		if (totalActiveSplats > this.allocatedCompactedCount) {
-			this.compactedSplatIds?.destroy();
-			this.allocatedCompactedCount = totalActiveSplats;
-			this.compactedSplatIds = new StorageBuffer(this.device, totalActiveSplats * 4, BUFFERUSAGE_COPY_SRC);
-		}
+		this.compactedSplatIds = this._scratch.ensureCompactedSplatIds(totalActiveSplats);
 		const requiredCountSize = numIntervals + 1;
 		if (requiredCountSize > this.allocatedCountBufferSize) {
 			this.countBuffer?.destroy();
@@ -61492,10 +60811,12 @@ class GSplatIntervalCompaction {
 			}
 		}
 	}
+	invalidateUpload() {
+		this._uploadedVersion = -1;
+	}
 	uploadIntervals(worldState) {
 		if (worldState.version === this._uploadedVersion) return;
 		this._uploadedVersion = worldState.version;
-		const splats = worldState.splats;
 		const numIntervals = worldState.totalIntervals;
 		if (numIntervals === 0) return;
 		if (numIntervals > this.allocatedIntervalCount) {
@@ -61503,26 +60824,7 @@ class GSplatIntervalCompaction {
 			this.allocatedIntervalCount = numIntervals;
 			this.intervalsBuffer = new StorageBuffer(this.device, numIntervals * INTERVAL_STRIDE * 4, BUFFERUSAGE_COPY_DST);
 		}
-		const data = new Uint32Array(numIntervals * INTERVAL_STRIDE);
-		let writeIdx = 0;
-		for (let s = 0; s < splats.length; s++) {
-			const splat = splats[s];
-			if (splat.intervals.length > 0) {
-				const nodeIndices = splat.intervalNodeIndices;
-				for (let i = 0; i < splat.intervals.length; i += 2) {
-					const count = splat.intervals[i + 1] - splat.intervals[i];
-					data[writeIdx++] = splat.intervalOffsets[i / 2];
-					data[writeIdx++] = count;
-					data[writeIdx++] = splat.boundsBaseIndex + (nodeIndices.length > 0 ? nodeIndices[i / 2] : 0);
-					data[writeIdx++] = 0;
-				}
-			} else {
-				data[writeIdx++] = splat.intervalOffsets[0];
-				data[writeIdx++] = splat.activeSplats;
-				data[writeIdx++] = splat.boundsBaseIndex;
-				data[writeIdx++] = 0;
-			}
-		}
+		const data = buildGSplatIntervalData(worldState);
 		this.intervalsBuffer.write(0, data, 0, numIntervals * INTERVAL_STRIDE);
 	}
 	dispatchCompact(frustumCuller, numIntervals, totalActiveSplats, fisheyeEnabled) {
@@ -61541,7 +60843,7 @@ class GSplatIntervalCompaction {
 			cullCompute.setParameter("frustumPlanes[0]", frustumCuller.frustumPlanes);
 		}
 		cullCompute.setParameter("numIntervals", numIntervals);
-		const cullWorkgroups = Math.ceil(numIntervals / WORKGROUP_SIZE);
+		const cullWorkgroups = Math.ceil(numIntervals / WORKGROUP_SIZE$1);
 		cullCompute.setupDispatch(cullWorkgroups);
 		this.device.computeDispatch([cullCompute], "GSplatIntervalCull");
 		const prefixCount = numIntervals + 1;
@@ -61567,7 +60869,7 @@ class GSplatIntervalCompaction {
 		compute.setParameter("indirectDispatchArgs", this.device.indirectDispatchBuffer);
 		compute.setParameter("sortElementCountBuf", this.sortElementCountBuffer);
 		compute.setParameter("drawSlot", drawSlot);
-		compute.setParameter("indexCount", INDEX_COUNT);
+		compute.setParameter("indexCount", INDEX_COUNT$1);
 		compute.setParameter("dispatchSlotBase", dispatchSlotBase);
 		compute.setParameter("totalSplats", numIntervals);
 		compute.setParameter("sortIndirectInfo", sortIndirectInfo);
@@ -61576,1356 +60878,231 @@ class GSplatIntervalCompaction {
 	}
 }
 
-class GSplatBudgetBalancer {
-	_buckets = null;
-	_initBuckets() {
-		if (!this._buckets) {
-			this._buckets = new Array(NUM_BUCKETS);
-			for (let i = 0; i < NUM_BUCKETS; i++) {
-				this._buckets[i] = [];
-			}
-		}
-	}
-	balance(octreeInstances, budget) {
-		this._initBuckets();
-		for (let i = 0; i < NUM_BUCKETS; i++) {
-			this._buckets[i].length = 0;
-		}
-		let totalOptimalSplats = 0;
-		for (const [, inst] of octreeInstances) {
-			const nodes = inst.octree.nodes;
-			const nodeInfos = inst.nodeInfos;
-			for (let nodeIndex = 0, len = nodes.length; nodeIndex < len; nodeIndex++) {
-				const nodeInfo = nodeInfos[nodeIndex];
-				const optimalLod = nodeInfo.optimalLod;
-				if (optimalLod < 0) continue;
-				const lods = nodes[nodeIndex].lods;
-				nodeInfo.lods = lods;
-				this._buckets[nodeInfo.budgetBucket].push(nodeInfo);
-				totalOptimalSplats += lods[optimalLod].count;
-			}
-		}
-		let currentSplats = totalOptimalSplats;
-		if (currentSplats === budget) {
-			return;
-		}
-		const isOverBudget = currentSplats > budget;
-		let done = false;
-		while (!done && (isOverBudget ? currentSplats > budget : currentSplats < budget)) {
-			let modified = false;
-			if (isOverBudget) {
-				for (let b = NUM_BUCKETS - 1; b >= 0 && !done; b--) {
-					const bucket = this._buckets[b];
-					for (let i = 0, len = bucket.length; i < len; i++) {
-						const nodeInfo = bucket[i];
-						if (nodeInfo.optimalLod < nodeInfo.inst.rangeMax) {
-							const lods = nodeInfo.lods;
-							const optimalLod = nodeInfo.optimalLod;
-							currentSplats -= lods[optimalLod].count - lods[optimalLod + 1].count;
-							nodeInfo.optimalLod = optimalLod + 1;
-							modified = true;
-							if (currentSplats <= budget) {
-								done = true;
-								break;
-							}
-						}
-					}
-				}
-			} else {
-				for (let b = 0; b < NUM_BUCKETS && !done; b++) {
-					const bucket = this._buckets[b];
-					for (let i = 0, len = bucket.length; i < len; i++) {
-						const nodeInfo = bucket[i];
-						if (nodeInfo.optimalLod > nodeInfo.inst.rangeMin) {
-							const lods = nodeInfo.lods;
-							const optimalLod = nodeInfo.optimalLod;
-							const splatsAdded = lods[optimalLod - 1].count - lods[optimalLod].count;
-							if (currentSplats + splatsAdded <= budget) {
-								nodeInfo.optimalLod = optimalLod - 1;
-								currentSplats += splatsAdded;
-								modified = true;
-								if (currentSplats >= budget) {
-									done = true;
-									break;
-								}
-							} else {
-								done = true;
-								break;
-							}
-						}
-					}
-				}
-			}
-			if (!modified) {
-				break;
-			}
-		}
-	}
-}
-
-class MemBlock {
-	_offset = 0;
-	_size = 0;
-	_free = true;
-	_prev = null;
-	_next = null;
-	_prevFree = null;
-	_nextFree = null;
-	_bucket = -1;
-	get offset() {
-		return this._offset;
-	}
-	get size() {
-		return this._size;
-	}
-}
-class BlockAllocator {
-	_headAll = null;
-	_tailAll = null;
-	_freeBucketHeads = [];
-	_pool = [];
-	_capacity = 0;
-	_usedSize = 0;
-	_freeSize = 0;
-	_freeRegionCount = 0;
-	_growMultiplier;
-	constructor(capacity = 0, growMultiplier = 1.1) {
-		this._growMultiplier = growMultiplier;
-		if (capacity > 0) {
-			this._capacity = capacity;
-			this._freeSize = capacity;
-			const block = this._obtain(0, capacity, true);
-			this._headAll = block;
-			this._tailAll = block;
-			this._addToBucket(block);
-		}
-	}
-	get capacity() {
-		return this._capacity;
-	}
-	get usedSize() {
-		return this._usedSize;
-	}
-	get freeSize() {
-		return this._freeSize;
-	}
-	get fragmentation() {
-		return this._freeSize > 0 ? 1 - 1 / this._freeRegionCount : 0;
-	}
-	_bucketFor(size) {
-		return 31 - Math.clz32(size);
-	}
-	_addToBucket(block) {
-		const b = this._bucketFor(block._size);
-		block._bucket = b;
-		while (b >= this._freeBucketHeads.length) {
-			this._freeBucketHeads.push(null);
-		}
-		block._prevFree = null;
-		block._nextFree = this._freeBucketHeads[b];
-		if (this._freeBucketHeads[b]) this._freeBucketHeads[b]._prevFree = block;
-		this._freeBucketHeads[b] = block;
-		this._freeRegionCount++;
-	}
-	_removeFromBucket(block) {
-		const b = block._bucket;
-		if (block._prevFree) block._prevFree._nextFree = block._nextFree;
-		else this._freeBucketHeads[b] = block._nextFree;
-		if (block._nextFree) block._nextFree._prevFree = block._prevFree;
-		block._prevFree = null;
-		block._nextFree = null;
-		block._bucket = -1;
-		this._freeRegionCount--;
-	}
-	_rebucket(block) {
-		const newBucket = this._bucketFor(block._size);
-		if (newBucket !== block._bucket) {
-			this._removeFromBucket(block);
-			this._addToBucket(block);
-		}
-	}
-	_obtain(offset, size, free) {
-		let block;
-		if (this._pool.length > 0) {
-			block = this._pool.pop();
-		} else {
-			block = new MemBlock();
-		}
-		block._offset = offset;
-		block._size = size;
-		block._free = free;
-		block._prev = null;
-		block._next = null;
-		block._prevFree = null;
-		block._nextFree = null;
-		block._bucket = -1;
-		return block;
-	}
-	_release(block) {
-		block._prev = null;
-		block._next = null;
-		block._prevFree = null;
-		block._nextFree = null;
-		block._bucket = -1;
-		this._pool.push(block);
-	}
-	_insertAfterInMainList(block, after) {
-		if (after === null) {
-			block._prev = null;
-			block._next = this._headAll;
-			if (this._headAll) this._headAll._prev = block;
-			this._headAll = block;
-			if (!this._tailAll) this._tailAll = block;
-		} else {
-			block._prev = after;
-			block._next = after._next;
-			if (after._next) after._next._prev = block;
-			after._next = block;
-			if (this._tailAll === after) this._tailAll = block;
-		}
-	}
-	_removeFromMainList(block) {
-		if (block._prev) block._prev._next = block._next;
-		else this._headAll = block._next;
-		if (block._next) block._next._prev = block._prev;
-		else this._tailAll = block._prev;
-		block._prev = null;
-		block._next = null;
-	}
-	_findFreeBlock(size) {
-		const startBucket = this._bucketFor(size);
-		const len = this._freeBucketHeads.length;
-		if (startBucket < len) {
-			let best = null;
-			let node = this._freeBucketHeads[startBucket];
-			while (node) {
-				if (node._size >= size) {
-					if (!best || node._size < best._size) {
-						best = node;
-						if (node._size === size) break;
-					}
-				}
-				node = node._nextFree;
-			}
-			if (best) return best;
-		}
-		for (let b = startBucket + 1; b < len; b++) {
-			if (this._freeBucketHeads[b]) {
-				return this._freeBucketHeads[b];
-			}
-		}
-		return null;
-	}
-	allocate(size) {
-		const gap = this._findFreeBlock(size);
-		if (!gap) return null;
-		this._usedSize += size;
-		this._freeSize -= size;
-		if (gap._size === size) {
-			gap._free = false;
-			this._removeFromBucket(gap);
-			return gap;
-		}
-		const alloc = this._obtain(gap._offset, size, false);
-		gap._offset += size;
-		gap._size -= size;
-		this._rebucket(gap);
-		this._insertAfterInMainList(alloc, gap._prev);
-		return alloc;
-	}
-	free(block) {
-		block._free = true;
-		this._usedSize -= block._size;
-		this._freeSize += block._size;
-		const prev = block._prev;
-		const next = block._next;
-		const prevFree = prev && prev._free;
-		const nextFree = next && next._free;
-		if (prevFree && nextFree) {
-			prev._size += block._size + next._size;
-			this._removeFromMainList(block);
-			this._removeFromMainList(next);
-			this._removeFromBucket(next);
-			this._release(block);
-			this._release(next);
-			this._rebucket(prev);
-		} else if (prevFree) {
-			prev._size += block._size;
-			this._removeFromMainList(block);
-			this._release(block);
-			this._rebucket(prev);
-		} else if (nextFree) {
-			block._size += next._size;
-			this._removeFromMainList(next);
-			this._removeFromBucket(next);
-			this._release(next);
-			this._addToBucket(block);
-		} else {
-			this._addToBucket(block);
-		}
-	}
-	grow(newCapacity) {
-		if (newCapacity <= this._capacity) return;
-		const added = newCapacity - this._capacity;
-		this._capacity = newCapacity;
-		this._freeSize += added;
-		if (this._tailAll && this._tailAll._free) {
-			this._tailAll._size += added;
-			this._rebucket(this._tailAll);
-		} else {
-			const block = this._obtain(this._capacity - added, added, true);
-			this._insertAfterInMainList(block, this._tailAll);
-			this._addToBucket(block);
-		}
-	}
-	defrag(maxMoves = 0, result = /* @__PURE__ */ new Set()) {
-		result.clear();
-		if (this._freeRegionCount === 0) return result;
-		if (maxMoves === 0) {
-			this._defragFull(result);
-		} else {
-			this._defragIncremental(maxMoves, result);
-		}
-		return result;
-	}
-	_defragFull(result) {
-		for (let b = 0; b < this._freeBucketHeads.length; b++) {
-			let node = this._freeBucketHeads[b];
-			while (node) {
-				const nextFree = node._nextFree;
-				this._removeFromMainList(node);
-				node._prevFree = null;
-				node._nextFree = null;
-				node._bucket = -1;
-				this._pool.push(node);
-				node = nextFree;
-			}
-			this._freeBucketHeads[b] = null;
-		}
-		this._freeRegionCount = 0;
-		let offset = 0;
-		let block = this._headAll;
-		while (block) {
-			if (block._offset !== offset) {
-				block._offset = offset;
-				result.add(block);
-			}
-			offset += block._size;
-			block = block._next;
-		}
-		const remaining = this._capacity - offset;
-		if (remaining > 0) {
-			const freeBlock = this._obtain(offset, remaining, true);
-			this._insertAfterInMainList(freeBlock, this._tailAll);
-			this._addToBucket(freeBlock);
-		}
-	}
-	_defragIncremental(maxMoves, result) {
-		const phase1Moves = Math.ceil(maxMoves / 2);
-		const phase2Moves = maxMoves - phase1Moves;
-		for (let i = 0; i < phase1Moves; i++) {
-			let lastAlloc = this._tailAll;
-			while (lastAlloc && lastAlloc._free) lastAlloc = lastAlloc._prev;
-			if (!lastAlloc) break;
-			const gap = this._findFreeBlock(lastAlloc._size);
-			if (!gap || gap._offset >= lastAlloc._offset) break;
-			this._moveBlock(lastAlloc, gap);
-			result.add(lastAlloc);
-		}
-		let block = this._headAll;
-		for (let i = 0; i < phase2Moves && block; ) {
-			const next = block._next;
-			if (block._free && next && !next._free) {
-				const allocBlock = next;
-				const freeBlock = block;
-				allocBlock._offset = freeBlock._offset;
-				freeBlock._offset = allocBlock._offset + allocBlock._size;
-				const a = freeBlock._prev;
-				const b = allocBlock._next;
-				allocBlock._prev = a;
-				allocBlock._next = freeBlock;
-				freeBlock._prev = allocBlock;
-				freeBlock._next = b;
-				if (a) a._next = allocBlock;
-				else this._headAll = allocBlock;
-				if (b) b._prev = freeBlock;
-				else this._tailAll = freeBlock;
-				if (freeBlock._next && freeBlock._next._free) {
-					const right = freeBlock._next;
-					freeBlock._size += right._size;
-					this._removeFromMainList(right);
-					this._removeFromBucket(right);
-					this._release(right);
-					this._rebucket(freeBlock);
-				}
-				result.add(allocBlock);
-				i++;
-				block = freeBlock._next;
-			} else {
-				block = next;
-			}
-		}
-	}
-	_moveBlock(block, gap) {
-		const blockSize = block._size;
-		const newOffset = gap._offset;
-		const prev = block._prev;
-		this._removeFromMainList(block);
-		const freed = this._obtain(block._offset, blockSize, true);
-		this._insertAfterInMainList(freed, prev);
-		this._addToBucket(freed);
-		if (freed._next && freed._next._free) {
-			const right = freed._next;
-			freed._size += right._size;
-			this._removeFromMainList(right);
-			this._removeFromBucket(right);
-			this._release(right);
-			this._rebucket(freed);
-		}
-		if (freed._prev && freed._prev._free) {
-			const left = freed._prev;
-			left._size += freed._size;
-			this._removeFromMainList(freed);
-			this._removeFromBucket(freed);
-			this._release(freed);
-			this._rebucket(left);
-		}
-		block._offset = newOffset;
-		if (gap._size === blockSize) {
-			const gapPrev = gap._prev;
-			this._removeFromMainList(gap);
-			this._removeFromBucket(gap);
-			this._release(gap);
-			this._insertAfterInMainList(block, gapPrev);
-		} else {
-			gap._offset += blockSize;
-			gap._size -= blockSize;
-			this._rebucket(gap);
-			this._insertAfterInMainList(block, gap._prev);
-		}
-	}
-	updateAllocation(toFree, toAllocate) {
-		for (let i = 0; i < toFree.length; i++) {
-			this.free(toFree[i]);
-		}
-		for (let i = 0; i < toAllocate.length; i++) {
-			const size = toAllocate[i];
-			const block = this.allocate(size);
-			if (block) {
-				toAllocate[i] = block;
-			} else {
-				let totalRemaining = size;
-				for (let j = i + 1; j < toAllocate.length; j++) {
-					totalRemaining += toAllocate[j];
-				}
-				const neededCapacity = this._usedSize + totalRemaining;
-				const headroomCapacity = Math.ceil(neededCapacity * this._growMultiplier);
-				if (headroomCapacity > this._capacity) {
-					this.grow(headroomCapacity);
-				}
-				this.defrag(0);
-				for (let j = i; j < toAllocate.length; j++) {
-					const s = toAllocate[j];
-					const b = this.allocate(s);
-					toAllocate[j] = b;
-				}
-				return true;
-			}
-		}
-		return false;
-	}
-}
-
-const cameraPosition = new Vec3();
-const cameraDirection = new Vec3();
-const translation = new Vec3();
-const _tempVec3 = new Vec3();
-const invModelMat = new Mat4();
-const NO_SORT_INDIRECT_INFO = new Uint32Array([0, 0, 0, 0]);
-const tempNonOctreePlacements = /* @__PURE__ */ new Set();
-const tempOctreePlacements = /* @__PURE__ */ new Set();
-const _updatedSplats = [];
-const _splatsWithSH = [];
-const _changedColorAllocIds = /* @__PURE__ */ new Set();
-const _cameraDeltas = { translationDelta: 0 };
-const _localCamPos = new Vec3();
-const _closestPt = new Vec3();
-const tempOctreesTicked = /* @__PURE__ */ new Set();
-const _queuedSplats = /* @__PURE__ */ new Set();
-const _lodColorsRaw = [
-	[1, 0, 0],
-	// red
-	[0, 1, 0],
-	// green
-	[0, 0, 1],
-	// blue
-	[1, 1, 0],
-	// yellow
-	[1, 0, 1],
-	// magenta
-	[0, 1, 1],
-	// cyan
-	[1, 0.5, 0],
-	// orange
-	[0.5, 0, 1]
-	// purple
-];
-[
-	new Color(1, 0, 0),
-	new Color(0, 1, 0),
-	new Color(0, 0, 1),
-	new Color(1, 1, 0),
-	new Color(1, 0, 1),
-	new Color(0, 1, 1),
-	new Color(1, 0.5, 0),
-	new Color(0.5, 0, 1)
-];
-let _randomColorRaw = null;
-class GSplatManager {
-	device;
-	node = new GraphNode("GSplatManager");
-	workBuffer;
-	renderer;
-	worldStates = /* @__PURE__ */ new Map();
-	lastWorldStateVersion = 0;
-	activeRenderer;
-	_worldStateDirty = false;
-	cpuSorter = null;
+const _invProjMat = new Mat4();
+const _shaderProjMat = new Mat4();
+const _camPos = new Vec3();
+const _camDir = new Vec3();
+const _tmpV = new Vec3();
+class GSplatHybridRenderer extends GSplatRenderer {
+	_material;
+	meshInstance;
+	_pickMaterial = null;
+	_pickMeshInstance = null;
+	_clipToViewZ = new Float32Array(4);
+	_clipToViewZPick = null;
+	originalBlendType = BLEND_ADDITIVE;
+	_internalDefines = /* @__PURE__ */ new Set();
+	forceCopyMaterial = true;
+	_lastSourceChunksKey = "";
+	_cacheStride = CACHE_STRIDE;
 	gpuSorter = null;
-	intervalCompaction = null;
 	projector = null;
+	intervalCompaction = null;
+	_scratch = null;
 	indirectDrawSlot = -1;
 	indirectDispatchSlot = -1;
 	lastCompactedNumIntervals = 0;
-	sortedVersion = 0;
-	_awaitingLodUpdate = false;
-	_workBufferFormatVersion = -1;
-	_workBufferRebuildRequired = false;
-	bufferCopyUploaded = 0;
-	bufferCopyTotal = 0;
-	_stateTracker = new GSplatPlacementStateTracker();
-	_centersVersions = /* @__PURE__ */ new Map();
-	framesTillFullUpdate = 0;
-	lastLodCameraPos = new Vec3(Infinity, Infinity, Infinity);
-	lastLodCameraFwd = new Vec3(Infinity, Infinity, Infinity);
-	lastLodCameraFov = -1;
-	lastSortCameraPos = new Vec3(Infinity, Infinity, Infinity);
-	lastSortCameraFwd = new Vec3(Infinity, Infinity, Infinity);
-	lastCullingCameraFwd = new Vec3(Infinity, Infinity, Infinity);
-	lastCullingProjMat = new Mat4();
-	sortNeeded = true;
-	_budgetBalancer = new GSplatBudgetBalancer();
-	_budgetScale = 1;
-	_allocator;
-	_allocationMap = /* @__PURE__ */ new Map();
-	lastColorUpdateCameraPos = new Vec3(Infinity, Infinity, Infinity);
-	cameraNode;
-	scene;
-	layerPlacements = [];
-	layerPlacementsDirty = false;
-	_placementSetChanged = false;
-	octreeInstances = /* @__PURE__ */ new Map();
-	octreeInstancesToDestroy = [];
-	hasNewOctreeInstances = false;
-	renderMode;
-	constructor(device, director, layer, cameraNode) {
-		this.device = device;
-		this.scene = director.scene;
-		this.director = director;
-		this.cameraNode = cameraNode;
-		const allocatorGrowMultiplier = 1.15;
-		const budget = this.scene.gsplat.splatBudget;
-		this._allocator = new BlockAllocator(budget > 0 ? Math.ceil(budget * allocatorGrowMultiplier) : 0, allocatorGrowMultiplier);
-		this.workBuffer = new GSplatWorkBuffer(device, this.scene.gsplat.format);
-		this.layer = layer;
-		this._createRenderer(this.scene.gsplat.currentRenderer);
-		this._workBufferFormatVersion = this.workBuffer.format.extraStreamsVersion;
+	constructor(device, node, cameraNode, layer, workBuffer, scratch = null) {
+		super(device, node, cameraNode, layer, workBuffer);
+		this._scratch = scratch;
+		this._material = new ShaderMaterial({
+			uniqueName: "UnifiedSplatHybridMaterial",
+			vertexWGSL: '#include "gsplatHybridVS"',
+			fragmentWGSL: '#include "gsplatPS"',
+			attributes: {
+				vertex_position: SEMANTIC_POSITION
+			}
+		});
+		this._material.setDefine("{GSPLAT_INSTANCE_SIZE}", GSplatResourceBase.instanceSize);
+		this._material.setDefine("{CACHE_STRIDE}", CACHE_STRIDE);
+		this.configureMaterial();
+		this._material.defines.forEach((value, key) => {
+			this._internalDefines.add(key);
+		});
+		this._internalDefines.add("{GSPLAT_INSTANCE_SIZE}");
+		this._internalDefines.add("{CACHE_STRIDE}");
+		this._internalDefines.add("GSPLAT_UNIFIED_ID");
+		this._internalDefines.add("PICK_CUSTOM_ID");
+		this._internalDefines.add("GSPLAT_OVERDRAW");
+		this._internalDefines.add("GSPLAT_NO_FOG");
+		this._internalDefines.add("GSPLAT_XR");
+		this.meshInstance = this.createMeshInstance();
+	}
+	setRenderMode(renderMode) {
+		const oldRenderMode = this.renderMode ?? 0;
+		const wasForward = (oldRenderMode & GSPLAT_FORWARD) !== 0;
+		const isForward = (renderMode & GSPLAT_FORWARD) !== 0;
+		if (wasForward && !isForward) {
+			this.layer.removeMeshInstances([this.meshInstance], true);
+		}
+		if (!wasForward && isForward) {
+			this.layer.addMeshInstances([this.meshInstance], true);
+		}
+		super.setRenderMode(renderMode);
 	}
 	destroy() {
-		this._destroyed = true;
-		for (const [, worldState] of this.worldStates) {
-			for (const splat of worldState.splats) {
-				splat.resource.decRefCount();
-			}
-			worldState.destroy();
+		if (this.renderMode && this.renderMode & GSPLAT_FORWARD) {
+			this.layer.removeMeshInstances([this.meshInstance], true);
 		}
-		this.worldStates.clear();
-		for (const [, instance] of this.octreeInstances) {
-			instance.destroy();
-		}
-		this.octreeInstances.clear();
-		for (const instance of this.octreeInstancesToDestroy) {
-			instance.destroy();
-		}
-		this.octreeInstancesToDestroy.length = 0;
-		this.destroyGpuSorting();
-		this.destroyCpuSorting();
-		this.workBuffer.destroy();
-		this.renderer.destroy();
-	}
-	destroyGpuSorting() {
 		this.gpuSorter?.destroy();
 		this.gpuSorter = null;
 		this.projector?.destroy();
 		this.projector = null;
-		const useCpuSort = false;
-		this.renderer.setCpuSortedRendering();
-		this.destroyIntervalCompaction(useCpuSort);
-	}
-	destroyIntervalCompaction(useCpuSort = true) {
-		if (this.intervalCompaction) {
-			if (useCpuSort) {
-				this.renderer.setCpuSortedRendering();
-			}
-			this.intervalCompaction.destroy();
-			this.intervalCompaction = null;
-		}
-	}
-	destroyCpuSorting() {
-		this.cpuSorter?.destroy();
-		this.cpuSorter = null;
-	}
-	initHybridSorting() {
-		if (!this.gpuSorter) {
-			this.gpuSorter = new ComputeRadixSort(this.device, { indirect: true });
-		}
-		if (!this.projector) {
-			this.projector = new GSplatProjector(this.device);
-		}
-	}
-	initCpuSorting() {
-		if (!this.cpuSorter) {
-			this.cpuSorter = this.createSorter();
-		}
-		const currentState = this.worldStates.get(this.sortedVersion);
-		if (currentState) {
-			currentState.sortParametersSet = false;
-			currentState.sortedBefore = false;
-			this.cpuSorter.updateCentersForSplats(currentState.splats);
-		}
-		this.renderer.setCpuSortedRendering();
+		this.intervalCompaction?.destroy();
+		this.intervalCompaction = null;
+		this._material.destroy();
+		this._pickMaterial?.destroy();
+		this.meshInstance.destroy();
+		this._pickMeshInstance?.destroy();
+		super.destroy();
 	}
 	get material() {
-		return this.renderer.material;
+		return this._material;
 	}
-	prepareForPicking(camera, width, height) {
-		if (this.activeRenderer === GSPLAT_RENDERER_RASTER_GPU_SORT) {
-			const sortedState = this.worldStates.get(this.sortedVersion);
-			if (!sortedState?.sortedBefore || !camera.node) return null;
-			const sortedIndices = this.sortGpuHybridForCamera(
-				sortedState,
-				camera.node,
-				width,
-				height,
-				Math.max(ALPHA_VISIBILITY_THRESHOLD, this.scene.gsplat.alphaClip),
-				!!this.workBuffer.format.getStream("pcId")
-			);
-			if (!sortedIndices) return null;
-			const proj = this.projector;
-			const ic = this.intervalCompaction;
-			return this.renderer.prepareForPicking(
-				this.indirectDrawSlot,
-				sortedIndices,
-				proj.projCache,
-				ic.numSplatsBuffer,
-				this.scene.gsplat.alphaClip,
-				this.scene.gsplat.alphaClipForward,
-				camera.node
-			);
-		}
-		if (this.activeRenderer !== GSPLAT_RENDERER_COMPUTE) return null;
-		const localRenderer = this.renderer;
-		return localRenderer.dispatchPick(camera, width, height);
-	}
-	createSorter() {
-		const sorter = new GSplatUnifiedSorter(this.scene);
-		sorter.on("sorted", (count, version, orderData) => {
-			this.onSorted(count, version, orderData);
-		});
-		return sorter;
-	}
-	setRenderMode(renderMode) {
-		this.renderMode = renderMode;
-		this.renderer.setRenderMode(renderMode);
-	}
-	get canCull() {
-		return this.activeRenderer !== GSPLAT_RENDERER_RASTER_CPU_SORT && this.workBuffer.frustumCuller.totalBoundsEntries > 0;
-	}
-	_createRenderer(mode) {
-		if (mode === GSPLAT_RENDERER_COMPUTE) {
-			this.renderer = new GSplatComputeLocalRenderer(this.device, this.node, this.cameraNode, this.layer, this.workBuffer);
-		} else if (mode === GSPLAT_RENDERER_RASTER_GPU_SORT) {
-			this.renderer = new GSplatHybridRenderer(this.device, this.node, this.cameraNode, this.layer, this.workBuffer);
-			this.initHybridSorting();
-		} else {
-			this.renderer = new GSplatQuadRenderer(this.device, this.node, this.cameraNode, this.layer, this.workBuffer);
-			this.initCpuSorting();
-		}
-		this.activeRenderer = mode;
-	}
-	prepareRendererMode() {
-		const requested = this.scene.gsplat.currentRenderer;
-		if (requested === this.activeRenderer) return;
-		this._worldStateDirty = true;
-		this.destroyGpuSorting();
-		this.destroyCpuSorting();
-		this.renderer.destroy();
-		this._createRenderer(requested);
-		this.renderer.setRenderMode(this.renderMode);
-		this._workBufferRebuildRequired = true;
-		this.sortNeeded = true;
-	}
-	reconcile(placements) {
-		tempNonOctreePlacements.clear();
-		for (const p of placements) {
-			if (p.resource instanceof GSplatOctreeResource) {
-				if (!this.octreeInstances.has(p)) {
-					this.octreeInstances.set(p, new GSplatOctreeInstance(this.device, p.resource.octree, p));
-					this.hasNewOctreeInstances = true;
-				}
-				tempOctreePlacements.add(p);
-			} else {
-				tempNonOctreePlacements.add(p);
-			}
-		}
-		for (const [placement, inst] of this.octreeInstances) {
-			if (!tempOctreePlacements.has(placement)) {
-				this.octreeInstances.delete(placement);
-				this.layerPlacementsDirty = true;
-				this._placementSetChanged = true;
-				this.octreeInstancesToDestroy.push(inst);
-			}
-		}
-		this.layerPlacementsDirty || (this.layerPlacementsDirty = this.layerPlacements.length !== tempNonOctreePlacements.size);
-		if (!this.layerPlacementsDirty) {
-			for (let i = 0; i < this.layerPlacements.length; i++) {
-				const existing = this.layerPlacements[i];
-				if (!tempNonOctreePlacements.has(existing)) {
-					this.layerPlacementsDirty = true;
-					break;
-				}
-			}
-		}
-		this._placementSetChanged || (this._placementSetChanged = this.layerPlacementsDirty);
-		this.layerPlacements.length = 0;
-		for (const p of tempNonOctreePlacements) {
-			this.layerPlacements.push(p);
-		}
-		tempNonOctreePlacements.clear();
-		tempOctreePlacements.clear();
-	}
-	updateWorldState() {
-		let stateChanged = this._stateTracker.hasChanges(this.layerPlacements);
-		for (const [, inst] of this.octreeInstances) {
-			if (this._stateTracker.hasChanges(inst.activePlacements)) {
-				stateChanged = true;
-			}
-		}
-		const placementsChanged = this.layerPlacementsDirty;
-		const worldChanged = placementsChanged || stateChanged || this.worldStates.size === 0 || this._worldStateDirty;
-		if (worldChanged) {
-			this.lastWorldStateVersion++;
-			const splats = [];
-			for (const p of this.layerPlacements) {
-				if (this.cpuSorter && !p.resource.hasCenters) {
-					continue;
-				}
-				p.ensureInstanceStreams(this.device);
-				const splatInfo = new GSplatInfo(this.device, p.resource, p, p.consumeRenderDirty.bind(p));
-				splats.push(splatInfo);
-			}
-			for (const [, inst] of this.octreeInstances) {
-				inst.activePlacements.forEach((p) => {
-					if (p.resource) {
-						const leafResource = p.resource;
-						if (this.cpuSorter && !leafResource.hasCenters) {
-							return;
-						}
-						p.ensureInstanceStreams(this.device);
-						const octreeNodes = p.intervals.size > 0 ? inst.octree.nodes : null;
-						const nodeInfos = octreeNodes ? inst.nodeInfos : null;
-						const splatInfo = new GSplatInfo(this.device, p.resource, p, p.consumeRenderDirty.bind(p), octreeNodes, nodeInfos);
-						splats.push(splatInfo);
-					}
-				});
-			}
-			if (this.cpuSorter) {
-				for (const splat of splats) {
-					const resource = splat.resource;
-					const lastVersion = this._centersVersions.get(resource.id);
-					if (lastVersion !== resource.centersVersion) {
-						this._centersVersions.set(resource.id, resource.centersVersion);
-						this.cpuSorter.setCenters(resource.id, null);
-						this.cpuSorter.setCenters(resource.id, resource.centers);
-					}
-				}
-			}
-			this.cpuSorter?.updateCentersForSplats(splats);
-			const newState = new GSplatWorldState(
-				this.device,
-				this.lastWorldStateVersion,
-				splats,
-				this._allocator,
-				this._allocationMap
-			);
-			for (const splat of newState.splats) {
-				splat.resource.incRefCount();
-			}
-			for (const [, inst] of this.octreeInstances) {
-				if (inst.removedCandidates && inst.removedCandidates.size) {
-					for (const fileIndex of inst.removedCandidates) {
-						newState.pendingReleases.push([inst.octree, fileIndex]);
-					}
-					inst.removedCandidates.clear();
-				}
-			}
-			if (this.octreeInstancesToDestroy.length) {
-				for (const inst of this.octreeInstancesToDestroy) {
-					if (inst.removedCandidates && inst.removedCandidates.size) {
-						for (const fileIndex of inst.removedCandidates) {
-							newState.pendingReleases.push([inst.octree, fileIndex]);
-						}
-						inst.removedCandidates.clear();
-					}
-					const toRelease = inst.getFileDecrements();
-					for (const fileIndex of toRelease) {
-						newState.pendingReleases.push([inst.octree, fileIndex]);
-					}
-					inst.destroy(true);
-				}
-				this.octreeInstancesToDestroy.length = 0;
-			}
-			if (this._placementSetChanged) {
-				newState.fullRebuild = true;
-			}
-			this.worldStates.set(this.lastWorldStateVersion, newState);
-			this.layerPlacementsDirty = false;
-			this._placementSetChanged = false;
-			this._worldStateDirty = false;
-			this.sortNeeded = true;
-		}
-	}
-	onSorted(count, version, orderData) {
-		this.cleanupOldWorldStates(version);
-		this.sortedVersion = version;
-		const worldState = this.worldStates.get(version);
-		if (worldState) {
-			if (!worldState.sortedBefore) {
-				worldState.sortedBefore = true;
-				this.rebuildWorkBuffer(worldState, count);
-			}
-			this.workBuffer.setOrderData(orderData);
-			this.renderer.setOrderData();
-		}
-	}
-	rebuildWorkBuffer(worldState, count, forceFullRebuild = false) {
-		const textureSize = worldState.textureSize;
-		if (textureSize !== this.workBuffer.textureSize) {
-			this.workBuffer.resize(textureSize);
-		}
-		if (this.activeRenderer !== GSPLAT_RENDERER_RASTER_CPU_SORT) {
-			this.workBuffer.frustumCuller.updateBoundsData(worldState.boundsGroups);
-			this.workBuffer.frustumCuller.updateTransformsData(worldState.boundsGroups);
-		}
-		const renderAll = forceFullRebuild || worldState.fullRebuild;
-		const splatsToRender = renderAll ? worldState.splats : worldState.needsUpload;
-		const changedAllocIds = renderAll ? null : worldState.needsUploadIds;
-		if (splatsToRender.length > 0) {
-			const totalBlocks = this._allocationMap.size;
-			const uploadBlocks = renderAll ? totalBlocks : worldState.needsUploadIds.size;
-			this.bufferCopyUploaded += uploadBlocks;
-			this.bufferCopyTotal = totalBlocks;
-			this.workBuffer.render(splatsToRender, this.cameraNode, this.getDebugColors(), changedAllocIds);
-		}
-		for (let i = 0; i < worldState.splats.length; i++) {
-			worldState.splats[i].update();
-		}
-		this.updateColorCameraTracking();
-		if (worldState.pendingReleases && worldState.pendingReleases.length) {
-			const cooldownTicks = this.scene.gsplat.cooldownTicks;
-			for (const [octree, fileIndex] of worldState.pendingReleases) {
-				octree.decRefCount(fileIndex, cooldownTicks);
-			}
-			worldState.pendingReleases.length = 0;
-		}
-		this.renderer.update(count, textureSize);
-	}
-	cleanupOldWorldStates(newVersion) {
-		const activeState = this.worldStates.get(newVersion);
-		if (!activeState.fullRebuild) {
-			for (let v = this.sortedVersion + 1; v < newVersion; v++) {
-				if (this.worldStates.get(v)?.fullRebuild) {
-					activeState.fullRebuild = true;
-					break;
-				}
-			}
-		}
-		if (!activeState.fullRebuild) {
-			const activeIds = activeState.needsUploadIds;
-			const lookup = activeState.allocIdToSplat;
-			for (let v = this.sortedVersion + 1; v < newVersion; v++) {
-				const oldState = this.worldStates.get(v);
-				if (oldState) {
-					for (const allocId of oldState.needsUploadIds) {
-						if (!activeIds.has(allocId)) {
-							activeIds.add(allocId);
-							const splat = lookup.get(allocId);
-							if (splat && !_queuedSplats.has(splat)) {
-								activeState.needsUpload.push(splat);
-								_queuedSplats.add(splat);
-							}
-						}
-					}
-				}
-			}
-			_queuedSplats.clear();
-		}
-		for (let v = this.sortedVersion; v < newVersion; v++) {
-			const oldState = this.worldStates.get(v);
-			if (oldState) {
-				for (const splat of oldState.splats) {
-					splat.resource.decRefCount();
-				}
-				this.worldStates.delete(v);
-				oldState.destroy();
-			}
-		}
-	}
-	applyWorkBufferUpdates(state) {
-		const { colorUpdateAngle } = this.scene.gsplat;
-		const ratio = Math.tan(colorUpdateAngle * math.DEG_TO_RAD);
-		const cameraPos = this.cameraNode.getPosition();
-		const { translationDelta } = this.calculateColorCameraDeltas();
-		const hasCameraMovement = translationDelta > 0;
-		let uploadedBlocks = 0;
-		state.splats.forEach((splat) => {
-			if (splat.update()) {
-				_updatedSplats.push(splat);
-				uploadedBlocks += splat.intervalAllocIds.length;
-				if (splat.nodeInfos) {
-					for (const ni of splat.intervalNodeIndices) {
-						splat.nodeInfos[ni].colorAccumulatedTranslation = 0;
-					}
-				} else {
-					splat.colorAccumulatedTranslation = 0;
-				}
-				this.sortNeeded = true;
-			} else if (hasCameraMovement && splat.hasSphericalHarmonics) {
-				_splatsWithSH.push(splat);
-				if (splat.nodeInfos) {
-					const nodeIndices = splat.intervalNodeIndices;
-					for (let j = 0; j < nodeIndices.length; j++) {
-						const nodeInfo = splat.nodeInfos[nodeIndices[j]];
-						nodeInfo.colorAccumulatedTranslation += translationDelta;
-						const threshold = ratio * Math.max(1, nodeInfo.worldDistance);
-						if (nodeInfo.colorAccumulatedTranslation >= threshold) {
-							_changedColorAllocIds.add(splat.intervalAllocIds[j]);
-							nodeInfo.colorAccumulatedTranslation = 0;
-							uploadedBlocks++;
-						}
-					}
-				} else {
-					splat.colorAccumulatedTranslation += translationDelta;
-					invModelMat.copy(splat.node.getWorldTransform()).invert();
-					invModelMat.transformPoint(cameraPos, _localCamPos);
-					splat.aabb.closestPoint(_localCamPos, _closestPt);
-					const dist = _localCamPos.distance(_closestPt) * splat.node.getWorldTransform().getScale().x;
-					const threshold = ratio * Math.max(1, dist);
-					if (splat.colorAccumulatedTranslation >= threshold) {
-						_changedColorAllocIds.add(splat.allocId);
-						uploadedBlocks += splat.intervalAllocIds.length;
-						splat.colorAccumulatedTranslation = 0;
-					}
-				}
-			}
-		});
-		this.bufferCopyUploaded += uploadedBlocks;
-		this.bufferCopyTotal = this._allocationMap.size;
-		if (_updatedSplats.length > 0) {
-			this.workBuffer.render(_updatedSplats, this.cameraNode, this.getDebugColors());
-			_updatedSplats.length = 0;
-		}
-		if (_changedColorAllocIds.size > 0) {
-			this.workBuffer.renderColor(
-				_splatsWithSH,
-				this.cameraNode,
-				this.getDebugColors(),
-				_changedColorAllocIds
-			);
-			_changedColorAllocIds.clear();
-		}
-		_splatsWithSH.length = 0;
-	}
-	testCameraMovedForLod() {
-		const distanceThreshold = this.scene.gsplat.lodUpdateDistance;
-		const currentCameraPos = this.cameraNode.getPosition();
-		const cameraMoved = this.lastLodCameraPos.distance(currentCameraPos) > distanceThreshold;
-		if (cameraMoved) {
-			return true;
-		}
-		let cameraRotated = false;
-		const lodUpdateAngleDeg = this.scene.gsplat.lodUpdateAngle;
-		if (lodUpdateAngleDeg > 0) {
-			if (Number.isFinite(this.lastLodCameraFwd.x)) {
-				const currentCameraFwd = this.cameraNode.forward;
-				const dot = Math.min(1, Math.max(-1, this.lastLodCameraFwd.dot(currentCameraFwd)));
-				const angle = Math.acos(dot);
-				const rotThreshold = lodUpdateAngleDeg * math.DEG_TO_RAD;
-				cameraRotated = angle > rotThreshold;
-			} else {
-				cameraRotated = true;
-			}
-		}
-		const currentFov = this.cameraNode.camera.fov;
-		const fovChanged = this.lastLodCameraFov < 0 || Math.abs(currentFov - this.lastLodCameraFov) > this.lastLodCameraFov * 0.02;
-		return cameraMoved || cameraRotated || fovChanged;
-	}
-	testCameraMovedForSort() {
-		const epsilon = 1e-3;
-		if (this.scene.gsplat.radialSorting) {
-			const currentCameraPos = this.cameraNode.getPosition();
-			return this.lastSortCameraPos.distance(currentCameraPos) > epsilon;
-		}
-		if (Number.isFinite(this.lastSortCameraFwd.x)) {
-			const currentCameraFwd = this.cameraNode.forward;
-			const dot = Math.min(1, Math.max(-1, this.lastSortCameraFwd.dot(currentCameraFwd)));
-			return Math.acos(dot) > epsilon;
-		}
+	get usesGpuSort() {
 		return true;
 	}
-	testFrustumChanged() {
-		const epsilon = 1e-3;
-		if (!this.lastCullingProjMat.equals(this.cameraNode.camera.projectionMatrix)) {
-			return true;
-		}
-		const currentCameraFwd = this.cameraNode.forward;
-		const dot = Math.min(1, Math.max(-1, this.lastCullingCameraFwd.dot(currentCameraFwd)));
-		return Math.acos(dot) > epsilon;
+	get requiresBounds() {
+		return true;
 	}
-	updateColorCameraTracking() {
-		this.lastColorUpdateCameraPos.copy(this.cameraNode.getPosition());
+	onWorkBufferFormatChanged() {
+		this.configureMaterial();
 	}
-	getDebugColors() {
-		const debug = this.scene.gsplat.debug;
-		if (debug === GSPLAT_DEBUG_SH_UPDATE) {
-			_randomColorRaw ?? (_randomColorRaw = []);
-			const r = Math.random();
-			const g = Math.random();
-			const b = Math.random();
-			for (let i = 0; i < _lodColorsRaw.length; i++) {
-				_randomColorRaw[i] ?? (_randomColorRaw[i] = [0, 0, 0]);
-				_randomColorRaw[i][0] = r;
-				_randomColorRaw[i][1] = g;
-				_randomColorRaw[i][2] = b;
-			}
-			return _randomColorRaw;
-		} else if (debug === GSPLAT_DEBUG_LOD) {
-			return _lodColorsRaw;
-		}
-		return void 0;
+	configureMaterial() {
+		this._material.setDefine("SH_BANDS", "0");
+		this._material.setDefine("GSPLAT_INDIRECT_DRAW", true);
+		this._updateIdDefines(this._material);
+		this._material.setDefine(`DITHER_${"NONE"}`, "");
+		this._material.cull = CULLFACE_NONE;
+		this._material.blendType = BLEND_PREMULTIPLIED;
+		this._material.depthWrite = false;
+		this._material.update();
 	}
-	calculateColorCameraDeltas() {
-		_cameraDeltas.translationDelta = 0;
-		if (isFinite(this.lastColorUpdateCameraPos.x)) {
-			const currentCameraPos = this.cameraNode.getPosition();
-			_cameraDeltas.translationDelta = this.lastColorUpdateCameraPos.distance(currentCameraPos);
-		}
-		return _cameraDeltas;
-	}
-	fireFrameReadyEvent() {
-		const ready = this.sortedVersion === this.lastWorldStateVersion && !this._awaitingLodUpdate;
-		let loadingCount = 0;
-		for (const [, inst] of this.octreeInstances) {
-			loadingCount += inst.pendingLoadCount;
-		}
-		this.director.eventHandler.fire("frame:ready", this.cameraNode.camera, this.renderer.layer, ready, loadingCount);
-	}
-	computeGlobalMaxDistance() {
-		let maxDist = 0;
-		cameraPosition.copy(this.cameraNode.getPosition());
-		for (const [, inst] of this.octreeInstances) {
-			const worldTransform = inst.placement.node.getWorldTransform();
-			const aabb = inst.placement.aabb;
-			worldTransform.transformPoint(aabb.center, _tempVec3);
-			const scale = worldTransform.getScale().x;
-			const dist = _tempVec3.distance(cameraPosition) + aabb.halfExtents.length() * scale;
-			if (dist > maxDist) maxDist = dist;
-		}
-		return Math.max(maxDist, 1);
-	}
-	_enforceBudget(budget) {
-		const textureWidth = this.workBuffer.textureSize;
-		let fixedSplats = 0;
-		let paddingEstimate = 0;
-		for (const p of this.layerPlacements) {
-			const resource = p.resource;
-			if (resource) {
-				const numSplats = resource.numSplats ?? 0;
-				fixedSplats += numSplats;
-				paddingEstimate += (textureWidth - numSplats % textureWidth) % textureWidth;
-			}
-		}
-		const octreeBudget = Math.max(1, budget - fixedSplats);
-		const globalMaxDistance = this.computeGlobalMaxDistance();
-		let totalOptimalSplats = 0;
-		for (const [, inst] of this.octreeInstances) {
-			totalOptimalSplats += inst.evaluateOptimalLods(this.cameraNode, this.scene.gsplat, this._budgetScale, globalMaxDistance);
-			for (const placement of inst.activePlacements) {
-				const resource = placement.resource;
-				const numSplats = resource?.numSplats ?? 0;
-				paddingEstimate += (textureWidth - numSplats % textureWidth) % textureWidth;
-			}
-		}
-		const adjustedBudget = Math.max(1, octreeBudget - paddingEstimate);
-		if (totalOptimalSplats > 0) {
-			const ratio = totalOptimalSplats / adjustedBudget;
-			const budgetScaleDeadZone = 0.4;
-			const budgetScaleBlendRate = 0.3;
-			if (ratio > 1 + budgetScaleDeadZone || ratio < 1 - budgetScaleDeadZone) {
-				const invCorrection = 1 / Math.sqrt(ratio);
-				this._budgetScale *= 1 + (invCorrection - 1) * budgetScaleBlendRate;
-				this._budgetScale = Math.max(0.01, Math.min(this._budgetScale, 100));
-			}
-		}
-		this._budgetBalancer.balance(this.octreeInstances, adjustedBudget);
-		for (const [, inst] of this.octreeInstances) {
-			const maxLod = inst.octree.lodLevels - 1;
-			inst.applyLodChanges(maxLod, this.scene.gsplat);
+	setStereo(enabled) {
+		if (this._material.getDefine("GSPLAT_XR") !== enabled) {
+			this._material.setDefine("GSPLAT_XR", enabled);
+			this._material.update();
 		}
 	}
-	handleFormatChange() {
-		const currentFormat = this.scene.gsplat.format;
-		if (this.workBuffer.format !== currentFormat) {
-			this.workBuffer.destroy();
-			this.workBuffer = new GSplatWorkBuffer(this.device, currentFormat);
-			this.renderer.setDataSource(this.workBuffer);
-			this._workBufferFormatVersion = this.workBuffer.format.extraStreamsVersion;
-			this._workBufferRebuildRequired = true;
-			this.sortNeeded = true;
+	update(count, textureSize) {
+		if (this.meshInstance.instancingCount <= 0) {
+			this.meshInstance.instancingCount = 1;
 		}
+		this.meshInstance.visible = count > 0;
 	}
-	update() {
-		this.bufferCopyUploaded = 0;
-		this.bufferCopyTotal = 0;
-		this.handleFormatChange();
-		const wbFormatVersion = this.workBuffer.format.extraStreamsVersion;
-		if (this._workBufferFormatVersion !== wbFormatVersion) {
-			this._workBufferFormatVersion = wbFormatVersion;
-			this.workBuffer.syncWithFormat();
-			this._workBufferRebuildRequired = true;
-			this.sortNeeded = true;
-		}
-		this.prepareRendererMode();
-		if (this.cpuSorter) {
-			this.cpuSorter.applyPendingSorted();
-		}
-		const sorterAvailable = this.activeRenderer !== GSPLAT_RENDERER_RASTER_CPU_SORT || this.cpuSorter && this.cpuSorter.jobsInFlight < 3;
-		let fullUpdate = false;
-		this.framesTillFullUpdate--;
-		if (this.framesTillFullUpdate <= 0) {
-			this.framesTillFullUpdate = 10;
-			if (sorterAvailable) {
-				fullUpdate = true;
-			}
-		}
-		const hasNewInstances = this.hasNewOctreeInstances && sorterAvailable;
-		if (hasNewInstances) this.hasNewOctreeInstances = false;
-		let anyInstanceNeedsLodUpdate = false;
-		let anyOctreeMoved = false;
-		let cameraMovedOrRotatedForLod = false;
-		if (fullUpdate) {
-			for (const [, inst] of this.octreeInstances) {
-				const isDirty = inst.update();
-				this.layerPlacementsDirty || (this.layerPlacementsDirty = isDirty);
-				this._placementSetChanged || (this._placementSetChanged = inst.consumePlacementSetChanged());
-				const instNeeds = inst.consumeNeedsLodUpdate();
-				anyInstanceNeedsLodUpdate || (anyInstanceNeedsLodUpdate = instNeeds);
-			}
-			const threshold = this.scene.gsplat.lodUpdateDistance;
-			for (const [, inst] of this.octreeInstances) {
-				const moved = inst.testMoved(threshold);
-				anyOctreeMoved || (anyOctreeMoved = moved);
-			}
-			cameraMovedOrRotatedForLod = this.testCameraMovedForLod();
-			this._awaitingLodUpdate = false;
-		}
-		if (this.testCameraMovedForSort()) {
-			this.sortNeeded = true;
-		}
-		if (this.intervalCompaction && !this.sortNeeded && this.testFrustumChanged()) {
-			this.lastCullingCameraFwd.copy(this.cameraNode.forward);
-			this.lastCullingProjMat.copy(this.cameraNode.camera.projectionMatrix);
-			this.sortNeeded = true;
-		}
-		if (this.scene.gsplat.dirty) {
-			this.layerPlacementsDirty = true;
-			this.renderer.updateOverdrawMode(this.scene.gsplat);
-			this._workBufferRebuildRequired = true;
-			this.sortNeeded = true;
-			if (this.octreeInstances.size > 0) {
-				this._awaitingLodUpdate = true;
-			}
-		}
-		if (cameraMovedOrRotatedForLod || anyOctreeMoved || this.scene.gsplat.dirty || anyInstanceNeedsLodUpdate || hasNewInstances) {
-			for (const [, inst] of this.octreeInstances) {
-				inst.updateMoved();
-			}
-			const cameraNode = this.cameraNode;
-			this.lastLodCameraPos.copy(cameraNode.getPosition());
-			this.lastLodCameraFwd.copy(cameraNode.forward);
-			this.lastLodCameraFov = cameraNode.camera.fov;
-			const budget = this.scene.gsplat.splatBudget;
-			if (budget > 0) {
-				this._enforceBudget(budget);
-			} else {
-				this._budgetScale = 1;
-				for (const [, inst] of this.octreeInstances) {
-					inst.updateLod(this.cameraNode, this.scene.gsplat);
-				}
-			}
-		}
-		this.updateWorldState();
-		const lastState = this.worldStates.get(this.lastWorldStateVersion);
-		if (lastState) {
-			if (this.cpuSorter && !lastState.sortParametersSet) {
-				lastState.sortParametersSet = true;
-				const payload = this.prepareSortParameters(lastState);
-				this.cpuSorter.setSortParameters(payload);
-			}
-		}
-		const sortedState = this.worldStates.get(this.sortedVersion);
-		if (sortedState?.sortedBefore) {
-			if (this._workBufferRebuildRequired) {
-				const count = sortedState.totalActiveSplats;
-				this.rebuildWorkBuffer(sortedState, count, true);
-				this._workBufferRebuildRequired = false;
-				this.renderer.setOrderData();
-				if (this.intervalCompaction) {
-					this.intervalCompaction._uploadedVersion = -1;
-				}
-			} else {
-				this.applyWorkBufferUpdates(sortedState);
-			}
-		}
-		let gpuSortedThisFrame = false;
-		if (this.sortNeeded && lastState) {
-			if (this.activeRenderer === GSPLAT_RENDERER_COMPUTE) {
-				this.compactGpu(lastState);
-				gpuSortedThisFrame = true;
-			} else if (this.activeRenderer === GSPLAT_RENDERER_RASTER_GPU_SORT) {
-				this.sortGpuHybrid(lastState);
-				gpuSortedThisFrame = true;
-			} else {
-				this.sortCpu(lastState);
-			}
-			this.sortNeeded = false;
-			this.lastSortCameraPos.copy(this.cameraNode.getPosition());
-			this.lastSortCameraFwd.copy(this.cameraNode.forward);
-			this.lastCullingCameraFwd.copy(this.cameraNode.forward);
-			this.lastCullingProjMat.copy(this.cameraNode.camera.projectionMatrix);
-		}
-		if (this.activeRenderer === GSPLAT_RENDERER_RASTER_GPU_SORT && lastState && !gpuSortedThisFrame) {
-			this.sortGpuHybrid(lastState);
-			gpuSortedThisFrame = true;
-		}
-		if (sortedState?.sortedBefore) {
-			this.updateColorCameraTracking();
-		}
-		if (this.octreeInstances.size) {
-			const cooldownTicks = this.scene.gsplat.cooldownTicks;
-			for (const [, inst] of this.octreeInstances) {
-				const octree = inst.octree;
-				if (!tempOctreesTicked.has(octree)) {
-					tempOctreesTicked.add(octree);
-					octree.updateCooldownTick(cooldownTicks);
-				}
-			}
-			tempOctreesTicked.clear();
-		}
-		this.fireFrameReadyEvent();
-		if (this.scene.gsplat.dirty) {
-			for (const [, inst] of this.octreeInstances) {
-				inst.needsLodUpdate = true;
-			}
-		}
-		const fogParams = this.scene.gsplat.useFog ? this.cameraNode.camera.fogParams ?? this.scene.fog : null;
-		this.renderer.frameUpdate(this.scene.gsplat, this.scene.exposure, fogParams);
-		return sortedState ? sortedState.totalActiveSplats : 0;
+	invalidateCullUpload() {
+		this.intervalCompaction?.invalidateUpload();
 	}
-	sortGpuHybrid(worldState) {
-		const cam = this.cameraNode.camera;
+	_ensureGpuPipeline() {
+		if (!this.gpuSorter) this.gpuSorter = new ComputeRadixSort(this.device, { indirect: true });
+		if (!this.projector) this.projector = new GSplatProjector(this.device);
+		if (!this.intervalCompaction) this.intervalCompaction = new GSplatIntervalCompaction(this.device, this._scratch);
+	}
+	prepareRenderView(world, worldState, params) {
+		const cameraNode = params.cameraNode;
+		const cam = cameraNode.camera;
 		const sceneCam = cam.camera;
 		const rt = cam.renderTarget;
 		const rect = cam.rect;
-		const xrView = sceneCam.xr?.session ? sceneCam.xr.views.list[0] : null;
+		const xrView = sceneCam.xrActive ? sceneCam.xrViews[0] ?? null : null;
 		const viewportWidth = Math.floor((xrView ? xrView.viewport.z : rt ? rt.width : this.device.width) * rect.z);
 		const viewportHeight = Math.floor((xrView ? xrView.viewport.w : rt ? rt.height : this.device.height) * rect.w);
-		const sortedIndices = this.sortGpuHybridForCamera(
+		const xrViewCount = sceneCam.xrActive ? sceneCam.xrViews.length : 0;
+		const isStereo = xrViewCount === 2;
+		this.setStereo(isStereo);
+		const sortedIndices = this.sortAndProjectForCamera(
+			world,
 			worldState,
-			this.cameraNode,
+			cameraNode,
 			viewportWidth,
 			viewportHeight,
-			Math.max(ALPHA_VISIBILITY_THRESHOLD, this.scene.gsplat.alphaClipForward),
-			false
+			Math.max(ALPHA_VISIBILITY_THRESHOLD, params.alphaClipForward),
+			false,
+			isStereo,
+			params
 		);
-		if (sortedIndices) {
-			this.applyGpuSortResults(sortedIndices);
-		}
+		if (!sortedIndices) return false;
+		this.setHybridSortedRendering(
+			this.indirectDrawSlot,
+			sortedIndices,
+			this.projector.projCache,
+			this.intervalCompaction.numSplatsBuffer
+		);
+		return true;
 	}
-	sortGpuHybridForCamera(worldState, cameraNode, viewportWidth, viewportHeight, alphaClip, pickMode) {
-		const gpuSorter = this.gpuSorter;
-		const projector = this.projector;
-		if (!gpuSorter || !projector) return null;
+	preparePickingView(world, worldState, pickParams) {
+		const pickMode = !!world.workBuffer.format.getStream("pcId");
+		const sortedIndices = this.sortAndProjectForCamera(
+			world,
+			worldState,
+			pickParams.cameraNode,
+			pickParams.width,
+			pickParams.height,
+			Math.max(ALPHA_VISIBILITY_THRESHOLD, pickParams.alphaClip),
+			pickMode,
+			false,
+			pickParams
+		);
+		if (!sortedIndices) return null;
+		return this.prepareForPicking(
+			this.indirectDrawSlot,
+			sortedIndices,
+			this.projector.projCache,
+			this.intervalCompaction.numSplatsBuffer,
+			pickParams.alphaClip,
+			pickParams.alphaClipForward,
+			pickParams.cameraNode
+		);
+	}
+	sortAndProjectForCamera(world, worldState, cameraNode, viewportWidth, viewportHeight, alphaClip, pickMode, isStereo, params) {
 		const elementCount = worldState.totalActiveSplats;
 		if (elementCount === 0) return null;
-		if (!this.intervalCompaction) {
-			this.intervalCompaction = new GSplatIntervalCompaction(this.device);
-		}
-		if (!worldState.sortedBefore) {
-			worldState.sortedBefore = true;
-			this.cleanupOldWorldStates(worldState.version);
-			this.sortedVersion = worldState.version;
-			this.rebuildWorkBuffer(worldState, elementCount);
-		}
+		this._ensureGpuPipeline();
+		const gpuSorter = this.gpuSorter;
+		const projector = this.projector;
 		this.intervalCompaction.uploadIntervals(worldState);
-		if (this.canCull) {
-			const state = this.worldStates.get(this.sortedVersion);
+		if (world.hasBounds) {
+			const state = world.getState(world.currentVersion);
 			if (state) {
-				this._runFrustumCulling(state, cameraNode);
+				this._runFrustumCulling(world, state, cameraNode, params);
 			}
 		}
-		const fisheyeProj = this.renderer.fisheyeProj;
+		const fisheyeProj = this.fisheyeProj;
 		const numIntervals = worldState.totalIntervals;
 		const totalActiveSplats = worldState.totalActiveSplats;
-		this.intervalCompaction.dispatchCompact(this.workBuffer.frustumCuller, numIntervals, totalActiveSplats, fisheyeProj.enabled);
+		this.intervalCompaction.dispatchCompact(world.workBuffer.frustumCuller, numIntervals, totalActiveSplats, fisheyeProj.enabled);
 		this.allocateAndWriteIntervalIndirectArgs(numIntervals);
 		const ic = this.intervalCompaction;
 		const compactedSplatIds = ic.compactedSplatIds;
-		const gsplat = this.scene.gsplat;
 		const numBits = Math.max(10, Math.min(20, Math.round(Math.log2(elementCount / 4))));
 		const radixBits = gpuSorter.radixBits;
 		const roundedNumBits = Math.ceil(numBits / radixBits) * radixBits;
-		const { minDist, maxDist } = this.computeDistanceRange(worldState, cameraNode);
+		const { minDist, maxDist } = this.computeDistanceRange(worldState, cameraNode, params.radialSorting);
 		const sortIndirectInfo = gpuSorter.prepareIndirect();
 		projector.dispatch({
-			workBuffer: this.workBuffer,
+			workBuffer: world.workBuffer,
 			cameraNode,
 			compactedSplatIds,
 			sortElementCountBuffer: ic.sortElementCountBuffer,
 			totalCapacity: elementCount,
-			radialSort: gsplat.radialSorting,
+			radialSort: params.radialSorting,
 			numBits: roundedNumBits,
 			minDist,
 			maxDist,
 			alphaClip,
-			minPixelSize: gsplat.minPixelSize * 0.5,
-			minContribution: gsplat.minContribution,
+			minPixelSize: params.minPixelSize * 0.5,
+			minContribution: params.minContribution,
+			foveationStrength: params.foveationStrength,
+			foveationCenter: params.foveationCenter,
 			viewportWidth,
 			viewportHeight,
 			flipY: !!cameraNode.camera.renderTarget?.flipY,
 			pickMode,
 			fisheyeProj,
-			antiAlias: gsplat.antiAlias
+			antiAlias: params.antiAlias,
+			isStereo,
+			material: params.material,
+			userCacheWords: params.varyings.words
 		});
 		projector.writeIndirectArgs(
 			this.indirectDrawSlot,
@@ -62946,41 +61123,9 @@ class GSplatManager {
 			// destructiveKeys: projector overwrites sortKeys each frame before the sort
 		);
 	}
-	compactGpu(worldState) {
-		if (!this.intervalCompaction) {
-			this.intervalCompaction = new GSplatIntervalCompaction(this.device);
-		}
-		const elementCount = worldState.totalActiveSplats;
-		if (elementCount === 0) return;
-		if (!worldState.sortedBefore) {
-			worldState.sortedBefore = true;
-			this.cleanupOldWorldStates(worldState.version);
-			this.sortedVersion = worldState.version;
-			this.rebuildWorkBuffer(worldState, elementCount);
-		}
-		this.intervalCompaction.uploadIntervals(worldState);
-		if (this.canCull) {
-			const state = this.worldStates.get(this.sortedVersion);
-			if (state) {
-				this._runFrustumCulling(state);
-			}
-		}
-		const numIntervals = worldState.totalIntervals;
-		const totalActiveSplats = worldState.totalActiveSplats;
-		this.intervalCompaction.dispatchCompact(this.workBuffer.frustumCuller, numIntervals, totalActiveSplats, this.renderer.fisheyeProj.enabled);
-		this.allocateAndWriteIntervalIndirectArgs(numIntervals);
-		const ic = this.intervalCompaction;
-		const localRenderer = this.renderer;
-		localRenderer.setCompactedData(
-			ic.compactedSplatIds,
-			ic.sortElementCountBuffer,
-			worldState.textureSize,
-			totalActiveSplats
-		);
-	}
 	allocateAndWriteIntervalIndirectArgs(numIntervals) {
 		const gpuSorter = this.gpuSorter;
-		const sortInfo = gpuSorter ? gpuSorter.prepareIndirect() : NO_SORT_INDIRECT_INFO;
+		const sortInfo = gpuSorter.prepareIndirect();
 		const sortSlotCount = sortInfo[0];
 		this.indirectDrawSlot = this.device.getIndirectDrawSlot(1);
 		this.indirectDispatchSlot = this.device.getIndirectDispatchSlot(1 + sortSlotCount);
@@ -62988,36 +61133,32 @@ class GSplatManager {
 		ic.writeIndirectArgs(this.indirectDrawSlot, this.indirectDispatchSlot, numIntervals, sortInfo);
 		this.lastCompactedNumIntervals = numIntervals;
 	}
-	applyGpuSortResults(sortedIndices) {
-		const proj = this.projector;
-		const ic = this.intervalCompaction;
-		this.renderer.setHybridSortedRendering(
-			this.indirectDrawSlot,
-			sortedIndices,
-			proj.projCache,
-			ic.numSplatsBuffer
-		);
-	}
-	_runFrustumCulling(worldState, cameraNode = this.cameraNode) {
-		this.workBuffer.frustumCuller.updateTransformsData(worldState.boundsGroups);
+	_runFrustumCulling(world, worldState, cameraNode, params) {
+		world.workBuffer.frustumCuller.updateTransformsData(worldState.boundsGroups);
 		const cam = cameraNode.camera;
-		this.workBuffer.frustumCuller.computeFrustumPlanes(cam.projectionMatrix, cam.viewMatrix);
-		const gsplat = this.scene.gsplat;
-		const fp = this.renderer.fisheyeProj;
-		fp.update(gsplat.fisheye, cam.fov, cam.projectionMatrix);
+		const sceneCamera = cam.camera;
+		const xrViews = sceneCamera.xrViews;
+		if (xrViews?.length) {
+			sceneCamera.updateViewTransforms();
+			sceneCamera.updateXrFrustum();
+			world.workBuffer.frustumCuller.setFrustumPlanes(sceneCamera.frustum);
+		} else {
+			world.workBuffer.frustumCuller.computeFrustumPlanes(cam.projectionMatrix, cam.viewMatrix);
+		}
+		const fp = this.fisheyeProj;
+		fp.update(this.resolveFisheye(params.fisheye), cam.fov, cam.projectionMatrix);
 		if (fp.enabled) {
-			this.workBuffer.frustumCuller.setFisheyeData(
+			world.workBuffer.frustumCuller.setFisheyeData(
 				cameraNode.getPosition(),
 				cameraNode.forward,
 				fp.maxTheta
 			);
 		}
 	}
-	computeDistanceRange(worldState, cameraNode = this.cameraNode) {
+	computeDistanceRange(worldState, cameraNode, radialSort) {
 		const cameraMat = cameraNode.getWorldTransform();
-		cameraMat.getTranslation(cameraPosition);
-		cameraMat.getZ(cameraDirection).normalize();
-		const radialSort = this.scene.gsplat.radialSorting;
+		cameraMat.getTranslation(_camPos);
+		cameraMat.getZ(_camDir).normalize();
 		let minDist = radialSort ? 0 : Infinity;
 		let maxDist = radialSort ? 0 : -Infinity;
 		for (const splat of worldState.splats) {
@@ -63025,15 +61166,15 @@ class GSplatManager {
 			const aabbMin = splat.aabb.getMin();
 			const aabbMax = splat.aabb.getMax();
 			for (let i = 0; i < 8; i++) {
-				_tempVec3.x = i & 1 ? aabbMax.x : aabbMin.x;
-				_tempVec3.y = i & 2 ? aabbMax.y : aabbMin.y;
-				_tempVec3.z = i & 4 ? aabbMax.z : aabbMin.z;
-				modelMat.transformPoint(_tempVec3, _tempVec3);
+				_tmpV.x = i & 1 ? aabbMax.x : aabbMin.x;
+				_tmpV.y = i & 2 ? aabbMax.y : aabbMin.y;
+				_tmpV.z = i & 4 ? aabbMax.z : aabbMin.z;
+				modelMat.transformPoint(_tmpV, _tmpV);
 				if (radialSort) {
-					const dist = _tempVec3.distance(cameraPosition);
+					const dist = _tmpV.distance(_camPos);
 					if (dist > maxDist) maxDist = dist;
 				} else {
-					const dist = _tempVec3.sub(cameraPosition).dot(cameraDirection);
+					const dist = _tmpV.sub(_camPos).dot(_camDir);
 					if (dist < minDist) minDist = dist;
 					if (dist > maxDist) maxDist = dist;
 				}
@@ -63043,6 +61184,1013 @@ class GSplatManager {
 			return { minDist: 0, maxDist: 1 };
 		}
 		return { minDist, maxDist };
+	}
+	setHybridSortedRendering(drawSlot, sortedIndices, projCache, numSplatsBuffer) {
+		this.meshInstance.setIndirect(null, drawSlot, 1);
+		this._material.setParameter("sortedIndices", sortedIndices);
+		this._material.setParameter("projCache", projCache);
+		this._material.setParameter("numSplatsStorage", numSplatsBuffer);
+		this._computeClipToViewZ(this.cameraNode, this._clipToViewZ);
+		this._material.setParameter("clipToViewZ", this._clipToViewZ);
+		this.meshInstance.visible = true;
+		if (this.meshInstance.instancingCount <= 0) {
+			this.meshInstance.instancingCount = 1;
+		}
+	}
+	prepareForPicking(drawSlot, sortedIndices, projCache, numSplatsBuffer, alphaClip, alphaClipForward, cameraNode) {
+		if (!this._pickMaterial) {
+			this._pickMaterial = new ShaderMaterial({
+				uniqueName: "UnifiedSplatHybridPickMaterial",
+				vertexWGSL: '#include "gsplatHybridVS"',
+				fragmentWGSL: '#include "gsplatPS"',
+				attributes: {
+					vertex_position: SEMANTIC_POSITION
+				}
+			});
+			this._pickMaterial.setDefine("{GSPLAT_INSTANCE_SIZE}", GSplatResourceBase.instanceSize);
+			this._pickMaterial.setDefine("{CACHE_STRIDE}", this._cacheStride);
+			this._pickMaterial.setDefine("SH_BANDS", "0");
+			this._pickMaterial.setDefine("GSPLAT_INDIRECT_DRAW", true);
+			this._pickMaterial.setDefine("DITHER_NONE", "");
+			this._updateIdDefines(this._pickMaterial);
+			this._pickMaterial.cull = CULLFACE_NONE;
+			this._pickMaterial.blendType = BLEND_NONE;
+			this._pickMaterial.depthWrite = false;
+			this._pickMaterial.update();
+			const mesh = GSplatResourceBase.createMesh(this.device);
+			this._pickMeshInstance = new MeshInstance(mesh, this._pickMaterial);
+			this._pickMeshInstance.node = this.node;
+			this._pickMeshInstance.setInstancing(true, true);
+			this._pickMeshInstance.instancingCount = 1;
+		} else {
+			if (this._updateIdDefines(this._pickMaterial)) {
+				this._pickMaterial.update();
+			}
+		}
+		const pickMaterial = this._pickMaterial;
+		const pickMeshInstance = this._pickMeshInstance;
+		pickMeshInstance.setIndirect(null, drawSlot, 1);
+		pickMaterial.setParameter("sortedIndices", sortedIndices);
+		pickMaterial.setParameter("projCache", projCache);
+		pickMaterial.setParameter("numSplatsStorage", numSplatsBuffer);
+		pickMaterial.setParameter("alphaClip", alphaClip);
+		pickMaterial.setParameter("alphaClipForward", alphaClipForward);
+		this._clipToViewZPick ?? (this._clipToViewZPick = new Float32Array(4));
+		this._computeClipToViewZ(cameraNode, this._clipToViewZPick);
+		pickMaterial.setParameter("clipToViewZ", this._clipToViewZPick);
+		return pickMeshInstance;
+	}
+	_computeClipToViewZ(cameraNode, dst) {
+		const camComp = cameraNode.camera;
+		const cam = camComp.camera;
+		if (this.fisheyeProj.enabled) {
+			const near = cam.nearClip;
+			const far = cam.farClip;
+			dst[0] = 0;
+			dst[1] = 0;
+			dst[2] = far - near;
+			dst[3] = near;
+			return;
+		}
+		const flipY = !!camComp.renderTarget?.flipY;
+		_invProjMat.copy(Camera$1.applyShaderProjectionTransform(cam.projectionMatrix, _shaderProjMat, flipY, this.device.isWebGPU)).invert();
+		const d = _invProjMat.data;
+		dst[0] = -d[2];
+		dst[1] = -d[6];
+		dst[2] = -d[10];
+		dst[3] = -d[14];
+	}
+	setCpuSortedRendering() {
+		this.meshInstance.setIndirect(null, -1);
+		this.meshInstance.visible = false;
+	}
+	setOrderData() {
+	}
+	frameUpdate(params) {
+		this._material.setParameter("alphaClip", params.alphaClip);
+		this._material.setParameter("alphaClipForward", params.alphaClipForward);
+		this._pickMaterial?.setParameter("alphaClip", params.alphaClip);
+		this._pickMaterial?.setParameter("alphaClipForward", params.alphaClipForward);
+		if (params.colorRamp) {
+			this._material.setParameter("colorRampIntensity", params.colorRampIntensity);
+		}
+		const noFog = !params.useFog;
+		if (noFog !== this._lastNoFog) {
+			this._lastNoFog = noFog;
+			this._material.setDefine("GSPLAT_NO_FOG", noFog);
+			this._material.update();
+		}
+		const cacheStride = CACHE_STRIDE + params.varyings.words;
+		if (cacheStride !== this._cacheStride) {
+			this._cacheStride = cacheStride;
+			this._material.setDefine("{CACHE_STRIDE}", cacheStride);
+			this._material.update();
+			if (this._pickMaterial) {
+				this._pickMaterial.setDefine("{CACHE_STRIDE}", cacheStride);
+				this._pickMaterial.update();
+			}
+		}
+		if (this.forceCopyMaterial || params.material.dirty) {
+			this.copyMaterialSettings(params.material);
+			this.forceCopyMaterial = false;
+		}
+	}
+	copyMaterialSettings(sourceMaterial) {
+		const keysToDelete = [];
+		this._material.defines.forEach((value, key) => {
+			if (!this._internalDefines.has(key) && !sourceMaterial.defines.has(key)) {
+				keysToDelete.push(key);
+			}
+		});
+		keysToDelete.forEach((key) => this._material.setDefine(key, void 0));
+		sourceMaterial.defines.forEach((value, key) => {
+			this._material.setDefine(key, value);
+		});
+		const srcParams = sourceMaterial.parameters;
+		for (const paramName in srcParams) {
+			if (srcParams.hasOwnProperty(paramName)) {
+				this._material.setParameter(paramName, srcParams[paramName].data);
+			}
+		}
+		if (sourceMaterial.hasShaderChunks) {
+			const sourceChunksKey = sourceMaterial.shaderChunks.key;
+			if (sourceChunksKey !== this._lastSourceChunksKey) {
+				this._material.shaderChunks.copy(sourceMaterial.shaderChunks);
+				this._lastSourceChunksKey = sourceChunksKey;
+			}
+		}
+		this._material.update();
+	}
+	_updateIdDefines(material) {
+		const hasPcId = !!this.workBuffer.format.getStream("pcId");
+		const changed = material.getDefine("GSPLAT_UNIFIED_ID") !== hasPcId || material.getDefine("PICK_CUSTOM_ID") !== hasPcId;
+		material.setDefine("GSPLAT_UNIFIED_ID", hasPcId);
+		material.setDefine("PICK_CUSTOM_ID", hasPcId);
+		return changed;
+	}
+	updateOverdrawMode(params) {
+		const overdrawEnabled = !!params.colorRamp;
+		const wasOverdrawEnabled = this._material.getDefine("GSPLAT_OVERDRAW");
+		if (overdrawEnabled) {
+			this._material.setParameter("colorRamp", params.colorRamp);
+			this._material.setParameter("colorRampIntensity", params.colorRampIntensity);
+		}
+		if (overdrawEnabled !== wasOverdrawEnabled) {
+			this._material.setDefine("GSPLAT_OVERDRAW", overdrawEnabled);
+			if (overdrawEnabled) {
+				this.originalBlendType = this._material.blendType;
+				this._material.blendType = BLEND_ADDITIVE;
+			} else {
+				this._material.blendType = this.originalBlendType;
+			}
+			this._material.update();
+		}
+	}
+	createMeshInstance() {
+		const mesh = GSplatResourceBase.createMesh(this.device);
+		const meshInstance = new MeshInstance(mesh, this._material);
+		meshInstance.node = this.node;
+		meshInstance.setInstancing(true, true);
+		meshInstance.instancingCount = 0;
+		meshInstance.pick = false;
+		const thisCamera = this.cameraNode.camera;
+		meshInstance.isVisibleFunc = (camera) => {
+			const renderMode = this.renderMode ?? 0;
+			if (thisCamera.camera === camera && renderMode & GSPLAT_FORWARD) {
+				return true;
+			}
+			if (camera.node?.name === SHADOWCAMERA_NAME) {
+				return false;
+			}
+			return false;
+		};
+		return meshInstance;
+	}
+}
+
+class GSplatHybridRendererScratch {
+	device;
+	compactedSplatIds = null;
+	_allocatedCompacted = 0;
+	constructor(device) {
+		this.device = device;
+	}
+	ensureCompactedSplatIds(capacity) {
+		if (capacity > this._allocatedCompacted) {
+			this.compactedSplatIds?.destroy();
+			this._allocatedCompacted = capacity;
+			this.compactedSplatIds = new StorageBuffer(this.device, capacity * 4, BUFFERUSAGE_COPY_SRC);
+		}
+		return this.compactedSplatIds;
+	}
+	destroy() {
+		this.compactedSplatIds?.destroy();
+		this.compactedSplatIds = null;
+		this._allocatedCompacted = 0;
+	}
+}
+
+const computeGsplatShadowCullSource = `
+const SPLAT_FRUSTUM_SIGMA: f32 = 3.0;
+struct CullUniforms {
+	frustumPlanes: array<vec4f, 6>,
+	numIntervals: u32,
+	splatTextureSize: u32,
+	alphaClip: f32,
+	worldSizeThreshold: f32
+};
+@group(0) @binding(0) var<uniform> uniforms: CullUniforms;
+@group(0) @binding(1) var<storage, read> compactedSplatIds: array<u32>;
+@group(0) @binding(2) var<storage, read> candidateCountBuffer: array<u32>;
+@group(0) @binding(3) var<storage, read_write> outputIndices: array<u32>;
+@group(0) @binding(4) var<storage, read_write> globalCount: array<atomic<u32>>;
+#include "gsplatComputeSplatCS"
+#include "gsplatFormatDeclCS"
+#include "gsplatFormatReadCS"
+#include "gsplatHelpersVS"
+#include "gsplatModifyVS"
+fn fineCull(splatId: u32) -> bool {
+	setSplat(splatId);
+	let originalCenter = getCenter();
+	var center = originalCenter;
+	modifySplatCenter(&center);
+	let opacity = getOpacity();
+	if (opacity <= uniforms.alphaClip) {
+		return false;
+	}
+	var rotation: vec4f = getRotation().yzwx;
+	var scale: vec3f = getScale();
+	modifySplatRotationScale(originalCenter, center, &rotation, &scale);
+	let maxScale = max(scale.x, max(scale.y, scale.z));
+	if (maxScale < uniforms.worldSizeThreshold) {
+		return false;
+	}
+	let splatRadius = maxScale * SPLAT_FRUSTUM_SIGMA;
+	for (var p = 0; p < 6; p++) {
+		let plane = uniforms.frustumPlanes[p];
+		if (dot(plane.xyz, center) + plane.w <= -splatRadius) {
+			return false;
+		}
+	}
+	return true;
+}
+var<workgroup> wgCount: atomic<u32>;
+var<workgroup> wgBase: u32;
+@compute @workgroup_size({WORKGROUP_SIZE})
+fn main(
+	@builtin(global_invocation_id) gid: vec3u,
+	@builtin(num_workgroups) numWorkgroups: vec3u,
+	@builtin(local_invocation_index) localIdx: u32
+) {
+	if (localIdx == 0u) {
+		atomicStore(&wgCount, 0u);
+	}
+	workgroupBarrier();
+	let threadIdx = gid.y * (numWorkgroups.x * {WORKGROUP_SIZE}u) + gid.x;
+	let candidateCount = candidateCountBuffer[uniforms.numIntervals];
+	var valid = false;
+	var splatId = 0u;
+	if (threadIdx < candidateCount) {
+		splatId = compactedSplatIds[threadIdx];
+		valid = fineCull(splatId);
+	}
+	var localSlot = 0u;
+	if (valid) {
+		localSlot = atomicAdd(&wgCount, 1u);
+	}
+	workgroupBarrier();
+	if (localIdx == 0u) {
+		wgBase = atomicAdd(&globalCount[0], atomicLoad(&wgCount));
+	}
+	workgroupBarrier();
+	if (valid) {
+		outputIndices[wgBase + localSlot] = splatId;
+	}
+}
+`;
+
+const computeGsplatShadowIndirectArgsSource = `
+${indirect_core_default}
+@group(0) @binding(0) var<storage, read> countBuffer: array<u32>;
+@group(0) @binding(1) var<storage, read_write> indirectDrawArgs: array<DrawIndexedIndirectArgs>;
+struct ShadowArgsUniforms {
+	drawSlot: u32,
+	indexCount: u32,
+	pad0: u32,
+	pad1: u32
+};
+@group(0) @binding(2) var<uniform> uniforms: ShadowArgsUniforms;
+@compute @workgroup_size(1)
+fn main() {
+	let count = countBuffer[0];
+	let instanceCount = (count + {INSTANCE_SIZE}u - 1u) / {INSTANCE_SIZE}u;
+	indirectDrawArgs[uniforms.drawSlot] = DrawIndexedIndirectArgs(
+		uniforms.indexCount,
+		instanceCount,
+		0u,
+		0,
+		0u
+	);
+}
+`;
+
+const WORKGROUP_SIZE = 256;
+const INDEX_COUNT = 6 * GSplatResourceBase.instanceSize;
+class GSplatShadowRenderer {
+	device;
+	node;
+	cameraNode;
+	layer;
+	world;
+	entries = /* @__PURE__ */ new Map();
+	_desiredLights = /* @__PURE__ */ new Set();
+	_compaction = null;
+	_cullDispatchSize = new Vec2(1, 1);
+	_frustumPlanes = new Float32Array(24);
+	_userChunksKey = "";
+	_userModifyWgsl = null;
+	// The cull/args shaders are shared, but each light entry gets its OWN Compute instances
+	// (created in _createEntry). A Compute owns a persistent uniform buffer, so a single shared
+	// Compute dispatched once per light per frame would have all dispatches read the last-written
+	// uniforms (frustum planes / draw slot) — making all but one light's shadow draw empty.
+	_cullShader = null;
+	_cullBindGroupFormat = null;
+	_cullFormatVersion = -1;
+	_cullBuiltChunksKey = null;
+	_cullShaderGen = 0;
+	_argsShader = null;
+	_argsBindGroupFormat = null;
+	constructor(device, node, cameraNode, layer, world, scratch = null) {
+		this.device = device;
+		this.node = node;
+		this.cameraNode = cameraNode;
+		this.layer = layer;
+		this.world = world;
+		this._compaction = new GSplatIntervalCompaction(device, scratch);
+		this._createArgsShader();
+	}
+	destroy() {
+		this.entries.forEach((entry) => this._destroyEntry(entry));
+		this.entries.clear();
+		this._compaction?.destroy();
+		this._compaction = null;
+		this._cullShader?.destroy();
+		this._cullBindGroupFormat?.destroy();
+		this._argsShader?.destroy();
+		this._argsBindGroupFormat?.destroy();
+		this._cullShader = null;
+		this._argsShader = null;
+	}
+	_ensureCullShader() {
+		const wbFormat = this.world.workBuffer.format;
+		const version = wbFormat.extraStreamsVersion;
+		if (!this._cullShader || version !== this._cullFormatVersion || this._userChunksKey !== this._cullBuiltChunksKey) {
+			this._cullFormatVersion = version;
+			this._cullBuiltChunksKey = this._userChunksKey;
+			this._buildCullShader();
+		}
+	}
+	_buildCullShader() {
+		const device = this.device;
+		const wbFormat = this.world.workBuffer.format;
+		const fixedBindings = [
+			new BindUniformBufferFormat("uniforms", SHADERSTAGE_COMPUTE),
+			// pass-1 outputs (read): the shared candidate list + its count at [numIntervals]
+			new BindStorageBufferFormat("compactedSplatIds", SHADERSTAGE_COMPUTE, true),
+			new BindStorageBufferFormat("candidateCountBuffer", SHADERSTAGE_COMPUTE, true),
+			// per-light outputs (read/write): the final visible list + atomic count
+			new BindStorageBufferFormat("outputIndices", SHADERSTAGE_COMPUTE, false),
+			new BindStorageBufferFormat("globalCount", SHADERSTAGE_COMPUTE, false)
+		];
+		this._cullBindGroupFormat?.destroy();
+		this._cullBindGroupFormat = new BindGroupFormat(device, [
+			...fixedBindings,
+			...wbFormat.getComputeBindFormats()
+		]);
+		const uniformBufferFormat = new UniformBufferFormat(device, [
+			new UniformFormat("frustumPlanes", UNIFORMTYPE_VEC4, 6),
+			new UniformFormat("numIntervals", UNIFORMTYPE_UINT),
+			new UniformFormat("splatTextureSize", UNIFORMTYPE_UINT),
+			new UniformFormat("alphaClip", UNIFORMTYPE_FLOAT),
+			new UniformFormat("worldSizeThreshold", UNIFORMTYPE_FLOAT)
+		]);
+		const cincludes = /* @__PURE__ */ new Map();
+		cincludes.set("gsplatComputeSplatCS", gsplatComputeSplat_default);
+		cincludes.set("gsplatFormatDeclCS", wbFormat.getComputeInputDeclarations(fixedBindings.length));
+		cincludes.set("gsplatFormatReadCS", wbFormat.getReadCode());
+		cincludes.set("gsplatHelpersVS", gsplatHelpers_default$1);
+		cincludes.set("gsplatModifyVS", this._userModifyWgsl ?? gsplatModify_default$3);
+		const cdefines = /* @__PURE__ */ new Map([["{WORKGROUP_SIZE}", WORKGROUP_SIZE.toString()]]);
+		const colorStream = wbFormat.getStream("dataColor");
+		if (colorStream && colorStream.format !== PIXELFORMAT_RGBA16U) {
+			cdefines.set("GSPLAT_COLOR_FLOAT", "");
+		}
+		this._cullShader?.destroy();
+		this._cullShader = new Shader(device, {
+			name: "GSplatShadowCull",
+			shaderLanguage: SHADERLANGUAGE_WGSL,
+			cshader: computeGsplatShadowCullSource,
+			cincludes,
+			cdefines,
+			computeBindGroupFormat: this._cullBindGroupFormat,
+			computeUniformBufferFormats: { uniforms: uniformBufferFormat }
+		});
+		this._cullShaderGen++;
+	}
+	_createArgsShader() {
+		const device = this.device;
+		this._argsBindGroupFormat = new BindGroupFormat(device, [
+			new BindStorageBufferFormat("countBuffer", SHADERSTAGE_COMPUTE, true),
+			new BindStorageBufferFormat("indirectDrawArgs", SHADERSTAGE_COMPUTE, false),
+			new BindUniformBufferFormat("uniforms", SHADERSTAGE_COMPUTE)
+		]);
+		const uniformBufferFormat = new UniformBufferFormat(device, [
+			new UniformFormat("drawSlot", UNIFORMTYPE_UINT),
+			new UniformFormat("indexCount", UNIFORMTYPE_UINT),
+			new UniformFormat("pad0", UNIFORMTYPE_UINT),
+			new UniformFormat("pad1", UNIFORMTYPE_UINT)
+		]);
+		this._argsShader = new Shader(device, {
+			name: "GSplatShadowIndirectArgs",
+			shaderLanguage: SHADERLANGUAGE_WGSL,
+			cshader: computeGsplatShadowIndirectArgsSource,
+			cdefines: /* @__PURE__ */ new Map([["{INSTANCE_SIZE}", GSplatResourceBase.instanceSize.toString()]]),
+			computeBindGroupFormat: this._argsBindGroupFormat,
+			computeUniformBufferFormats: { uniforms: uniformBufferFormat }
+		});
+	}
+	setDataSource(workBuffer) {
+		this._compaction?.invalidateUpload();
+		this._cullFormatVersion = -1;
+		this.entries.forEach((entry) => {
+			this._configureMaterialWorkBuffer(entry.material);
+			entry.material.update();
+		});
+	}
+	setCastersAabb(aabb) {
+		if (!aabb) return;
+		this.entries.forEach((entry) => {
+			entry.meshInstance.setCustomAabb(aabb);
+		});
+	}
+	syncLights() {
+		const lights = this.layer.splitLights[LIGHTTYPE_DIRECTIONAL];
+		const desired = this._desiredLights;
+		desired.clear();
+		for (let i = 0; i < lights.length; i++) {
+			const light = lights[i];
+			if (!light.enabled || !light.castShadows) continue;
+			if (light.numCascades !== 1) {
+				continue;
+			}
+			desired.add(light);
+		}
+		this.entries.forEach((entry, light) => {
+			if (!desired.has(light)) {
+				this._destroyEntry(entry);
+				this.entries.delete(light);
+			}
+		});
+		desired.forEach((light) => {
+			if (!this.entries.has(light)) {
+				this.entries.set(light, this._createEntry(light));
+			}
+		});
+	}
+	cull(gsplatParams) {
+		const worldState = this.world.getState(this.world.currentVersion);
+		const ready = worldState && worldState.sortedBefore && worldState.totalActiveSplats > 0;
+		if (!ready) {
+			this.entries.forEach((entry) => {
+				entry.meshInstance.visible = false;
+			});
+			return;
+		}
+		this._compaction.uploadIntervals(worldState);
+		this.world.workBuffer.frustumCuller.updateTransformsData(worldState.boundsGroups);
+		this._syncUserModify(gsplatParams);
+		this._ensureCullShader();
+		const numIntervals = worldState.totalIntervals;
+		const totalActiveSplats = worldState.totalActiveSplats;
+		const textureSize = this.world.workBuffer.textureSize;
+		this.entries.forEach((entry) => {
+			this._cullEntry(entry, numIntervals, totalActiveSplats, textureSize, gsplatParams);
+		});
+	}
+	_syncUserModify(gsplatParams) {
+		const userMat = gsplatParams.material;
+		if (!userMat) return;
+		const chunksKey = userMat.shaderChunks?.key ?? "";
+		if (chunksKey !== this._userChunksKey) {
+			this._userChunksKey = chunksKey;
+			this._userModifyWgsl = userMat.getShaderChunks?.("wgsl")?.get("gsplatModifyVS") ?? null;
+			this.entries.forEach((entry) => this._applyUserModify(entry));
+		}
+		const params = userMat.parameters;
+		this.entries.forEach((entry) => {
+			for (const name in params) {
+				if (params.hasOwnProperty(name)) {
+					entry.material.setParameter(name, params[name].data);
+				}
+			}
+		});
+	}
+	_applyUserModify(entry) {
+		const wgsl = entry.material.shaderChunks.wgsl;
+		if (this._userModifyWgsl) {
+			wgsl.set("gsplatModifyVS", this._userModifyWgsl);
+		} else {
+			wgsl.delete("gsplatModifyVS");
+		}
+		entry.material.update();
+	}
+	_cullEntry(entry, numIntervals, totalActiveSplats, textureSize, gsplatParams) {
+		const device = this.device;
+		const sceneCamera = this.cameraNode.camera?.camera;
+		const shadowCamera = sceneCamera && entry.light.getRenderData(sceneCamera, 0).shadowCamera;
+		const frustum = shadowCamera && shadowCamera.frustum;
+		const frustumCuller = this.world.workBuffer.frustumCuller;
+		if (!frustum || !frustumCuller?.boundsBuffer || !frustumCuller?.transformsBuffer) {
+			entry.meshInstance.visible = false;
+			return;
+		}
+		this._fillFrustumPlanes(frustum);
+		const orthoHeight = shadowCamera.orthoHeight;
+		const shadowRes = entry.light._shadowResolution;
+		const minPixelSize = gsplatParams.minPixelSize;
+		const focal = orthoHeight > 0 && shadowRes > 0 ? shadowRes / orthoHeight : 0;
+		const t2 = minPixelSize * minPixelSize * 0.5 - 0.3;
+		const worldSizeThreshold = focal > 0 && t2 > 0 ? Math.sqrt(t2) / focal : 0;
+		if (totalActiveSplats > entry.allocatedIndexCount) {
+			entry.indexBuffer?.destroy();
+			entry.allocatedIndexCount = totalActiveSplats;
+			entry.indexBuffer = new StorageBuffer(device, totalActiveSplats * 4);
+		}
+		const compaction = this._compaction;
+		compaction.dispatchCompact({
+			boundsBuffer: frustumCuller.boundsBuffer,
+			transformsBuffer: frustumCuller.transformsBuffer,
+			frustumPlanes: this._frustumPlanes
+		}, numIntervals, totalActiveSplats, false);
+		entry.countBuffer.clear();
+		if (!entry.cullCompute || entry.cullComputeGen !== this._cullShaderGen) {
+			entry.cullCompute?.destroy();
+			entry.cullCompute = new Compute(device, this._cullShader, "GSplatShadowCull");
+			entry.cullComputeGen = this._cullShaderGen;
+		}
+		const cull = entry.cullCompute;
+		const userMat = gsplatParams.material;
+		if (userMat) {
+			const srcParams = userMat.parameters;
+			for (const name in srcParams) {
+				if (srcParams.hasOwnProperty(name)) {
+					cull.setParameter(name, srcParams[name].data);
+				}
+			}
+		}
+		cull.setParameter("compactedSplatIds", compaction.compactedSplatIds);
+		cull.setParameter("candidateCountBuffer", compaction.countBuffer);
+		cull.setParameter("outputIndices", entry.indexBuffer);
+		cull.setParameter("globalCount", entry.countBuffer);
+		cull.setParameter("frustumPlanes[0]", this._frustumPlanes);
+		cull.setParameter("numIntervals", numIntervals);
+		cull.setParameter("splatTextureSize", textureSize);
+		cull.setParameter("alphaClip", gsplatParams.alphaClip);
+		cull.setParameter("worldSizeThreshold", worldSizeThreshold);
+		const workBuffer = this.world.workBuffer;
+		for (const stream of workBuffer.format.resourceStreams) {
+			const texture = workBuffer.getTexture(stream.name);
+			if (texture) {
+				cull.setParameter(stream.name, texture);
+			}
+		}
+		const workgroupCount = Math.ceil(totalActiveSplats / WORKGROUP_SIZE);
+		Compute.calcDispatchSize(workgroupCount, this._cullDispatchSize, device.limits.maxComputeWorkgroupsPerDimension || 65535);
+		cull.setupDispatch(this._cullDispatchSize.x, this._cullDispatchSize.y, 1);
+		device.computeDispatch([cull], "GSplatShadowCull");
+		const drawSlot = device.getIndirectDrawSlot(1);
+		const args = entry.argsCompute;
+		args.setParameter("countBuffer", entry.countBuffer);
+		args.setParameter("indirectDrawArgs", device.indirectDrawBuffer);
+		args.setParameter("drawSlot", drawSlot);
+		args.setParameter("indexCount", INDEX_COUNT);
+		args.setParameter("pad0", 0);
+		args.setParameter("pad1", 0);
+		args.setupDispatch(1);
+		device.computeDispatch([args], "GSplatShadowIndirectArgs");
+		const material = entry.material;
+		entry.meshInstance.setIndirect(null, drawSlot, 1);
+		material.setParameter("compactedSplatIds", entry.indexBuffer);
+		material.setParameter("numSplatsStorage", entry.countBuffer);
+		material.setParameter("splatTextureSize", textureSize);
+		material.setParameter("alphaClip", gsplatParams.alphaClip);
+		entry.meshInstance.visible = true;
+		if (entry.meshInstance.instancingCount <= 0) {
+			entry.meshInstance.instancingCount = 1;
+		}
+	}
+	_fillFrustumPlanes(frustum) {
+		const p = this._frustumPlanes;
+		for (let i = 0; i < 6; i++) {
+			const plane = frustum.planes[i];
+			p[i * 4 + 0] = plane.normal.x;
+			p[i * 4 + 1] = plane.normal.y;
+			p[i * 4 + 2] = plane.normal.z;
+			p[i * 4 + 3] = plane.distance;
+		}
+	}
+	_createEntry(light) {
+		const device = this.device;
+		const material = this._createMaterial();
+		const meshInstance = this._createMeshInstance(light, material);
+		meshInstance.castShadow = true;
+		this.layer.addShadowCasters([meshInstance]);
+		const countBuffer = new StorageBuffer(device, 4, BUFFERUSAGE_COPY_DST);
+		const argsCompute = new Compute(device, this._argsShader, "GSplatShadowIndirectArgs");
+		const entry = {
+			light,
+			material,
+			meshInstance,
+			indexBuffer: null,
+			allocatedIndexCount: 0,
+			countBuffer,
+			cullCompute: null,
+			cullComputeGen: -1,
+			argsCompute
+		};
+		this._applyUserModify(entry);
+		return entry;
+	}
+	_destroyEntry(entry) {
+		this.layer.removeShadowCasters([entry.meshInstance]);
+		entry.meshInstance.destroy();
+		entry.material.destroy();
+		entry.indexBuffer?.destroy();
+		entry.countBuffer.destroy();
+		entry.cullCompute?.destroy();
+		entry.argsCompute.destroy();
+	}
+	_createMaterial() {
+		const material = new ShaderMaterial({
+			uniqueName: "GSplatShadowMaterial",
+			vertexGLSL: '#include "gsplatVS"',
+			fragmentGLSL: '#include "gsplatPS"',
+			vertexWGSL: '#include "gsplatVS"',
+			fragmentWGSL: '#include "gsplatPS"',
+			attributes: {
+				vertex_position: SEMANTIC_POSITION
+			}
+		});
+		material.setDefine("{GSPLAT_INSTANCE_SIZE}", GSplatResourceBase.instanceSize);
+		material.setDefine("SH_BANDS", "0");
+		material.setDefine("GSPLAT_SEPARATE_OPACITY", "");
+		material.setDefine("DITHER_NONE", "");
+		material.setDefine("GSPLAT_INDIRECT_DRAW", true);
+		this._configureMaterialWorkBuffer(material);
+		material.cull = CULLFACE_NONE;
+		material.blendType = BLEND_PREMULTIPLIED;
+		material.depthWrite = false;
+		material.update();
+		return material;
+	}
+	_configureMaterialWorkBuffer(material) {
+		const workBuffer = this.world.workBuffer;
+		const wbFormat = workBuffer.format;
+		const chunks = this.device.isWebGPU ? material.shaderChunks.wgsl : material.shaderChunks.glsl;
+		chunks.set("gsplatDeclarationsVS", wbFormat.getInputDeclarations());
+		chunks.set("gsplatReadVS", wbFormat.getReadCode());
+		const colorStream = wbFormat.getStream("dataColor");
+		if (colorStream && colorStream.format !== PIXELFORMAT_RGBA16U) {
+			material.setDefine("GSPLAT_COLOR_FLOAT", "");
+		}
+		const hasPcId = !!wbFormat.getStream("pcId");
+		material.setDefine("GSPLAT_UNIFIED_ID", hasPcId);
+		material.setDefine("PICK_CUSTOM_ID", hasPcId);
+		for (const stream of wbFormat.resourceStreams) {
+			const texture = workBuffer.getTexture(stream.name);
+			if (texture) {
+				material.setParameter(stream.name, texture);
+			}
+		}
+	}
+	_createMeshInstance(light, material) {
+		const mesh = GSplatResourceBase.createMesh(this.device);
+		const meshInstance = new MeshInstance(mesh, material);
+		meshInstance.node = this.node;
+		meshInstance.setInstancing(true, true);
+		meshInstance.instancingCount = 0;
+		meshInstance.pick = false;
+		const cameraNode = this.cameraNode;
+		meshInstance.isVisibleFunc = (camera) => {
+			const sceneCamera = cameraNode.camera?.camera;
+			if (!sceneCamera) return false;
+			return camera === light.getRenderData(sceneCamera, 0).shadowCamera;
+		};
+		return meshInstance;
+	}
+}
+
+const cameraPosition = new Vec3();
+const cameraDirection = new Vec3();
+const translation = new Vec3();
+const invModelMat = new Mat4();
+[
+	new Color(1, 0, 0),
+	new Color(0, 1, 0),
+	new Color(0, 0, 1),
+	new Color(1, 1, 0),
+	new Color(1, 0, 1),
+	new Color(0, 1, 1),
+	new Color(1, 0.5, 0),
+	new Color(0.5, 0, 1)
+];
+class GSplatManager {
+	device;
+	node = new GraphNode("GSplatManager");
+	world;
+	renderer;
+	shadowRenderer = null;
+	_hybridScratch = null;
+	activeRenderer;
+	cpuSorter = null;
+	_centersVersions = /* @__PURE__ */ new Map();
+	lastSortCameraPos = new Vec3(Infinity, Infinity, Infinity);
+	lastSortCameraFwd = new Vec3(Infinity, Infinity, Infinity);
+	sortNeeded = true;
+	_deviceRestoredEvent = null;
+	cameraNode;
+	scene;
+	renderMode;
+	_updateResult = { newVersion: false, overdrawDirty: false, sortNeeded: false };
+	_bakeResult = { rebuilt: false, count: 0, textureSize: 0, sortNeeded: false };
+	_markResult = { rebuilt: false, count: 0, textureSize: 0 };
+	_formatResult = { bufferRecreated: false, sortNeeded: false };
+	_lastStreamToken = -1;
+	_streamAdvanced = false;
+	_renderViewParams = {};
+	_pickParams = {};
+	constructor(device, director, layer, cameraNode) {
+		this.device = device;
+		this.scene = director.scene;
+		this.director = director;
+		this.cameraNode = cameraNode;
+		this.world = new GSplatWorld(device, this.scene);
+		this.layer = layer;
+		this._createRenderer(this.scene.gsplat.currentRenderer);
+		this._deviceRestoredEvent = this.device.on("devicerestored", this._onDeviceRestored, this);
+	}
+	destroy() {
+		this._destroyed = true;
+		this._deviceRestoredEvent?.off();
+		this._deviceRestoredEvent = null;
+		this.destroyCpuSorting();
+		this.world.destroy();
+		this.renderer.destroy();
+		this.shadowRenderer?.destroy();
+		this.shadowRenderer = null;
+		this._hybridScratch?.destroy();
+		this._hybridScratch = null;
+	}
+	_onDeviceRestored() {
+		if (this.world.hasOctreeInstances) return;
+		this.world.invalidate({ workBuffer: true });
+		this.sortNeeded = true;
+	}
+	destroyCpuSorting() {
+		this.cpuSorter?.destroy();
+		this.cpuSorter = null;
+	}
+	initCpuSorting() {
+		if (!this.cpuSorter) {
+			this.cpuSorter = this.createSorter();
+		}
+		const splats = this.world.invalidateSortState();
+		if (splats) {
+			this.cpuSorter.updateCentersForSplats(splats);
+		}
+		this.renderer.setCpuSortedRendering();
+	}
+	get material() {
+		return this.renderer.material;
+	}
+	get bufferCopyUploaded() {
+		return this.world.bufferCopyUploaded;
+	}
+	get bufferCopyTotal() {
+		return this.world.bufferCopyTotal;
+	}
+	get hasPendingSort() {
+		return !!this.cpuSorter?.pendingSorted;
+	}
+	prepareForPicking(camera, width, height) {
+		if (!this.renderer.usesGpuSort || !camera.node) return null;
+		const sortedState = this.world.getState(this.world.currentVersion);
+		if (!sortedState?.sortedBefore) return null;
+		return this.renderer.preparePickingView(this.world, sortedState, this._fillPickParams(camera, width, height));
+	}
+	_writeGsplatParams(p) {
+		const gsplat = this.scene.gsplat;
+		p.radialSorting = gsplat.radialSorting;
+		p.alphaClip = gsplat.alphaClip;
+		p.alphaClipForward = gsplat.alphaClipForward;
+		p.minPixelSize = gsplat.minPixelSize;
+		p.minContribution = gsplat.minContribution;
+		p.foveationStrength = gsplat.foveationStrength;
+		p.foveationCenter = gsplat.foveationCenter;
+		p.antiAlias = gsplat.antiAlias;
+		p.fisheye = gsplat.fisheye;
+		p.material = gsplat.material;
+		p.varyings = gsplat.varyings;
+	}
+	_fillRenderViewParams() {
+		const p = this._renderViewParams;
+		this._writeGsplatParams(p);
+		p.cameraNode = this.cameraNode;
+		return p;
+	}
+	_fillPickParams(camera, width, height) {
+		const p = this._pickParams;
+		this._writeGsplatParams(p);
+		p.cameraNode = camera.node;
+		p.width = width;
+		p.height = height;
+		return p;
+	}
+	createSorter() {
+		const sorter = new GSplatUnifiedSorter(this.scene);
+		sorter.on("sorted", (count, version, orderData) => {
+			this.onSorted(count, version, orderData);
+		});
+		return sorter;
+	}
+	setRenderMode(renderMode) {
+		this.renderMode = renderMode;
+		this.renderer.setRenderMode(renderMode);
+		this._syncShadowRenderer();
+	}
+	_syncShadowRenderer() {
+		const wantShadow = !!(this.renderMode & GSPLAT_SHADOW) && this.renderer.usesGpuSort;
+		if (wantShadow && !this.shadowRenderer) {
+			this.shadowRenderer = new GSplatShadowRenderer(this.device, this.node, this.cameraNode, this.layer, this.world, this._hybridScratch);
+		} else if (!wantShadow && this.shadowRenderer) {
+			this.shadowRenderer.destroy();
+			this.shadowRenderer = null;
+		}
+		if (!this.renderer.usesGpuSort && this._hybridScratch) {
+			this._hybridScratch.destroy();
+			this._hybridScratch = null;
+		}
+	}
+	_createRenderer(mode) {
+		const workBuffer = this.world.workBuffer;
+		if (mode === GSPLAT_RENDERER_RASTER_GPU_SORT) {
+			this._hybridScratch ?? (this._hybridScratch = new GSplatHybridRendererScratch(this.device));
+			this.renderer = new GSplatHybridRenderer(this.device, this.node, this.cameraNode, this.layer, workBuffer, this._hybridScratch);
+		} else {
+			this.renderer = new GSplatQuadRenderer(this.device, this.node, this.cameraNode, this.layer, workBuffer);
+			this.initCpuSorting();
+		}
+		this.activeRenderer = mode;
+	}
+	prepareRendererMode() {
+		const requested = this.scene.gsplat.currentRenderer;
+		if (requested === this.activeRenderer) return;
+		this.world.invalidate({ worldState: true });
+		this.destroyCpuSorting();
+		this.renderer.destroy();
+		this._createRenderer(requested);
+		this.renderer.setRenderMode(this.renderMode);
+		this._syncShadowRenderer();
+		this.world.invalidate({ workBuffer: true });
+		this.sortNeeded = true;
+	}
+	reconcile(placements) {
+		this.world.reconcile(placements);
+	}
+	onSorted(count, version, orderData) {
+		const updateBounds = this.renderer.requiresBounds;
+		const result = this.world.onSorted(version, count, orderData, this.cameraNode, updateBounds, this._markResult);
+		if (result.rebuilt) {
+			this.renderer.update(result.count, result.textureSize);
+		}
+		this.renderer.setOrderData();
+	}
+	_markSortedIfNeeded(worldState) {
+		if (!worldState.sortedBefore) {
+			this.world.markSorted(worldState.version, worldState.totalActiveSplats, this.cameraNode, true, this._markResult);
+			if (this._markResult.rebuilt) {
+				this.renderer.update(this._markResult.count, this._markResult.textureSize);
+			}
+		}
+	}
+	testCameraMovedForSort() {
+		const epsilon = 1e-3;
+		if (this.scene.gsplat.radialSorting) {
+			const currentCameraPos = this.cameraNode.getPosition();
+			return this.lastSortCameraPos.distance(currentCameraPos) > epsilon;
+		}
+		if (Number.isFinite(this.lastSortCameraFwd.x)) {
+			const currentCameraFwd = this.cameraNode.forward;
+			const dot = Math.min(1, Math.max(-1, this.lastSortCameraFwd.dot(currentCameraFwd)));
+			return Math.acos(dot) > epsilon;
+		}
+		return true;
+	}
+	fireFrameReadyEvent() {
+		const ready = this.world.currentVersion === this.world.lastWorldStateVersion && !this.world.awaitingLodUpdate;
+		const loadingCount = this.world.pendingLoadCount;
+		this.director.eventHandler.fire("frame:ready", this.cameraNode.camera, this.renderer.layer, ready, loadingCount);
+	}
+	updateStreaming(token) {
+		if (token === this._lastStreamToken) return this._streamAdvanced;
+		this._lastStreamToken = token;
+		this.world.syncFormat(this._formatResult);
+		if (this._formatResult.bufferRecreated) {
+			this.renderer.setDataSource(this.world.workBuffer);
+			this.shadowRenderer?.setDataSource(this.world.workBuffer);
+		}
+		if (this._formatResult.sortNeeded) this.sortNeeded = true;
+		this.prepareRendererMode();
+		const allowLodUpdate = !this.renderer.requiresCpuSort || this.cpuSorter && this.cpuSorter.jobsInFlight < 3;
+		this.world.update(this.cameraNode, allowLodUpdate, !!this.cpuSorter, this._updateResult);
+		if (this._updateResult.overdrawDirty) this.renderer.updateOverdrawMode(this.scene.gsplat);
+		if (this._updateResult.sortNeeded) this.sortNeeded = true;
+		if (this._updateResult.newVersion) this._feedCpuSorterCenters();
+		this.world.tickCooldowns();
+		this._streamAdvanced = this._updateResult.newVersion || this._formatResult.bufferRecreated;
+		return this._streamAdvanced;
+	}
+	update() {
+		this.world.resetFrameStats();
+		this.updateStreaming(this.director._streamToken);
+		if (this.cpuSorter) {
+			this.cpuSorter.applyPendingSorted();
+		}
+		if (this.testCameraMovedForSort()) {
+			this.sortNeeded = true;
+		}
+		const lastState = this.world.getState(this.world.lastWorldStateVersion);
+		if (lastState) {
+			if (this.cpuSorter && !lastState.sortParametersSet) {
+				lastState.sortParametersSet = true;
+				const payload = this.world.prepareSortParameters(lastState);
+				this.cpuSorter.setSortParameters(payload);
+			}
+		}
+		const updateBounds = this.renderer.requiresBounds;
+		this.world.bake(this.world.currentVersion, this.cameraNode, updateBounds, this._bakeResult);
+		if (this._bakeResult.rebuilt) {
+			this.renderer.update(this._bakeResult.count, this._bakeResult.textureSize);
+			this.renderer.setOrderData();
+			this.renderer.invalidateCullUpload();
+		}
+		if (this._bakeResult.sortNeeded) this.sortNeeded = true;
+		if (lastState) {
+			if (this.renderer.usesGpuSort) {
+				this._markSortedIfNeeded(lastState);
+				if (this.renderMode & GSPLAT_FORWARD) {
+					this.renderer.prepareRenderView(this.world, lastState, this._fillRenderViewParams());
+				}
+			} else if (this.sortNeeded) {
+				this.sortCpu(lastState);
+			}
+			if (this.sortNeeded) {
+				this.sortNeeded = false;
+				this.lastSortCameraPos.copy(this.cameraNode.getPosition());
+				this.lastSortCameraFwd.copy(this.cameraNode.forward);
+			}
+		}
+		this.shadowRenderer?.syncLights();
+		const aggregateAabb = this.world.computeAggregateAabb();
+		this.renderer?.meshInstance?.setCustomAabb(aggregateAabb);
+		this.shadowRenderer?.setCastersAabb(aggregateAabb);
+		this.fireFrameReadyEvent();
+		if (this.scene.gsplat.dirty) {
+			this.world.markInstancesNeedLodUpdate();
+		}
+		const fogParams = this.scene.gsplat.useFog ? this.cameraNode.camera.fogParams ?? this.scene.fog : null;
+		this.renderer.frameUpdate(this.scene.gsplat, this.scene.exposure, fogParams);
+		const sortedState = this.world.getState(this.world.currentVersion);
+		return sortedState ? sortedState.totalActiveSplats : 0;
+	}
+	updateShadows() {
+		this.shadowRenderer?.cull(this.scene.gsplat);
+	}
+	_feedCpuSorterCenters() {
+		if (!this.cpuSorter) return;
+		const state = this.world.getState(this.world.lastWorldStateVersion);
+		if (!state) return;
+		const splats = state.splats;
+		for (const splat of splats) {
+			const resource = splat.resource;
+			const lastVersion = this._centersVersions.get(resource.id);
+			if (lastVersion !== resource.centersVersion) {
+				this._centersVersions.set(resource.id, resource.centersVersion);
+				this.cpuSorter.setCenters(resource.id, null);
+				this.cpuSorter.setCenters(resource.id, resource.centers);
+			}
+		}
+		this.cpuSorter.updateCentersForSplats(splats);
 	}
 	sortCpu(lastState) {
 		if (!this.cpuSorter) return;
@@ -63072,18 +62220,6 @@ class GSplatManager {
 			});
 		});
 		this.cpuSorter.setSortParams(sorterRequest, this.scene.gsplat.radialSorting);
-	}
-	prepareSortParameters(worldState) {
-		return {
-			command: "intervals",
-			textureSize: worldState.textureSize,
-			totalActiveSplats: worldState.totalActiveSplats,
-			version: worldState.version,
-			ids: worldState.splats.map((splat) => splat.resource.id),
-			pixelOffsets: worldState.splats.map((splat) => splat.intervalOffsets),
-			// TODO: consider storing this in typed array and transfer it to sorter worker
-			intervals: worldState.splats.map((splat) => splat.intervals)
-		};
 	}
 }
 
@@ -63179,6 +62315,7 @@ class GSplatDirector {
 	camerasMap = /* @__PURE__ */ new Map();
 	scene;
 	eventHandler;
+	_streamToken = 0;
 	constructor(device, renderer, scene, eventHandler) {
 		this.device = device;
 		this.renderer = renderer;
@@ -63204,8 +62341,36 @@ class GSplatDirector {
 		if (!layerData?.gsplatManager) return null;
 		return layerData.gsplatManager.prepareForPicking(camera, width, height);
 	}
-	update(comp) {
+	updateStreaming() {
+		this.scene.gsplat.frameUpdate();
 		GSplatResourceCleanup.process(this.device);
+		const token = ++this._streamToken;
+		let needRender = false;
+		let streamed = false;
+		this.camerasMap.forEach((cameraData) => {
+			cameraData.layersMap.forEach((layerData) => {
+				const manager = layerData.gsplatManager;
+				if (manager) {
+					needRender = manager.updateStreaming(token) || needRender;
+					needRender = manager.hasPendingSort || needRender;
+					streamed = true;
+				}
+				const shadowManager = layerData.gsplatManagerShadow;
+				if (shadowManager) {
+					needRender = shadowManager.updateStreaming(token) || needRender;
+					needRender = shadowManager.hasPendingSort || needRender;
+					streamed = true;
+				}
+			});
+		});
+		if (streamed) {
+			this.scene.gsplat.dirty = false;
+		}
+		if (needRender) {
+			this.eventHandler.fire("frame:request");
+		}
+	}
+	update(comp) {
 		this.camerasMap.forEach((cameraData, camera) => {
 			if (!comp.camerasSet.has(camera)) {
 				cameraData.destroy();
@@ -63281,6 +62446,14 @@ class GSplatDirector {
 			comp.layerList[i].gsplatPlacementsDirty = false;
 		}
 	}
+	updateShadows() {
+		this.camerasMap.forEach((cameraData) => {
+			cameraData.layersMap.forEach((layerData) => {
+				layerData.gsplatManager?.updateShadows();
+				layerData.gsplatManagerShadow?.updateShadows();
+			});
+		});
+	}
 }
 
 class GSplatComponent extends Component {
@@ -63290,9 +62463,10 @@ class GSplatComponent extends Component {
 	_placement = null;
 	_id = PickerId.get();
 	_materialTmp = null;
-	_highQualitySH = true;
 	_lodBaseDistance = 5;
 	_lodMultiplier = 3;
+	_lodRangeMin = 0;
+	_lodRangeMax = 99;
 	_customAabb = null;
 	_assetReference;
 	_resource = null;
@@ -63371,15 +62545,6 @@ class GSplatComponent extends Component {
 		}
 		return this._instance?.material ?? this._materialTmp ?? null;
 	}
-	set highQualitySH(value) {
-		if (value !== this._highQualitySH) {
-			this._highQualitySH = value;
-			this._instance?.setHighQualitySH(value);
-		}
-	}
-	get highQualitySH() {
-		return this._highQualitySH;
-	}
 	set castShadows(value) {
 		if (this._castShadows !== value) {
 			const layers = this.layers;
@@ -63436,6 +62601,24 @@ class GSplatComponent extends Component {
 	}
 	get lodMultiplier() {
 		return this._lodMultiplier;
+	}
+	set lodRangeMin(value) {
+		this._lodRangeMin = value;
+		if (this._placement) {
+			this._placement.lodRangeMin = value;
+		}
+	}
+	get lodRangeMin() {
+		return this._lodRangeMin;
+	}
+	set lodRangeMax(value) {
+		this._lodRangeMax = value;
+		if (this._placement) {
+			this._placement.lodRangeMax = value;
+		}
+	}
+	get lodRangeMax() {
+		return this._lodRangeMax;
 	}
 	set lodDistances(value) {
 		if (Array.isArray(value) && value.length > 0) {
@@ -63592,7 +62775,7 @@ class GSplatComponent extends Component {
 			}
 		}
 	}
-	onRemove() {
+	onBeforeRemove() {
 		this.destroyInstance();
 		this.asset = null;
 		this._assetReference.id = null;
@@ -63698,6 +62881,8 @@ class GSplatComponent extends Component {
 			this._placement = new GSplatPlacement(resource, this.entity, 0, this._parameters, null, this._id);
 			this._placement.lodBaseDistance = this._lodBaseDistance;
 			this._placement.lodMultiplier = this._lodMultiplier;
+			this._placement.lodRangeMin = this._lodRangeMin;
+			this._placement.lodRangeMax = this._lodRangeMax;
 			this._placement.workBufferUpdate = this._workBufferUpdate;
 			this._placement.workBufferModifier = this._workBufferModifier;
 			if (this.enabled && this.entity.enabled) {
@@ -63706,7 +62891,6 @@ class GSplatComponent extends Component {
 		} else {
 			this.instance = new GSplatInstance(resource, {
 				material: this._materialTmp,
-				highQualitySH: this._highQualitySH,
 				scene: this.system.app.scene
 			});
 			this._materialTmp = null;
@@ -63718,10 +62902,6 @@ class GSplatComponent extends Component {
 	_onGSplatAssetRemove() {
 		this._onGSplatAssetUnload();
 	}
-}
-
-class GSplatComponentData {
-	enabled = true;
 }
 
 var gsplatCenter_default$1 = `
@@ -63893,7 +63073,7 @@ var gsplatEvalSH_default$1 = `
 	#endif
 `;
 
-var gsplatHelpers_default$1 = `
+var gsplatHelpers_default = `
 void gsplatMakeSpherical(inout vec3 scale, float size) {
 	scale = vec3(size);
 }
@@ -63902,13 +63082,85 @@ float gsplatGetSizeFromScale(vec3 scale) {
 }
 `;
 
-var gsplatModify_default$1 = `
+var gsplatModify_default$2 = `
 void modifySplatCenter(inout vec3 center) {
 }
 void modifySplatRotationScale(vec3 originalCenter, vec3 modifiedCenter, inout vec4 rotation, inout vec3 scale) {
 }
 void modifySplatColor(vec3 center, inout vec4 color) {
 }
+`;
+
+var gsplatModify_default$1 = `
+void modifySplatColor(vec2 gaussianUV, inout vec4 color) {
+}
+`;
+
+var gsplatWorkBufferGeometry_default$1 = `
+#ifdef GSPLAT_WORKBUFFER_GEOMETRY
+	uniform highp usampler2D uWorkBufferTransformA;
+	uniform highp usampler2D uWorkBufferTransformB;
+	uniform mat4 matrix_model_inverse;
+	uniform vec3 uCameraPosition;
+	ivec2 wbCoord;
+	uvec4 wbTransformA;
+	void initWorkBufferGeometry(ivec2 coord) {
+		wbCoord = coord;
+		wbTransformA = texelFetch(uWorkBufferTransformA, coord, 0);
+	}
+	vec3 workBufferWorldCenter() {
+		return vec3(uintBitsToFloat(wbTransformA.x), uintBitsToFloat(wbTransformA.y), uintBitsToFloat(wbTransformA.z));
+	}
+	vec4 workBufferWorldRotation() {
+		#ifdef GSPLAT_WORKBUFFER_COMPACT
+			uint data = texelFetch(uWorkBufferTransformB, wbCoord, 0).x;
+			vec3 p = vec3(
+				float(data & 0x7FFu) / 2047.0 * 2.0 - 1.0,
+				float((data >> 11u) & 0x7FFu) / 2047.0 * 2.0 - 1.0,
+				float((data >> 22u) & 0x3FFu) / 1023.0 * 2.0 - 1.0
+			);
+			float d = dot(p, p);
+			return vec4(sqrt(max(0.0, 2.0 - d)) * p, 1.0 - d);
+		#else
+			vec2 rotXY = unpackHalf2x16(wbTransformA.w);
+			vec3 r = vec3(rotXY, unpackHalf2x16(texelFetch(uWorkBufferTransformB, wbCoord, 0).x).x);
+			return vec4(r, sqrt(max(0.0, 1.0 - dot(r, r))));
+		#endif
+	}
+	vec3 workBufferWorldScale() {
+		#ifdef GSPLAT_WORKBUFFER_COMPACT
+			uint data = wbTransformA.w;
+			float sx = float(data & 0xFFu);
+			float sy = float((data >> 8u) & 0xFFu);
+			float sz = float((data >> 16u) & 0xFFu);
+			const float logRange = 21.0 / 255.0;
+			const float logMin = -12.0;
+			return vec3(
+				sx == 0.0 ? 0.0 : exp(sx * logRange + logMin),
+				sy == 0.0 ? 0.0 : exp(sy * logRange + logMin),
+				sz == 0.0 ? 0.0 : exp(sz * logRange + logMin)
+			);
+		#else
+			uvec2 b = texelFetch(uWorkBufferTransformB, wbCoord, 0).xy;
+			return vec3(unpackHalf2x16(b.x).y, unpackHalf2x16(b.y));
+		#endif
+	}
+	vec3 quatRotateInv(vec4 q, vec3 v) {
+		vec3 t = -q.xyz;
+		return v + 2.0 * cross(t, cross(t, v) + q.w * v);
+	}
+	vec3 getCenter() {
+		return (matrix_model_inverse * vec4(workBufferWorldCenter(), 1.0)).xyz;
+	}
+	vec4 getRotation() {
+		vec4 worldRotation = workBufferWorldRotation();
+		vec4 localRotation = quatMul(vec4(-model_rotation.xyz, model_rotation.w), worldRotation);
+		return localRotation.wxyz;
+	}
+	vec3 getScale() {
+		return workBufferWorldScale() / model_scale;
+	}
+#endif
 `;
 
 var gsplatQuatToMat3_default$1 = `
@@ -64070,7 +63322,7 @@ bool initCorner(SplatSource source, SplatCenter center, out SplatCorner corner) 
 }
 `;
 
-var gsplatOutput_default = `
+var gsplatOutput_default$1 = `
 #include "tonemappingPS"
 #include "decodePS"
 #include "gammaPS"
@@ -64120,6 +63372,10 @@ varying mediump vec4 gaussianColor;
 #ifdef PICK_PASS
 	#include "pickPS"
 #endif
+#ifdef GSPLAT_USER_VARYINGS
+	#include "gsplatUserVaryingsPS"
+#endif
+#include "gsplatModifyPS"
 const float EXP4 = exp(-4.0);
 const float INV_EXP4 = 1.0 / (1.0 - EXP4);
 float normExp(float x) {
@@ -64146,7 +63402,7 @@ void main(void) {
 			pcFragColor1 = getPickDepth();
 		#endif
 	#elif SHADOW_PASS
-		gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+		gl_FragColor = vec4(gl_FragCoord.z, 0.0, 0.0, 1.0);
 	#elif PREPASS_PASS
 		gl_FragColor = float2vec4(vLinearDepth);
 	#else
@@ -64156,7 +63412,9 @@ void main(void) {
 		#ifndef DITHER_NONE
 			opacityDither(alpha, id * 0.013);
 		#endif
-		gl_FragColor = vec4(gaussianColor.xyz * alpha, alpha);
+		vec4 fragColor = vec4(gaussianColor.xyz, alpha);
+		modifySplatColor(gaussianUV, fragColor);
+		gl_FragColor = vec4(fragColor.xyz * fragColor.a, fragColor.a);
 	#endif
 }
 `;
@@ -64179,6 +63437,9 @@ bool initSource(out SplatSource source) {
 `;
 
 var gsplat_default$2 = `
+#ifdef GSPLAT_USER_VARYINGS
+	#include "gsplatUserVaryingsVS"
+#endif
 #include "gsplatCommonVS"
 varying mediump vec2 gaussianUV;
 varying mediump vec4 gaussianColor;
@@ -64483,6 +63744,7 @@ const float norm = sqrt(2.0);
 	float lutSh0(int b)	{ return texelFetch(sogCodebook, ivec2(b, 0), 0).g; }
 	float lutShN(int b)	{ return texelFetch(sogCodebook, ivec2(b, 0), 0).b; }
 #endif
+#ifndef GSPLAT_WORKBUFFER_GEOMETRY
 vec3 getCenter() {
 	vec3 l = texelFetch(means_l, splat.uv, 0).xyz;
 	vec3 u = texelFetch(means_u, splat.uv, 0).xyz;
@@ -64509,6 +63771,7 @@ vec3 getScale() {
 	#endif
 	return exp(logS);
 }
+#endif
 vec4 getColor() {
 	vec4 c = texelFetch(sh0, splat.uv, 0);
 	#ifdef SOG_V2
@@ -64580,11 +63843,13 @@ const gsplatChunksGLSL = {
 	gsplatCommonVS: gsplatCommon_default$1,
 	gsplatSplatVS: gsplatSplat_default$1,
 	gsplatEvalSHVS: gsplatEvalSH_default$1,
-	gsplatHelpersVS: gsplatHelpers_default$1,
-	gsplatModifyVS: gsplatModify_default$1,
+	gsplatHelpersVS: gsplatHelpers_default,
+	gsplatModifyVS: gsplatModify_default$2,
+	gsplatModifyPS: gsplatModify_default$1,
+	gsplatWorkBufferGeometryPS: gsplatWorkBufferGeometry_default$1,
 	gsplatQuatToMat3VS: gsplatQuatToMat3_default$1,
 	gsplatStructsVS: gsplatStructs_default$1,
-	gsplatOutputVS: gsplatOutput_default,
+	gsplatOutputVS: gsplatOutput_default$1,
 	gsplatPS: gsplat_default$3,
 	gsplatSourceVS: gsplatSource_default$1,
 	gsplatVS: gsplat_default$2,
@@ -64762,22 +64027,76 @@ var gsplatEvalSH_default = `
 	#endif
 `;
 
-var gsplatHelpers_default = `
-fn gsplatMakeSpherical(scale: ptr<function, vec3f>, size: f32) {
-	*scale = vec3f(size);
-}
-fn gsplatGetSizeFromScale(scale: vec3f) -> f32 {
-	return sqrt((scale.x * scale.x + scale.y * scale.y + scale.z * scale.z) / 3.0);
+var gsplatModify_default = `
+fn modifySplatColor(gaussianUV: vec2f, color: ptr<function, vec4f>) {
 }
 `;
 
-var gsplatModify_default = `
-fn modifySplatCenter(center: ptr<function, vec3f>) {
-}
-fn modifySplatRotationScale(originalCenter: vec3f, modifiedCenter: vec3f, rotation: ptr<function, vec4f>, scale: ptr<function, vec3f>) {
-}
-fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
-}
+var gsplatWorkBufferGeometry_default = `
+#ifdef GSPLAT_WORKBUFFER_GEOMETRY
+	var uWorkBufferTransformA: texture_2d<u32>;
+	var uWorkBufferTransformB: texture_2d<u32>;
+	uniform matrix_model_inverse: mat4x4f;
+	uniform uCameraPosition: vec3f;
+	var<private> wbCoord: vec2i;
+	var<private> wbTransformA: vec4u;
+	fn initWorkBufferGeometry(coord: vec2i) {
+		wbCoord = coord;
+		wbTransformA = textureLoad(uWorkBufferTransformA, coord, 0);
+	}
+	fn workBufferWorldCenter() -> vec3f {
+		return vec3f(bitcast<f32>(wbTransformA.x), bitcast<f32>(wbTransformA.y), bitcast<f32>(wbTransformA.z));
+	}
+	fn workBufferWorldRotation() -> vec4f {
+		#ifdef GSPLAT_WORKBUFFER_COMPACT
+			let data = textureLoad(uWorkBufferTransformB, wbCoord, 0).x;
+			let p = vec3f(
+				f32(data & 0x7FFu) / 2047.0 * 2.0 - 1.0,
+				f32((data >> 11u) & 0x7FFu) / 2047.0 * 2.0 - 1.0,
+				f32((data >> 22u) & 0x3FFu) / 1023.0 * 2.0 - 1.0
+			);
+			let d = dot(p, p);
+			return vec4f(sqrt(max(0.0, 2.0 - d)) * p, 1.0 - d);
+		#else
+			let rotXY = unpack2x16float(wbTransformA.w);
+			let r = vec3f(rotXY, unpack2x16float(textureLoad(uWorkBufferTransformB, wbCoord, 0).x).x);
+			return vec4f(r, sqrt(max(0.0, 1.0 - dot(r, r))));
+		#endif
+	}
+	fn workBufferWorldScale() -> vec3f {
+		#ifdef GSPLAT_WORKBUFFER_COMPACT
+			let data = wbTransformA.w;
+			let sx = f32(data & 0xFFu);
+			let sy = f32((data >> 8u) & 0xFFu);
+			let sz = f32((data >> 16u) & 0xFFu);
+			let logRange = 21.0 / 255.0;
+			let logMin = -12.0;
+			return vec3f(
+				select(exp(sx * logRange + logMin), 0.0, sx == 0.0),
+				select(exp(sy * logRange + logMin), 0.0, sy == 0.0),
+				select(exp(sz * logRange + logMin), 0.0, sz == 0.0)
+			);
+		#else
+			let b = textureLoad(uWorkBufferTransformB, wbCoord, 0).xy;
+			return vec3f(unpack2x16float(b.x).y, unpack2x16float(b.y));
+		#endif
+	}
+	fn quatRotateInv(q: vec4f, v: vec3f) -> vec3f {
+		let t = -q.xyz;
+		return v + 2.0 * cross(t, cross(t, v) + q.w * v);
+	}
+	fn getCenter() -> vec3f {
+		return (uniform.matrix_model_inverse * vec4f(workBufferWorldCenter(), 1.0)).xyz;
+	}
+	fn getRotation() -> vec4f {
+		let worldRotation = workBufferWorldRotation();
+		let localRotation = vec4f(quatMul(half4(vec4f(-uniform.model_rotation.xyz, uniform.model_rotation.w)), half4(worldRotation)));
+		return localRotation.wxyz;
+	}
+	fn getScale() -> vec3f {
+		return workBufferWorldScale() / uniform.model_scale;
+	}
+#endif
 `;
 
 var gsplatQuatToMat3_default = `
@@ -64933,37 +64252,29 @@ fn initCorner(source: ptr<function, SplatSource>, center: ptr<function, SplatCen
 }
 `;
 
-var gsplatTileComposite_default$1 = `
-varying vUv0: vec2f;
-var<storage, read> rasterizeTileList: array<u32>;
-uniform numTilesX: u32;
-uniform screenWidth: f32;
-uniform screenHeight: f32;
-@vertex
-fn vertexMain(input: VertexInput) -> VertexOutput {
-	var output: VertexOutput;
-	let quadIdx = pcVertexIndex / 6u;
-	let cornerIdx = pcVertexIndex % 6u;
-	let tileIdx = rasterizeTileList[quadIdx];
-	let tileX = tileIdx % uniform.numTilesX;
-	let tileY = tileIdx / uniform.numTilesX;
-	let corners = array<vec2f, 6>(
-		vec2f(0.0, 0.0), vec2f(1.0, 0.0), vec2f(1.0, 1.0),
-		vec2f(0.0, 0.0), vec2f(1.0, 1.0), vec2f(0.0, 1.0)
-	);
-	let corner = corners[cornerIdx];
-	let x0 = f32(tileX * 16u);
-	let y0 = f32(tileY * 16u);
-	let pixelX = x0 + corner.x * 16.0;
-	let pixelY = y0 + corner.y * 16.0;
-	output.position = vec4f(
-		pixelX / uniform.screenWidth * 2.0 - 1.0,
-		pixelY / uniform.screenHeight * 2.0 - 1.0,
-		0.5, 1.0
-	);
-	output.vUv0 = vec2f(pixelX / uniform.screenWidth,
-						pixelY / uniform.screenHeight);
-	return output;
+var gsplatOutput_default = `
+#include "tonemappingPS"
+#include "decodePS"
+#include "gammaPS"
+#include "fogPS"
+#if FOG != NONE && !defined(GSPLAT_NO_FOG)
+	#define GSPLAT_FOG
+#endif
+fn prepareOutputFromGamma(gammaColor: vec3f, depth: f32) -> vec3f {
+	var color = gammaColor;
+	#if TONEMAP != NONE || GAMMA == NONE || defined(GSPLAT_FOG)
+		color = decodeGamma3(color);
+	#endif
+	#ifdef GSPLAT_FOG
+		color = addFog(color, depth);
+	#endif
+	#if TONEMAP != NONE
+		color = toneMap(color);
+	#endif
+	#if TONEMAP != NONE || (GAMMA != NONE && defined(GSPLAT_FOG))
+		color = gammaCorrectOutput(color);
+	#endif
+	return color;
 }
 `;
 
@@ -64996,13 +64307,16 @@ varying gaussianColor: half4;
 #ifdef PICK_PASS
 	#include "pickPS"
 #endif
+#ifdef GSPLAT_USER_VARYINGS
+	#include "gsplatUserVaryingsPS"
+#endif
+#include "gsplatModifyPS"
 @fragment
 fn fragmentMain(input: FragmentInput) -> FragmentOutput {
 	var output: FragmentOutput;
 	let A: half = dot(gaussianUV, gaussianUV);
 	if (A > half(1.0)) {
 		discard;
-		return output;
 	}
 	var alpha: half = normExp(A) * gaussianColor.a;
 	#if defined(SHADOW_PASS) || defined(PICK_PASS) || defined(PREPASS_PASS)
@@ -65021,57 +64335,22 @@ fn fragmentMain(input: FragmentInput) -> FragmentOutput {
 			output.color1 = getPickDepth();
 		#endif
 	#elif SHADOW_PASS
-		output.color = vec4f(0.0, 0.0, 0.0, 1.0);
+		output.color = vec4f(input.position.z, 0.0, 0.0, 1.0);
 	#elif PREPASS_PASS
 		output.color = float2vec4(vLinearDepth);
 	#else
 		if (alpha < half(uniform.alphaClipForward)) {
 			discard;
-			return output;
 		}
 		#ifndef DITHER_NONE
 			opacityDither(f32(alpha), id * 0.013);
 		#endif
-		output.color = vec4f(vec3f(gaussianColor.xyz * alpha), f32(alpha));
+		var fragColor: vec4f = vec4f(vec3f(gaussianColor.xyz), f32(alpha));
+		modifySplatColor(vec2f(gaussianUV), &fragColor);
+		output.color = vec4f(fragColor.xyz * fragColor.a, fragColor.a);
 	#endif
 	return output;
 }`;
-
-var gsplatTileComposite_default = `
-#ifdef PICK_MODE
-	#include "pickPS"
-	#include "floatAsUintPS"
-	var pickIdTexture: texture_2d<u32>;
-	var pickDepthTexture: texture_2d<f32>;
-#else
-	#include "tonemappingPS"
-	#include "gammaPS"
-	var source: texture_2d<f32>;
-#endif
-varying vUv0: vec2f;
-@fragment fn fragmentMain(input: FragmentInput) -> FragmentOutput {
-	var output: FragmentOutput;
-	#ifdef PICK_MODE
-		let texSize = vec2f(textureDimensions(pickIdTexture));
-		let coord = vec2u(input.vUv0 * texSize);
-		let pickId = textureLoad(pickIdTexture, coord, 0).r;
-		if (pickId == 0xFFFFFFFFu) {
-			discard;
-			return output;
-		}
-		output.color = encodePickOutput(pickId);
-		let depthData = textureLoad(pickDepthTexture, coord, 0);
-		let normalizedDepth = select(depthData.r / depthData.g, 1.0, depthData.g < 1e-6);
-		output.color1 = float2uint(normalizedDepth);
-	#else
-		let texSize = vec2f(textureDimensions(source));
-		let coord = vec2u(input.vUv0 * texSize);
-		let linear = textureLoad(source, coord, 0);
-		output.color = vec4f(gammaCorrectOutput(toneMap(linear.rgb)), linear.a);
-	#endif
-	return output;
-}
-`;
 
 var gsplatSource_default = `
 attribute vertex_position: vec3f;
@@ -65105,6 +64384,9 @@ fn initSource(source: ptr<function, SplatSource>) -> bool {
 `;
 
 var gsplat_default = `
+#ifdef GSPLAT_USER_VARYINGS
+	#include "gsplatUserVaryingsVS"
+#endif
 #include "gsplatCommonVS"
 varying gaussianUV: half2;
 varying gaussianColor: half4;
@@ -65183,6 +64465,9 @@ fn vertexMain(input: VertexInput) -> VertexOutput {
 		output.position = center.proj + vec4f(corner.offset.xyz, 0.0);
 	#endif
 	output.gaussianUV = corner.uv;
+	#ifdef GSPLAT_USER_VARYINGS
+		#include "gsplatUserVaryingsFlushVS"
+	#endif
 	#ifdef GSPLAT_OVERDRAW
 		let t: f32 = clamp(center.modelCenterOriginal.y / 20.0, 0.0, 1.0);
 		let rampColor: vec3f = textureSampleLevel(colorRamp, colorRampSampler, vec2f(t, 0.5), 0.0).rgb;
@@ -65207,9 +64492,16 @@ fn vertexMain(input: VertexInput) -> VertexOutput {
 var gsplatHybrid_default = `
 #include "gsplatHelpersVS"
 #include "gsplatOutputVS"
+#ifdef GSPLAT_USER_VARYINGS
+	#include "gsplatUserVaryingsVS"
+#endif
 attribute vertex_position: vec3f;
 uniform viewport_size: vec4f;
 uniform clipToViewZ: vec4f;
+#ifdef GSPLAT_XR
+	uniform view_index: u32;
+	uniform matrix_projection: mat4x4f;
+#endif
 #if defined(SHADOW_PASS) || defined(PICK_PASS) || defined(PREPASS_PASS)
 	uniform alphaClip: f32;
 #else
@@ -65246,24 +64538,40 @@ fn vertexMain(input: VertexInput) -> VertexOutput {
 	}
 	let cacheIdx = sortedIndices[order];
 	let base = cacheIdx * {CACHE_STRIDE}u;
-	let proj = vec4f(
-		bitcast<f32>(projCache[base + 0u]),
-		bitcast<f32>(projCache[base + 1u]),
-		bitcast<f32>(projCache[base + 2u]),
-		bitcast<f32>(projCache[base + 3u])
-	);
-	let v1 = unpack2x16float(projCache[base + 4u]);
-	let v2 = unpack2x16float(projCache[base + 5u]);
-	let ba = unpack2x16float(projCache[base + 7u]);
-	let alpha = half(ba.y);
-	#if defined(GSPLAT_UNIFIED_ID) && defined(PICK_PASS)
-		let pickId = projCache[base + 6u];
-	#endif
-	#ifdef PICK_PASS
-		var clr: half4 = half4(half(0.0), half(0.0), half(0.0), alpha);
+	#ifdef GSPLAT_XR
+		let off = uniform.view_index * 2u;
+		let ndc = vec2f(
+			bitcast<f32>(projCache[base + off + 0u]),
+			bitcast<f32>(projCache[base + off + 1u])
+		);
+		let w = bitcast<f32>(projCache[base + 4u]);
+		let pz = (uniform.matrix_projection[2][2] / uniform.matrix_projection[2][3]) * w + uniform.matrix_projection[3][2];
+		let proj = vec4f(ndc * w, clamp(pz, 0.0, abs(w)), w);
+		let v1 = unpack2x16float(projCache[base + 5u]);
+		let v2 = unpack2x16float(projCache[base + 6u]);
+		let rgba = unpack4x8unorm(projCache[base + 7u]);
+		let alpha = half(rgba.a);
+		var clr: half4 = half4(half(rgba.r), half(rgba.g), half(rgba.b), alpha);
 	#else
-		let rg = unpack2x16float(projCache[base + 6u]);
-		var clr: half4 = half4(half(rg.x), half(rg.y), half(ba.x), alpha);
+		let proj = vec4f(
+			bitcast<f32>(projCache[base + 0u]),
+			bitcast<f32>(projCache[base + 1u]),
+			bitcast<f32>(projCache[base + 2u]),
+			bitcast<f32>(projCache[base + 3u])
+		);
+		let v1 = unpack2x16float(projCache[base + 4u]);
+		let v2 = unpack2x16float(projCache[base + 5u]);
+		let ba = unpack2x16float(projCache[base + 7u]);
+		let alpha = half(ba.y);
+		#if defined(GSPLAT_UNIFIED_ID) && defined(PICK_PASS)
+			let pickId = projCache[base + 6u];
+		#endif
+		#ifdef PICK_PASS
+			var clr: half4 = half4(half(0.0), half(0.0), half(0.0), alpha);
+		#else
+			let rg = unpack2x16float(projCache[base + 6u]);
+			var clr: half4 = half4(half(rg.x), half(rg.y), half(ba.x), alpha);
+		#endif
 	#endif
 	let cornerUV = vec2f(vertex_position.xy);
 	#if defined(SHADOW_PASS) || defined(PICK_PASS) || defined(PREPASS_PASS)
@@ -65278,7 +64586,14 @@ fn vertexMain(input: VertexInput) -> VertexOutput {
 	let clipOffset = pixelOffset * c;
 	output.position = proj + vec4f(clipOffset, 0.0, 0.0);
 	output.gaussianUV = half2(cornerClipped);
-	let viewDepth = dot(uniform.clipToViewZ, proj);
+	#ifdef GSPLAT_USER_VARYINGS
+		#include "gsplatUserCacheReadVS"
+	#endif
+	#ifdef GSPLAT_XR
+		let viewDepth = proj.w;
+	#else
+		let viewDepth = dot(uniform.clipToViewZ, proj);
+	#endif
 	#ifdef GSPLAT_OVERDRAW
 		let t: f32 = clamp(viewDepth / 20.0, 0.0, 1.0);
 		let rampColor: vec3f = textureSampleLevel(colorRamp, colorRampSampler, vec2f(t, 0.5), 0.0).rgb;
@@ -65547,6 +64862,7 @@ const norm: f32 = sqrt(2.0);
 	fn lutSh0(b: i32) -> f32	{ return textureLoad(sogCodebook, vec2i(b, 0), 0).g; }
 	fn lutShN(b: i32) -> f32	{ return textureLoad(sogCodebook, vec2i(b, 0), 0).b; }
 #endif
+#ifndef GSPLAT_WORKBUFFER_GEOMETRY
 fn getCenter() -> vec3f {
 	let l = textureLoad(means_l, splat.uv, 0).xyz;
 	let u = textureLoad(means_u, splat.uv, 0).xyz;
@@ -65582,6 +64898,7 @@ fn getScale() -> vec3f {
 	#endif
 	return exp(logS);
 }
+#endif
 fn getColor() -> vec4f {
 	let c = textureLoad(sh0, splat.uv, 0);
 	var rgb: vec3f;
@@ -65671,17 +64988,17 @@ fn getColor() -> vec4f {
 const gsplatChunksWGSL = {
 	gsplatCenterVS: gsplatCenter_default,
 	gsplatCornerVS: gsplatCorner_default,
-	gsplatTileCompositeVS: gsplatTileComposite_default$1,
 	gsplatCommonVS: gsplatCommon_default,
 	gsplatSplatVS: gsplatSplat_default,
 	gsplatEvalSHVS: gsplatEvalSH_default,
-	gsplatHelpersVS: gsplatHelpers_default,
-	gsplatModifyVS: gsplatModify_default,
+	gsplatHelpersVS: gsplatHelpers_default$1,
+	gsplatModifyVS: gsplatModify_default$3,
+	gsplatModifyPS: gsplatModify_default,
+	gsplatWorkBufferGeometryPS: gsplatWorkBufferGeometry_default,
 	gsplatStructsVS: gsplatStructs_default,
 	gsplatQuatToMat3VS: gsplatQuatToMat3_default,
-	gsplatOutputVS: gsplatOutput_default$1,
+	gsplatOutputVS: gsplatOutput_default,
 	gsplatPS: gsplat_default$1,
-	gsplatTileCompositePS: gsplatTileComposite_default,
 	gsplatSourceVS: gsplatSource_default,
 	gsplatVS: gsplat_default,
 	gsplatHybridVS: gsplatHybrid_default,
@@ -65698,16 +65015,14 @@ const gsplatChunksWGSL = {
 	gsplatContainerFloatReadVS: containerFloatRead_default
 };
 
-const _schema = [
-	"enabled"
-];
 const _properties = [
 	"unified",
 	"lodBaseDistance",
 	"lodMultiplier",
+	"lodRangeMin",
+	"lodRangeMax",
 	"castShadows",
 	"material",
-	"highQualitySH",
 	"asset",
 	"resource",
 	"layers"
@@ -65715,16 +65030,19 @@ const _properties = [
 class GSplatComponentSystem extends ComponentSystem {
 	static EVENT_MATERIALCREATED = "material:created";
 	static EVENT_FRAMEREADY = "frame:ready";
+	static EVENT_FRAMEREQUEST = "frame:request";
 	constructor(app) {
 		super(app);
 		this.id = "gsplat";
 		this.ComponentType = GSplatComponent;
-		this.DataType = GSplatComponentData;
-		this.schema = _schema;
 		app.renderer.gsplatDirector = new GSplatDirector(app.graphicsDevice, app.renderer, app.scene, this);
 		ShaderChunks.get(app.graphicsDevice, SHADERLANGUAGE_GLSL).add(gsplatChunksGLSL);
 		ShaderChunks.get(app.graphicsDevice, SHADERLANGUAGE_WGSL).add(gsplatChunksWGSL);
-		this.on("beforeremove", this.onRemove, this);
+		this.on("beforeremove", this.onBeforeRemove, this);
+		this.app.on("framerender", this.onFrameRender, this);
+	}
+	onFrameRender() {
+		this.app.renderer.gsplatDirector?.updateStreaming();
 	}
 	initializeComponentData(component, _data, properties) {
 		if (_data.layers && _data.layers.length) {
@@ -65738,7 +65056,7 @@ class GSplatComponentSystem extends ComponentSystem {
 		if (_data.aabbCenter && _data.aabbHalfExtents) {
 			component.customAabb = new BoundingBox(new Vec3(_data.aabbCenter), new Vec3(_data.aabbHalfExtents));
 		}
-		super.initializeComponentData(component, _data, _schema);
+		super.initializeComponentData(component, _data);
 	}
 	cloneComponent(entity, clone) {
 		const gSplatComponent = entity.gsplat;
@@ -65760,8 +65078,8 @@ class GSplatComponentSystem extends ComponentSystem {
 		component.customAabb = gSplatComponent.customAabb?.clone() ?? null;
 		return component;
 	}
-	onRemove(entity, component) {
-		component.onRemove();
+	onBeforeRemove(entity, component) {
+		component.onBeforeRemove();
 	}
 	getMaterial(camera, layer) {
 		const director = this.app.renderer.gsplatDirector;
@@ -65774,8 +65092,11 @@ class GSplatComponentSystem extends ComponentSystem {
 	getGSplatMaterial(camera, layer) {
 		return this.getMaterial(camera, layer);
 	}
+	destroy() {
+		super.destroy();
+		this.app.off("framerender", this.onFrameRender, this);
+	}
 }
-Component._buildAccessors(GSplatComponent.prototype, _schema);
 
 class Render extends EventHandler {
 	static EVENT_SETMESHES = "set:meshes";
@@ -65845,6 +65166,7 @@ class AnimData {
 }
 
 function DracoWorker(jsUrl, wasmUrl) {
+	const myself = typeof self !== "undefined" && self || require("node:worker_threads").parentPort;
 	let draco;
 	const POSITION_ATTRIBUTE = 0;
 	const NORMAL_ATTRIBUTE = 1;
@@ -66078,7 +65400,7 @@ function DracoWorker(jsUrl, wasmUrl) {
 	};
 	const decode = (data) => {
 		const result = decodeMesh(new Uint8Array(data.buffer));
-		self.postMessage({
+		myself.postMessage({
 			jobId: data.jobId,
 			error: result.error,
 			indices: result.indices,
@@ -66088,11 +65410,12 @@ function DracoWorker(jsUrl, wasmUrl) {
 		}, [result.indices, result.vertices].filter((t) => t != null));
 	};
 	const workQueue = [];
-	self.onmessage = (message) => {
+	myself.addEventListener("message", (message) => {
 		const data = message.data;
 		switch (data.type) {
-			case "init":
-				self.DracoDecoderModule({
+			case "init": {
+				const DracoDecoderModule = myself.DracoDecoderModule || typeof module !== "undefined" && module.exports;
+				DracoDecoderModule({
 					instantiateWasm: (imports, successCallback) => {
 						WebAssembly.instantiate(data.module, imports).then((result) => successCallback(result)).catch((reason) => console.error(`instantiate failed + ${reason}`));
 						return {};
@@ -66102,6 +65425,7 @@ function DracoWorker(jsUrl, wasmUrl) {
 					workQueue.forEach((data2) => decode(data2));
 				});
 				break;
+			}
 			case "decodeMesh":
 				if (draco) {
 					decode(data);
@@ -66110,7 +65434,7 @@ function DracoWorker(jsUrl, wasmUrl) {
 				}
 				break;
 		}
-	};
+	});
 }
 
 const downloadMaxRetries = 3;
@@ -66131,8 +65455,8 @@ class JobQueue {
 	// initialize the queue with worker instances
 	init(workers) {
 		workers.forEach((worker) => {
-			worker.addEventListener("message", (message) => {
-				const data = message.data;
+			const messageHandler = (message) => {
+				const data = message.data ?? message;
 				const callback = this.jobCallbacks.get(data.jobId);
 				if (callback) {
 					callback(data.error, {
@@ -66159,7 +65483,12 @@ class JobQueue {
 						}
 					}
 				}
-			});
+			};
+			if (platform.environment === "node") {
+				worker.on("message", messageHandler);
+			} else {
+				worker.addEventListener("message", messageHandler);
+			}
 		});
 		this.workers[0] = workers;
 		while (this.jobQueue.length && (this.workers[0].length || this.workers[1].length)) {
@@ -66175,7 +65504,19 @@ class JobQueue {
 			}
 		}
 	}
+	// mark the queue as failed: notify pending jobs and fail any future ones
+	fail(error) {
+		this.error = error;
+		this.jobQueue.length = 0;
+		const callbacks = this.jobCallbacks;
+		this.jobCallbacks = /* @__PURE__ */ new Map();
+		callbacks.forEach((callback) => callback(error));
+	}
 	enqueueJob(buffer, callback) {
+		if (this.error) {
+			callback(this.error);
+			return;
+		}
 		const job = {
 			jobId: this.jobId++,
 			buffer
@@ -66261,12 +65602,12 @@ ${DracoWorker.toString()}
 
 `
 		].join("\n");
-		const blob = new Blob([code], { type: "application/javascript" });
-		const workerUrl = URL.createObjectURL(blob);
 		const numWorkers = Math.max(1, Math.min(16, config.numWorkers || defaultNumWorkers$1));
+		const isNode = platform.environment === "node";
+		const workerUrl = isNode ? null : URL.createObjectURL(new Blob([code], { type: "application/javascript" }));
 		const workers = [];
 		for (let i = 0; i < numWorkers; ++i) {
-			const worker = new Worker(workerUrl);
+			const worker = isNode ? new Worker(code, { eval: true }) : new Worker(workerUrl);
 			worker.postMessage({
 				type: "init",
 				module: dracoModule
@@ -66274,6 +65615,8 @@ ${DracoWorker.toString()}
 			workers.push(worker);
 		}
 		jobQueue.init(workers);
+	}).catch((err) => {
+		jobQueue.fail(err instanceof Error ? err : new Error(err));
 	});
 	return true;
 };
@@ -66795,7 +66138,7 @@ const createDracoMesh = (device, primitive, accessors, bufferViews, meshVariants
 	result.aabb = getAccessorBoundingBox(accessors[primitive.attributes.POSITION]);
 	promises.push(new Promise((resolve, reject) => {
 		const dracoExt = primitive.extensions.KHR_draco_mesh_compression;
-		dracoDecode(bufferViews[dracoExt.bufferView].slice().buffer, (err, decompressedData) => {
+		const initialized = dracoDecode(bufferViews[dracoExt.bufferView].slice().buffer, (err, decompressedData) => {
 			if (err) {
 				console.log(err);
 				reject(err);
@@ -66848,6 +66191,10 @@ const createDracoMesh = (device, primitive, accessors, bufferViews, meshVariants
 				resolve();
 			}
 		});
+		if (!initialized) {
+			const message = "glTF file contains Draco compressed meshes, but the Draco decoder is not configured. Call dracoInitialize() or WasmModule.setConfig('DracoDecoderModule', ...) before loading the asset.";
+			reject(new Error(message));
+		}
 	}));
 	if (primitive?.extensions?.KHR_materials_variants) {
 		const variants = primitive.extensions.KHR_materials_variants;
@@ -69847,6 +69194,11 @@ class SogBundleParser {
 			}
 			Object.values(textures).forEach((t) => this.app.assets.load(t));
 			await Promise.allSettled(promises);
+			Object.values(textures).forEach((t) => {
+				if (t.file) {
+					t.file.contents = null;
+				}
+			});
 			const { assets } = this.app;
 			asset.once("unload", () => {
 				Object.values(textures).forEach((t) => {
@@ -69901,6 +69253,7 @@ class GSplatAssetLoader extends GSplatAssetLoaderBase {
 	_currentlyLoading = /* @__PURE__ */ new Set();
 	_loadQueue = [];
 	_retryCount = /* @__PURE__ */ new Map();
+	_failed = /* @__PURE__ */ new Set();
 	_destroyed = false;
 	constructor(registry) {
 		super();
@@ -69919,12 +69272,16 @@ class GSplatAssetLoader extends GSplatAssetLoaderBase {
 		this._loadQueue.length = 0;
 		this._currentlyLoading.clear();
 		this._retryCount.clear();
+		this._failed.clear();
 	}
 	_canLoad() {
 		return !!this._registry.loader?.getHandler("gsplat");
 	}
 	load(url) {
 		const asset = this._urlToAsset.get(url);
+		if (asset && asset.loaded && !asset.resource && !this._currentlyLoading.has(url) && !this._failed.has(url)) {
+			asset.loaded = false;
+		}
 		if (asset?.loaded || this._currentlyLoading.has(url)) {
 			return;
 		}
@@ -69968,10 +69325,12 @@ class GSplatAssetLoader extends GSplatAssetLoaderBase {
 			this._retryCount.set(url, retryCount + 1);
 			asset.loaded = false;
 			asset.loading = false;
+			asset.once("error", (retryErr) => this._onAssetLoadError(url, asset, retryErr));
 			this._registry.load(asset);
 		} else {
 			this._currentlyLoading.delete(url);
 			this._retryCount.delete(url);
+			this._failed.add(url);
 			this._processQueue();
 		}
 	}
@@ -69993,6 +69352,7 @@ class GSplatAssetLoader extends GSplatAssetLoaderBase {
 			this._loadQueue.splice(queueIndex, 1);
 		}
 		this._retryCount.delete(url);
+		this._failed.delete(url);
 		const asset = this._urlToAsset.get(url);
 		if (asset) {
 			asset.fire("unload", asset);
@@ -70007,6 +69367,9 @@ class GSplatAssetLoader extends GSplatAssetLoaderBase {
 	getResource(url) {
 		const asset = this._urlToAsset.get(url);
 		return asset?.resource;
+	}
+	hasFailed(url) {
+		return this._failed.has(url);
 	}
 }
 
@@ -73229,19 +72592,10 @@ class XrMeshDetection extends EventHandler {
 	}
 }
 
-class XrView extends EventHandler {
+class XrView extends RenderView {
 	static EVENT_DEPTHRESIZE = "depth:resize";
 	_manager;
 	_xrView;
-	_positionData = new Float32Array(3);
-	_viewport = new Vec4();
-	_projMat = new Mat4();
-	_projViewOffMat = new Mat4();
-	_viewMat = new Mat4();
-	_viewOffMat = new Mat4();
-	_viewMat3 = new Mat3();
-	_viewInvMat = new Mat4();
-	_viewInvOffMat = new Mat4();
 	_xrCamera = null;
 	_textureColor = null;
 	_textureDepth = null;
@@ -73307,40 +72661,18 @@ class XrView extends EventHandler {
 	get eye() {
 		return this._xrView.eye;
 	}
-	get viewport() {
-		return this._viewport;
-	}
-	get projMat() {
-		return this._projMat;
-	}
-	get projViewOffMat() {
-		return this._projViewOffMat;
-	}
-	get viewOffMat() {
-		return this._viewOffMat;
-	}
-	get viewInvOffMat() {
-		return this._viewInvOffMat;
-	}
-	get viewMat3() {
-		return this._viewMat3;
-	}
-	get positionData() {
-		return this._positionData;
-	}
 	update(frame, xrView) {
 		this._xrView = xrView;
 		if (this._manager.views.availableColor) {
 			this._xrCamera = this._xrView.camera;
 		}
 		const viewport = this._manager.xrBridge.getViewport(frame, this._xrView);
-		this._viewport.x = viewport.x;
-		this._viewport.y = viewport.y;
-		this._viewport.z = viewport.width;
-		this._viewport.w = viewport.height;
-		this._projMat.set(this._xrView.projectionMatrix);
-		this._viewMat.set(this._xrView.transform.inverse.matrix);
-		this._viewInvMat.set(this._xrView.transform.matrix);
+		this.setViewport(viewport.x, viewport.y, viewport.width, viewport.height);
+		this.setView(
+			this._xrView.projectionMatrix,
+			this._xrView.transform.matrix,
+			this._xrView.transform.inverse.matrix
+		);
 		this._updateTextureColor();
 		this._updateDepth(frame);
 	}
@@ -73399,20 +72731,6 @@ class XrView extends EventHandler {
 			this._textureDepth.upload();
 		}
 		if (resized) this.fire("depth:resize", width, height);
-	}
-	updateTransforms(transform) {
-		if (transform) {
-			this._viewInvOffMat.mul2(transform, this._viewInvMat);
-			this.viewOffMat.copy(this._viewInvOffMat).invert();
-		} else {
-			this._viewInvOffMat.copy(this._viewInvMat);
-			this.viewOffMat.copy(this._viewMat);
-		}
-		this._viewMat3.setFromMat4(this._viewOffMat);
-		this._projViewOffMat.mul2(this._projMat, this._viewOffMat);
-		this._positionData[0] = this._viewInvOffMat.data[12];
-		this._positionData[1] = this._viewInvOffMat.data[13];
-		this._positionData[2] = this._viewInvOffMat.data[14];
 	}
 	_onDeviceLost() {
 		this._depthInfo = null;
@@ -73686,6 +73004,19 @@ class XrManager extends EventHandler {
 			this._deviceAvailabilityCheck();
 		}
 	}
+	static async isDeviceSupported(deviceType, type) {
+		if (!platform.browser || !navigator.xr || !XrManager._backendSupportsXr(deviceType)) {
+			return false;
+		}
+		try {
+			return await navigator.xr.isSessionSupported(type);
+		} catch {
+			return false;
+		}
+	}
+	static _backendSupportsXr(deviceType) {
+		return deviceType !== DEVICETYPE_WEBGPU || typeof globalThis.XRGPUBinding !== "undefined";
+	}
 	destroy() {
 		if (this.xrBridge) {
 			this.xrBridge.destroy();
@@ -73706,7 +73037,6 @@ class XrManager extends EventHandler {
 			return;
 		}
 		this._camera = camera;
-		this._camera.camera.xr = this;
 		this._type = type;
 		this._spaceType = spaceType;
 		this._framebufferScaleFactor = options?.framebufferScaleFactor ?? 1;
@@ -73789,7 +73119,6 @@ class XrManager extends EventHandler {
 		navigator.xr.requestSession(type, options).then((session) => {
 			this._onSessionStart(session, spaceType, callback);
 		}).catch((ex) => {
-			this._camera.camera.xr = null;
 			this._camera = null;
 			this._type = null;
 			this._spaceType = null;
@@ -73842,6 +73171,9 @@ class XrManager extends EventHandler {
 	}
 	_sessionSupportCheck(type) {
 		navigator.xr.isSessionSupported(type).then((available) => {
+			if (available && !XrManager._backendSupportsXr(this.app?.graphicsDevice?.deviceType)) {
+				available = false;
+			}
 			if (this._available[type] === available) {
 				return;
 			}
@@ -73855,6 +73187,7 @@ class XrManager extends EventHandler {
 	_onSessionStart(session, spaceType, callback) {
 		let failed = false;
 		this._session = session;
+		this._camera.camera.xrViews = this.views.list;
 		this.xrBridge = new XrBridge(this.app.graphicsDevice, this);
 		const onVisibilityChange = () => {
 			this.fire("visibility:change", session.visibilityState);
@@ -73869,7 +73202,7 @@ class XrManager extends EventHandler {
 			if (this._camera) {
 				this._camera.off("set_nearClip", onClipPlanesChange);
 				this._camera.off("set_farClip", onClipPlanesChange);
-				this._camera.camera.xr = null;
+				this._camera.camera.xrViews = null;
 				this._camera = null;
 			}
 			session.removeEventListener("end", onEnd);
@@ -93789,7 +93122,12 @@ class XrNavigation extends Script {
 
             const handleSelectEnd = () => {
                 this.activePointers.set(inputSource, false);
-                this.tryTeleport(inputSource);
+                // Only teleport when teleportation is enabled. Otherwise a select/pinch gesture
+                // (e.g. used to click a UI element) would still snap the rig to the floor point
+                // under the ray.
+                if (this.enableTeleport) {
+                    this.tryTeleport(inputSource);
+                }
             };
 
             // Attach the handlers
