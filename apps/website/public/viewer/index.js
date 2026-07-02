@@ -92458,7 +92458,11 @@ class Viewer {
         const { background } = settings;
         // hpr override takes precedence over settings.highPrecisionRendering
         const highPrecisionRendering = config.hpr ?? settings.highPrecisionRendering;
-        const postFxRequested = !config.nofx &&
+        // Mobile skips the post-fx camera frame entirely: the extra full-screen
+        // pass costs real fill rate on phones (the primary bottleneck), and the
+        // sharpness gain is invisible at mobile pixel sizes. Verified on-device
+        // 2026-07-02: ?nofx was the smoothest variant on iPhone.
+        const postFxRequested = !config.nofx && !platform.mobile &&
             (anyPostEffectEnabled(postEffectSettings) || highPrecisionRendering);
         const enableCameraFrame = !app.xr.active && postFxRequested;
         if (enableCameraFrame) {

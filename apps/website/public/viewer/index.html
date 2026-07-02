@@ -22,15 +22,15 @@
             const skyboxUrl = url.searchParams.get('skybox');
             const collisionUrl = url.searchParams.get('collision') ?? url.searchParams.get('voxel') ?? './scene.voxel.json';
             const settingsUrl = url.searchParams.has('settings') ? url.searchParams.get('settings') : './settings.json';
-            // Renderer: WebGPU by default (fast, full quality). Safari/iOS start
-            // WebGPU but render splats black, and the engine only auto-falls-back
-            // when WebGPU is *absent* — so force WebGL on Apple WebKit. `?webgl`
-            // forces it everywhere; `?webgpu` forces WebGPU (escape hatch).
-            const ua = navigator.userAgent;
-            const isAppleWebkit = /iPad|iPhone|iPod/.test(ua) ||
-                (/Safari/.test(ua) && !/Chrome|Chromium|Android|Edg|OPR|CriOS|FxiOS/.test(ua));
+            // Renderer: WebGPU by default for EVERY device that exposes it
+            // (feature detection via navigator.gpu), WebGL otherwise. The old
+            // Safari/iOS black-splat bug that forced Apple WebKit onto WebGL
+            // was fixed with engine 2.20 (upstream supersplat-viewer ships
+            // WebGPU-default too; verified on a real iPhone 2026-07-02).
+            // `?webgl` forces WebGL everywhere; `?webgpu` forces WebGPU.
+            const hasWebGPU = !!navigator.gpu;
             const renderer = url.searchParams.has('webgpu') ? 'webgpu' :
-                (url.searchParams.has('webgl') || isAppleWebkit) ? 'webgl' : 'webgpu';
+                (url.searchParams.has('webgl') || !hasWebGPU) ? 'webgl' : 'webgpu';
 
             // Serve a lighter scan to the WebGL path (Safari) so it loads fast and
             // stays smooth. WebGPU gets the streamed multi-LOD SOG (`lod-meta.json`):
