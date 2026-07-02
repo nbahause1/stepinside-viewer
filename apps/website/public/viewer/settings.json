@@ -47,7 +47,7 @@
       "name": "Rundgang",
       "duration": 55,
       "frameRate": 1,
-      "loopMode": "repeat",
+      "loopMode": "none",
       "interpolation": "spline",
       "smoothness": 0.5,
       "keyframes": {

@@ -235,7 +235,15 @@ class CameraManager {
 
             // update animation timeline
             if (state.cameraMode === 'anim') {
-                state.animationTime = controllers.anim.animState.cursor.value;
+                const { cursor } = controllers.anim.animState;
+                state.animationTime = cursor.value;
+
+                // A non-looping track (the guided Rundgang) has reached its
+                // end: hand control back to the mode the visitor came from —
+                // the same exit path 'cancel'/'interrupt' use.
+                if (cursor.loopMode === 'none' && cursor.duration > 0 && cursor.value >= cursor.duration) {
+                    state.cameraMode = fromMode;
+                }
             }
 
             if (clearOrbitTargetOnTransitionEnd && prevTransitionTimer < 1 && transitionTimer === 1) {
@@ -318,10 +326,21 @@ class CameraManager {
                         flySource.cancel();
                         startTransition();
                         controllers.fly.resetToSpawn(target);
-                    } else {
+                    } else if (defaultMode === 'orbit') {
                         events.fire('orbitTarget:clear');
                         state.cameraMode = 'orbit';
                         controllers.orbit.goto(resetCamera);
+                        startTransition();
+                    } else {
+                        // From orbit/aerial/anim (including a running Rundgang),
+                        // home returns to the scene's default first-person mode
+                        // at the curated start pose — on touch there are no mode
+                        // buttons, so orbit must never become a trap.
+                        sourcesByMode[state.cameraMode]?.cancel();
+                        events.fire('orbitTarget:clear');
+                        events.fire('navTarget:clear');
+                        state.cameraMode = defaultMode;
+                        (controllers[defaultMode] as { goto?: (c: Camera) => void } | null)?.goto?.(homeCamera);
                         startTransition();
                     }
                     break;
@@ -329,6 +348,7 @@ class CameraManager {
                     // guided-tour toggle ("Rundgang"): start track 0 from the
                     // top, or stop and hand back to the mode the visitor came
                     // from — the same exit path 'cancel'/'interrupt' use.
+                    if (state.moveLocked) break;    // don't hijack while the tutorial gate is up
                     if (state.hasAnimation) {
                         if (state.cameraMode === 'anim') {
                             state.cameraMode = fromMode;
@@ -428,6 +448,11 @@ class CameraManager {
             events.fire('orbitTarget:clear');
             events.fire('navTarget:clear');
             this.camera.copy(createCamera(new Vec3(view.position), new Vec3(view.target), view.fov));
+            if (mode === 'orbit') {
+                // snap() re-enters via onEnter, which (unlike goto) keeps the
+                // controller's stored fov — adopt the shared one explicitly
+                controllers.orbit.fov = view.fov;
+            }
             if (state.cameraMode !== mode) {
                 state.cameraMode = mode;
             }
@@ -496,8 +521,22 @@ class CameraManager {
             clearOrbitTargetOnTransitionEnd = true;
         });
 
+        // Annotation taps frame the hotspot in orbit mode. Remember where the
+        // visitor came from and glide back when the tooltip closes — on touch
+        // there are no mode buttons, so orbit must never become a trap
+        // (mirrors the aerial enter/exit pattern).
+        let preAnnotationMode: CameraMode | null = null;
+        const preAnnotationCamera = new Camera();
+
         events.on('annotation.activate', (annotation: Annotation) => {
             events.fire('orbitTarget:clear');
+
+            if (state.cameraMode !== 'orbit') {
+                preAnnotationMode = state.cameraMode;
+                preAnnotationCamera.copy(this.camera);
+                sourcesByMode[state.cameraMode]?.cancel();
+                events.fire('navTarget:clear');
+            }
 
             // switch to orbit camera on pick
             state.cameraMode = 'orbit';
@@ -513,6 +552,17 @@ class CameraManager {
 
             controllers.orbit.goto(tmpCamera);
             startTransition();
+        });
+
+        // tooltip closed: return to the mode (and pose) the visitor came from,
+        // unless they already moved on to another mode themselves
+        events.on('annotation.deactivate', () => {
+            if (preAnnotationMode !== null && state.cameraMode === 'orbit') {
+                state.cameraMode = preAnnotationMode;
+                (controllers[preAnnotationMode] as { goto?: (c: Camera) => void } | null)?.goto?.(preAnnotationCamera);
+                startTransition();
+            }
+            preAnnotationMode = null;
         });
 
         // tap-to-navigate: start auto-driving the active mode toward a picked position
