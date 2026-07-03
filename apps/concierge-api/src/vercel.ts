@@ -17,6 +17,7 @@ import type { KnowledgeBase } from './knowledge.js';
 import { MemoryRateLimiter } from './ratelimit.js';
 import { handleConcierge } from './core.js';
 import { handleStaging } from './staging.js';
+import { handleEvents, handleLead } from './analytics.js';
 import { parseAllowedOrigins, resolveAllowOrigin, corsHeaders } from './cors.js';
 
 interface VercelRequestLike {
@@ -114,6 +115,12 @@ export default async function handler(
     return;
   }
 
+  // Analytics reports need the Cloudflare Worker (D1 binding) — uniform 404 here.
+  if (req.method === 'GET' && (req.url ?? '').split('?')[0].includes('/report/')) {
+    res.status(404).json({ error: 'Not found.' });
+    return;
+  }
+
   if (req.method !== 'POST') {
     res.status(405).json({ error: 'Method not allowed.' });
     return;
@@ -128,6 +135,20 @@ export default async function handler(
   }
 
   const path = (req.url ?? '/').split('?')[0];
+
+  // Analytics endpoints: this adapter has no D1 binding, so valid payloads are
+  // validated, answered 202 and dropped (same fail-soft contract as the Worker
+  // without ANALYTICS_DB — the viewer never breaks).
+  if (path === '/events' || path.endsWith('/events')) {
+    const result = await handleEvents(rawBody, undefined);
+    res.status(result.status).json(result.body);
+    return;
+  }
+  if (path === '/lead' || path.endsWith('/lead')) {
+    const result = await handleLead(rawBody, undefined);
+    res.status(result.status).json(result.body);
+    return;
+  }
 
   // Route by path. /stage = virtual staging (Gemini); everything else falls
   // through to the concierge for backward compatibility.

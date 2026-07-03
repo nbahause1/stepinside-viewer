@@ -18,6 +18,7 @@ import type { KnowledgeBase } from './knowledge.js';
 import { MemoryRateLimiter } from './ratelimit.js';
 import { handleConcierge } from './core.js';
 import { handleStaging } from './staging.js';
+import { handleEvents, handleLead } from './analytics.js';
 import type { StagingStyle } from './staging-prompt.js';
 import { parseAllowedOrigins, resolveAllowOrigin, corsHeaders } from './cors.js';
 
@@ -118,6 +119,12 @@ const server = createServer((req: IncomingMessage, res: ServerResponse) => {
       return;
     }
 
+    // Analytics reports need the deployed Worker (D1 binding) — uniform 404 here.
+    if (req.method === 'GET' && (req.url ?? '').startsWith('/report/')) {
+      send(res, 404, { error: 'Not found.' }, cors);
+      return;
+    }
+
     if (req.method !== 'POST') {
       send(res, 405, { error: 'Method not allowed.' }, cors);
       return;
@@ -133,6 +140,18 @@ const server = createServer((req: IncomingMessage, res: ServerResponse) => {
     }
 
     const path = (req.url ?? '/').split('?')[0];
+
+    // Analytics endpoints: the dev server has no D1 binding, so valid payloads
+    // are validated, answered 202 and dropped (same fail-soft contract as the
+    // Worker without ANALYTICS_DB — the viewer never breaks).
+    if (path === '/events' || path === '/lead') {
+      const result =
+        path === '/events'
+          ? await handleEvents(rawBody, undefined)
+          : await handleLead(rawBody, undefined);
+      send(res, result.status, result.body, cors);
+      return;
+    }
 
     // Route by path. /stage = virtual staging (Gemini); everything else falls
     // through to the concierge for backward compatibility.

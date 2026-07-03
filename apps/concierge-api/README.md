@@ -3,12 +3,15 @@
 Server-side AI endpoints for the StepInside viewer. All API keys stay
 server-side — the browser only ever talks to this service.
 
-Two endpoints, one worker:
+One worker, several endpoints:
 
-| Path         | Feature                                    | Upstream                                        |
-| ------------ | ------------------------------------------ | ----------------------------------------------- |
-| `/stage`     | Virtual staging ("Möbliert sehen")         | Google Gemini (`gemini-3-pro-image`, paid)      |
-| anything else | AI concierge chat (`/concierge` by convention) | Anthropic Claude                            |
+| Path         | Method | Feature                                    | Upstream                                        |
+| ------------ | ------ | ------------------------------------------ | ----------------------------------------------- |
+| `/stage`     | POST   | Virtual staging ("Möbliert sehen")         | Google Gemini (`gemini-3-pro-image`, paid)      |
+| `/events`    | POST   | Anonymous analytics beacons                | D1 (`ANALYTICS_DB`, optional)                   |
+| `/lead`      | POST   | Lead / inquiry form                        | D1 (`ANALYTICS_DB`, optional)                   |
+| `/report/{propertyId}` | GET | Owner report (token-gated, self-contained HTML) | D1 (`ANALYTICS_DB`)              |
+| anything else | POST  | AI concierge chat (`/concierge` by convention) | Anthropic Claude                            |
 
 The core logic (`core.ts`, `staging.ts`) is framework-agnostic and dependency-
 injected; three thin entry points wrap it:
@@ -63,6 +66,126 @@ at all:
   no server needed). This is what ships today.
 - `"mode": "live"` — captures the current frame and POSTs it to
   `staging.endpoint`. Requires `endpoint` **and** `propertyId` to be set.
+
+---
+
+## Analytics & Leads (`/events`, `/lead`, `/report/{propertyId}`)
+
+Anonymous, privacy-first usage analytics + lead capture, backed by a D1
+database bound as `ANALYTICS_DB`. **Everything is optional:** without the
+binding, `/events` and `/lead` answer `202` and drop silently and `/report/*`
+is a uniform 404 — the viewer never breaks because analytics is not
+provisioned.
+
+### Privacy model (this is a feature, not a footnote)
+
+- **No cookies, no localStorage, no fingerprinting.** The viewer generates a
+  `sessionId` with `crypto.randomUUID()` and keeps it **in memory only** — it
+  dies with the tab. Two visits by the same person are two unrelated sessions.
+- **No IP addresses, no user agents.** The client IP is used for rate limiting
+  only and never reaches the analytics module or the database. There is no
+  column it could even go into.
+- **Server-side timestamps.** Clients cannot send timestamps; the worker
+  stamps events on arrival, so no client clock/timezone data is retained.
+- **Tiny, allowlisted events.** Only 12 fixed event types are accepted; the
+  optional `data` payload is capped at 500 JSON characters.
+- Free text exists only where the visitor typed it deliberately: concierge
+  questions (shown anonymously in the report) and the lead form (explicit
+  consent required).
+
+### `POST /events` — beacon batch
+
+```jsonc
+{
+  "propertyId": "example-fewo",                      // ^[a-z0-9-]{1,64}$
+  "sessionId": "9b2f3c4d-…",                         // ^[a-f0-9-]{8,64}$, in-memory only
+  "events": [                                        // 1–20 events per request
+    { "type": "open" },
+    { "type": "annotation", "data": { "id": "kitchen" } }  // data ≤ 500 chars JSON
+  ]
+}
+```
+
+Allowed types: `open`, `heartbeat`, `tour_start`, `tour_complete`, `aerial`,
+`annotation`, `staging`, `share`, `inquiry_click`, `concierge_question`,
+`survey`, `cta_click`. Body ≤ 32 KB, rate limit 60 requests / 5 min per IP
+(layered in-memory + KV, same machinery as the other endpoints). Responses:
+`202` stored (or dropped without DB — also `202` on a D1 error: losing a
+beacon must never surface in the tour), `400` invalid, `413` too large,
+`429` rate-limited.
+
+Payload conventions the report understands:
+`survey` → `{ "rating": 1..4 }` (1 = 👎, 2 = 🤔, 3 = 👍, 4 = 😍);
+`annotation` → `{ "id": "...", "label": "..." }`;
+`concierge_question` → `{ "q": "..." }`.
+
+### `POST /lead` — inquiry form
+
+```jsonc
+{
+  "propertyId": "example-fewo",
+  "name": "Max Mustermann",        // 1–120 chars
+  "contact": "max@example.com",    // 1–200 chars (email or phone)
+  "message": "…",                  // optional, ≤ 2000 chars
+  "interest": "viewing",           // optional, ≤ 100 chars
+  "consent": true                  // MUST be the literal boolean true, else 400
+}
+```
+
+Rate limit 5 requests / 5 min per IP, body ≤ 16 KB. `202` stored, `400`
+invalid/missing consent, `500` if the D1 insert fails (a lead is a customer
+inquiry — unlike beacons it is NOT dropped silently).
+
+### `GET /report/{propertyId}?token=…` — owner report
+
+Self-contained German HTML (inline CSS, no JS, mobile-friendly): KPI row
+(Aufrufe, Ø Verweildauer, Tour-Starts/-Abschlüsse, Staging-Nutzungen,
+Share-Klicks), top annotations, survey distribution, CTA-Klicks vs. Leads,
+anonymous concierge questions, and the leads table. All aggregation happens
+in SQL.
+
+The token is compared **constant-time** against `properties.report_token`;
+any mismatch — wrong token, unknown property, no DB — returns the **same 404
+page**, so the endpoint never reveals whether a property exists. The response
+carries `Referrer-Policy: no-referrer` (the token travels in the URL),
+`Cache-Control: no-store` and `X-Robots-Tag: noindex`.
+
+### Setup
+
+```sh
+cd apps/concierge-api
+
+# 1. Create the database and apply the migration
+npx wrangler d1 create stepinside-analytics
+#    -> paste the printed database_id into the [[d1_databases]] block in wrangler.toml
+npx wrangler d1 migrations apply stepinside-analytics --remote
+
+# 2. Register a property + generate its report token (any long random secret)
+#    (openssl on Windows: use Git Bash, or any other 32+ byte random source)
+TOKEN=$(openssl rand -hex 32)
+npx wrangler d1 execute stepinside-analytics --remote --command \
+  "INSERT INTO properties (property_id, report_token, label) VALUES ('example-fewo', '$TOKEN', 'Ferienwohnung Beispiel');"
+echo "Report: https://<worker-url>/report/example-fewo?token=$TOKEN"
+
+npm run deploy
+```
+
+Rotate a token with an `UPDATE properties SET report_token = '<new>' WHERE
+property_id = '...'` via the same `d1 execute` command.
+
+### GDPR / DSGVO notes
+
+- Events are **anonymous by design** (no cookies, no IPs, no cross-visit
+  identifiers), so they do not constitute personal data processing that
+  requires consent banners — there is nothing to link to a person.
+- Leads DO contain personal data, which is why `/lead` refuses anything
+  without `consent: true` (the viewer's form has an explicit checkbox). Legal
+  basis: consent / pre-contractual steps (Art. 6 (1) a/b GDPR).
+- Data minimization: name + contact + optional message/interest, nothing else.
+- Deletion requests: `npx wrangler d1 execute stepinside-analytics --remote
+  --command "DELETE FROM leads WHERE contact = '...';"`.
+- Concierge questions are stored without any person/session linkage and are
+  labeled as anonymous in the report.
 
 ---
 

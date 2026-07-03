@@ -29,6 +29,25 @@ compatibility_flags = ["nodejs_compat"]
 # binding = "RATE_LIMIT_KV"
 # id = "<id printed by the create command>"
 
+# --- Anonymous analytics + leads (D1) ----------------------------------------
+# /events, /lead and /report/{propertyId} require a D1 database bound as
+# ANALYTICS_DB. Without it the worker still works: /events and /lead answer
+# 202 and drop silently, /report/* is a uniform 404 — the viewer never breaks.
+#
+# Privacy model (see README.md): no cookies, no IP addresses, no user agents;
+# the session id is crypto-random and in-memory only.
+#
+# Provision once, then uncomment with the printed database_id:
+#   npx wrangler d1 create stepinside-analytics
+#   npx wrangler d1 migrations apply stepinside-analytics --remote
+# (local dev against `wrangler dev`: npx wrangler d1 migrations apply stepinside-analytics --local)
+#
+# [[d1_databases]]
+# binding = "ANALYTICS_DB"
+# database_name = "stepinside-analytics"
+# database_id = "<id printed by the create command>"
+# migrations_dir = "migrations"
+
 # Optional hardening (details in README.md):
 #
 #   STAGE_DAILY_LIMIT — max staged images per UTC day across ALL visitors
