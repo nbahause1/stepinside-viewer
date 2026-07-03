@@ -5,6 +5,7 @@ import type { CameraFrame, Camera, CameraController } from './camera';
 import { DEFAULT_CONTROLLER_DAMPING, applyFrameRotation, dampAngles, setBasisOffset, setYawBasis } from './camera-utils';
 import { IdleLook } from './idle-look';
 import { SpawnState } from './spawn-state';
+import { applySmoothedZoom } from './zoom';
 import { findCylinderSpawn } from '../collision/find-spawn';
 import { damp } from '../core/math';
 
@@ -263,7 +264,7 @@ class WalkController implements CameraController {
 
         camera.position.copy(this._position);
         camera.distance = this._distance;
-        camera.fov = this.fov;
+        camera.fov = applySmoothedZoom(this.fov, deltaTime);
 
         // Walking gaze-scan: while moving (and not actively aiming), sweep the
         // view around the travel heading so the gaze isn't a dead locked-forward

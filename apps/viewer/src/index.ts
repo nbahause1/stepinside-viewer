@@ -27,6 +27,8 @@ import type { Config, Global } from './types';
 import { initControls } from './controls';
 import { initConcierge } from './concierge';
 import { initInquiry } from './inquiry';
+import { getZoom, registerZoomNotifier, resetZoom } from './cameras/zoom';
+import { initZoomIndicator } from './zoom-indicator';
 import { initShare } from './share';
 import { initStaging } from './staging';
 import { initSurvey } from './survey';
@@ -184,13 +186,24 @@ const initCanvas = (global: Global) => {
     const webgl = global.renderer === 'webgl';
     const maxPixelDim = platform.mobile ? (webgl ? 768 : 1080) : (webgl ? 1080 : 1536);
 
-    // cap pixel ratio to limit resolution on high-DPI devices
-    const calcPixelRatio = () => Math.min(maxPixelDim / Math.min(screen.width, screen.height), window.devicePixelRatio);
+    // Optical-zoom sharpness: while zoomed in, raise the cap in step with the
+    // zoom factor (quantized to half steps so the swap chain doesn't
+    // reallocate on every pinch frame). devicePixelRatio stays the hard
+    // ceiling, so this converges on the display's NATIVE resolution — the
+    // zoomed-in view is exactly where the capped soft splat rendering would
+    // otherwise read as blur.
+    const zoomBoost = () => 1 + Math.min(1.5, Math.round((getZoom() - 1) * 2) / 2);
 
-    // last known device pixel size (full resolution, before any quality scaling)
+    // cap pixel ratio to limit resolution on high-DPI devices
+    const calcPixelRatio = () => Math.min((maxPixelDim * zoomBoost()) / Math.min(screen.width, screen.height), window.devicePixelRatio);
+
+    // last known client size + device pixel size (before any quality scaling)
+    const clientSize = { width: 0, height: 0 };
     const deviceSize = { width: 0, height: 0 };
 
     const set = (width: number, height: number) => {
+        clientSize.width = width;
+        clientSize.height = height;
         const ratio = calcPixelRatio();
         deviceSize.width = width * ratio;
         deviceSize.height = height * ratio;
@@ -228,6 +241,12 @@ const initCanvas = (global: Global) => {
     resizeObserver.observe(canvas);
 
     events.on('performanceMode:changed', () => {
+        app.renderNextFrame = true;
+    });
+
+    // re-derive the resolution cap when the optical zoom changes
+    events.on('zoom:changed', () => {
+        set(clientSize.width, clientSize.height);
         app.renderNextFrame = true;
     });
 
@@ -291,6 +310,14 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
         cameraMoving: false
     };
 
+    // optical zoom (walk/fly): forward target changes onto the event bus for
+    // the resolution cap + badge, and ease back to 1× on every mode switch
+    registerZoomNotifier((zoom: number) => {
+        events.fire('zoom:changed', zoom);
+        app.renderNextFrame = true;
+    });
+    events.on('cameraMode:changed', () => resetZoom());
+
     initCanvas(global);
 
     // DEV: expose globals for camera tuning — only for the authoring/tooling
@@ -325,6 +352,7 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
     initConcierge(global);
     initStaging(global);
     initInquiry(global);
+    initZoomIndicator(global);
     // anonymous usage analytics (inert no-op without settings.analytics); must
     // init before the Viewer so its 'inputEvent' listener registers ahead of
     // the camera manager's (it reads the pre-transition camera mode)

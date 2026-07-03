@@ -81793,6 +81793,96 @@ const initInquiry = (global) => {
     pill.classList.remove('hidden');
 };
 
+// Optical zoom for the first-person modes (walk/fly): a shared zoom factor
+// that narrows the camera FOV like a lens, NOT a dolly. Input devices set the
+// target (pinch on touch, wheel on desktop); the controllers apply it with
+// exponential smoothing every frame, so zooming always eases like the rest of
+// the camera motion.
+//
+// The FOV transform is tan-true (fov' = 2·atan(tan(fov/2)/zoom)) so 2× zoom
+// really doubles the apparent size of what's in the centre of the view.
+//
+// Module-level singleton on purpose: the camera controllers are constructed
+// without access to Global (see camera-manager.ts), and there is exactly one
+// camera. Interested parties (resolution scaling, the zoom badge) register a
+// notifier that forwards changes onto the global event bus.
+const ZOOM_MIN = 1;
+const ZOOM_MAX = 2.5;
+/** How fast the smoothed zoom eases toward the target (higher = snappier). */
+const SMOOTHING_RATE = 12;
+const zoomState = {
+    target: 1,
+    smoothed: 1
+};
+let notify = null;
+/** Forward zoom-target changes (e.g. onto the global event bus as 'zoom:changed'). */
+const registerZoomNotifier = (fn) => {
+    notify = fn;
+};
+const getZoom = () => zoomState.target;
+const setZoom = (value) => {
+    const clamped = math.clamp(value, ZOOM_MIN, ZOOM_MAX);
+    if (clamped === zoomState.target)
+        return;
+    zoomState.target = clamped;
+    notify?.(clamped);
+};
+/** Multiplicative step — the natural unit for pinch/wheel gestures. */
+const multiplyZoom = (factor) => setZoom(zoomState.target * factor);
+/** Ease back to 1× (used when the camera mode changes). */
+const resetZoom = (immediate = false) => {
+    setZoom(1);
+    if (immediate)
+        zoomState.smoothed = 1;
+};
+/**
+ * Advance the smoothed zoom by dt and return the zoomed FOV for this frame.
+ * Called by the walk/fly controllers exactly where they write camera.fov.
+ */
+const applySmoothedZoom = (baseFovDeg, dt) => {
+    const t = 1 - Math.exp(-dt * SMOOTHING_RATE);
+    zoomState.smoothed += (zoomState.target - zoomState.smoothed) * t;
+    if (Math.abs(zoomState.smoothed - zoomState.target) < 1e-3) {
+        zoomState.smoothed = zoomState.target;
+    }
+    if (zoomState.smoothed === 1)
+        return baseFovDeg;
+    const halfTan = Math.tan(baseFovDeg * 0.5 * math.DEG_TO_RAD) / zoomState.smoothed;
+    return 2 * Math.atan(halfTan) * math.RAD_TO_DEG;
+};
+
+// Subtle zoom badge ("1,6×"): appears bottom-centre while the optical zoom is
+// active, fades away when the view returns to 1×. Display-only — it never
+// takes pointer events, so it can't interfere with the camera or the cards.
+const initZoomIndicator = (global) => {
+    const { events } = global;
+    let badge = null;
+    let hideTimer = 0;
+    const ensure = () => {
+        if (badge)
+            return badge;
+        badge = document.createElement('div');
+        badge.id = 'zoomBadge';
+        badge.setAttribute('aria-hidden', 'true');
+        (document.getElementById('ui') ?? document.body).appendChild(badge);
+        return badge;
+    };
+    events.on('zoom:changed', (zoom) => {
+        const el = ensure();
+        window.clearTimeout(hideTimer);
+        if (zoom > 1.001) {
+            // German decimal comma, one digit — reads like a camera app
+            el.textContent = `${zoom.toFixed(1).replace('.', ',')}×`;
+            el.classList.add('visible');
+        }
+        else {
+            // brief "1,0×" so zooming back out lands with feedback, then fade
+            el.textContent = '1,0×';
+            hideTimer = window.setTimeout(() => el?.classList.remove('visible'), 700);
+        }
+    });
+};
+
 //---------------------------------------------------------------------
 //
 // QR Code Generator for JavaScript
@@ -87783,7 +87873,7 @@ class FlyController {
         camera.position.copy(this._position);
         camera.angles.set(this._angles.x, this._angles.y, 0);
         camera.distance = this._distance;
-        camera.fov = this.fov;
+        camera.fov = applySmoothedZoom(this.fov, deltaTime);
     }
     onExit(_camera) {
     }
@@ -88278,7 +88368,7 @@ class WalkController {
         }
         camera.position.copy(this._position);
         camera.distance = this._distance;
-        camera.fov = this.fov;
+        camera.fov = applySmoothedZoom(this.fov, deltaTime);
         // Walking gaze-scan: while moving (and not actively aiming), sweep the
         // view around the travel heading so the gaze isn't a dead locked-forward
         // stare. It is a render-only offset (camera.gazeYaw/Pitch) the navigation
@@ -90153,6 +90243,8 @@ class KeyboardMouseDevice {
     moveSpeed = 4;
     orbitSpeed = 18;
     wheelSpeed = 0.06;
+    /** Optical-zoom gain per wheel delta unit in walk mode (~1.2×/notch). */
+    wheelZoomSensitivity = 0.0015;
     mouseRotateSensitivity = 0.5;
     /**
      * Extra drag-look sensitivity multiplier in first-person (walk/fly) modes.
@@ -90272,7 +90364,18 @@ class KeyboardMouseDevice {
         v.add(tmpV2.copy(keyMove).mulScalar((0) * dt));
         screenToWorld(cameraComponent, mouse[0], mouse[1], distance, panMove);
         v.add(panMove.mulScalar(pan));
-        wheelMove.set(0, 0, -wheel[0]);
+        // Walk mode: the wheel is OPTICAL zoom (scroll up = magnify), not
+        // locomotion — moving stays on click-to-walk / WASD. Other modes keep
+        // the classic wheel dolly.
+        if (isWalk) {
+            if (wheel[0] !== 0) {
+                multiplyZoom(Math.exp(-wheel[0] * this.wheelZoomSensitivity));
+            }
+            wheelMove.set(0, 0, 0);
+        }
+        else {
+            wheelMove.set(0, 0, -wheel[0]);
+        }
         v.add(wheelMove.mulScalar(this.wheelSpeed * DISPLACEMENT_SCALE));
         deltas.move.append([v.x, v.y, flipZForOrbit(mode, v.z)]);
         // rotate (mouse-drag, masked when in pan mode)
@@ -90293,6 +90396,8 @@ class TouchDevice {
     orbitSpeed = 18;
     moveSpeed = 4;
     pinchSpeed = 0.4;
+    /** Optical-zoom gain per pixel of pinch spread in first-person modes. */
+    pinchZoomSensitivity = 0.004;
     touchRotateSensitivity = 1.5;
     _source = new MultiTouchSource();
     _global = null;
@@ -90406,12 +90511,17 @@ class TouchDevice {
             flyMoveTmp.set(this._joystick[0], 0, -this._joystick[1]);
             v.add(flyMoveTmp.mulScalar(fly * this.moveSpeed * dt));
         }
-        // Two-finger pinch z: orbit interprets +z as "farther from target"
-        // (close-pinch = +pinch[0] = zoom out). First-person modes interpret
-        // +z as "forward", so spreading (pinch[0] < 0) should move forward —
-        // flip the sign there.
-        pinchMoveTmp.set(0, 0, (orbit - directFirstPerson) * pinch[0]);
+        // Two-finger pinch z in orbit: +z = "farther from target" (close-pinch
+        // = +pinch[0] = zoom out).
+        pinchMoveTmp.set(0, 0, orbit * pinch[0]);
         v.add(pinchMoveTmp.mulScalar(double * this.pinchSpeed * DISPLACEMENT_SCALE));
+        // First-person pinch is OPTICAL zoom (like pinching a photo), not a
+        // dolly: spreading the fingers (pinch[0] < 0) magnifies the view.
+        // Multiplicative mapping so every pixel of spread feels the same at
+        // any zoom level. Walking stays on the joystick / tap-to-walk.
+        if (isFirstPerson && double && pinch[0] !== 0) {
+            multiplyZoom(Math.exp(-pinch[0] * this.pinchZoomSensitivity));
+        }
         // tap-to-jump in walk + gaming controls
         if (isWalk && this._tapJump) {
             v.y = 1;
@@ -94353,11 +94463,21 @@ const initCanvas = (global) => {
     // settings.json), which costs no extra render resolution.
     const webgl = global.renderer === 'webgl';
     const maxPixelDim = platform.mobile ? (webgl ? 768 : 1080) : (webgl ? 1080 : 1536);
+    // Optical-zoom sharpness: while zoomed in, raise the cap in step with the
+    // zoom factor (quantized to half steps so the swap chain doesn't
+    // reallocate on every pinch frame). devicePixelRatio stays the hard
+    // ceiling, so this converges on the display's NATIVE resolution — the
+    // zoomed-in view is exactly where the capped soft splat rendering would
+    // otherwise read as blur.
+    const zoomBoost = () => 1 + Math.min(1.5, Math.round((getZoom() - 1) * 2) / 2);
     // cap pixel ratio to limit resolution on high-DPI devices
-    const calcPixelRatio = () => Math.min(maxPixelDim / Math.min(screen.width, screen.height), window.devicePixelRatio);
-    // last known device pixel size (full resolution, before any quality scaling)
+    const calcPixelRatio = () => Math.min((maxPixelDim * zoomBoost()) / Math.min(screen.width, screen.height), window.devicePixelRatio);
+    // last known client size + device pixel size (before any quality scaling)
+    const clientSize = { width: 0, height: 0 };
     const deviceSize = { width: 0, height: 0 };
     const set = (width, height) => {
+        clientSize.width = width;
+        clientSize.height = height;
         const ratio = calcPixelRatio();
         deviceSize.width = width * ratio;
         deviceSize.height = height * ratio;
@@ -94392,6 +94512,11 @@ const initCanvas = (global) => {
     });
     resizeObserver.observe(canvas);
     events.on('performanceMode:changed', () => {
+        app.renderNextFrame = true;
+    });
+    // re-derive the resolution cap when the optical zoom changes
+    events.on('zoom:changed', () => {
+        set(clientSize.width, clientSize.height);
         app.renderNextFrame = true;
     });
     // Resize canvas before render() so the swap chain texture is acquired at the correct size.
@@ -94447,6 +94572,13 @@ const main = async (canvas, settingsJson, config) => {
         renderer,
         cameraMoving: false
     };
+    // optical zoom (walk/fly): forward target changes onto the event bus for
+    // the resolution cap + badge, and ease back to 1× on every mode switch
+    registerZoomNotifier((zoom) => {
+        events.fire('zoom:changed', zoom);
+        app.renderNextFrame = true;
+    });
+    events.on('cameraMode:changed', () => resetZoom());
     initCanvas(global);
     // DEV: expose globals for camera tuning — only for the authoring/tooling
     // entry points (?debug / ?scout / ?record), never in the visitor path
@@ -94475,6 +94607,7 @@ const main = async (canvas, settingsJson, config) => {
     initConcierge(global);
     initStaging(global);
     initInquiry(global);
+    initZoomIndicator(global);
     // anonymous usage analytics (inert no-op without settings.analytics); must
     // init before the Viewer so its 'inputEvent' listener registers ahead of
     // the camera manager's (it reads the pre-transition camera mode)
