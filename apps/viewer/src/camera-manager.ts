@@ -186,6 +186,13 @@ class CameraManager {
         let transitionTimer = 1;
         let clearOrbitTargetOnTransitionEnd = false;
 
+        // Set when a guided tour starts from the top ('tour:start'), consumed
+        // by the single 'tour:complete' that started tour may fire. Scrubbing
+        // ('scrubAnim') enters anim mode WITHOUT resetting the cursor, so a
+        // scrub-to-end — or a pointerup parking the cursor at the end again —
+        // must not (re)fire 'tour:complete'.
+        let tourStarted = false;
+
         // start a new camera transition from the current pose
         const startTransition = () => {
             from.copy(this.camera);
@@ -244,8 +251,12 @@ class CameraManager {
                 if (cursor.loopMode === 'none' && cursor.duration > 0 && cursor.value >= cursor.duration) {
                     state.cameraMode = fromMode;
                     // played through to the end (interrupt/cancel exits don't
-                    // come this way) — signal it, e.g. for analytics
-                    events.fire('tour:complete');
+                    // come this way) — signal it, e.g. for analytics; at most
+                    // once per started tour (see tourStarted)
+                    if (tourStarted) {
+                        tourStarted = false;
+                        events.fire('tour:complete');
+                    }
                 }
             }
 
@@ -364,6 +375,7 @@ class CameraManager {
                             state.animationPaused = false;
                             // the guided tour started from the top — signal it,
                             // e.g. for analytics
+                            tourStarted = true;
                             events.fire('tour:start');
                         }
                     }

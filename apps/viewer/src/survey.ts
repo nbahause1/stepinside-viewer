@@ -131,12 +131,16 @@ const init = (global: Global) => {
         } catch { /* fire-and-forget */ }
     };
 
-    // The card must never fight the onboarding or cover the staging overlay's
-    // "Original zeigen" peek. (While staging is open, CSS also slides an
-    // already-visible card away — body.staging-open — and back afterwards.)
+    // The card must never fight the onboarding, cover the staging overlay's
+    // "Original zeigen" peek, pop up over a running guided tour (cameraMode
+    // 'anim'), or land on top of the open concierge chat panel. (While staging
+    // is open, CSS also slides an already-visible card away — body.staging-open
+    // — and back afterwards.)
     const blocked = () => {
         return document.body.classList.contains('tutorial-active') ||
-            document.body.classList.contains('staging-open');
+            document.body.classList.contains('staging-open') ||
+            state.cameraMode === 'anim' ||
+            state.chatOpen;
     };
 
     // ---- card ---------------------------------------------------------------
@@ -257,6 +261,12 @@ const init = (global: Global) => {
 
             // A lead is a deliberate inquiry — unlike analytics events it is NOT
             // fire-and-forget: a failure is surfaced so the visitor can retry.
+            // (The form contents stay intact either way.)
+            const fail = (text: string) => {
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Absenden';
+                showError(text);
+            };
             fetch(leadEndpoint, {
                 method: 'POST',
                 headers: { 'content-type': 'application/json' },
@@ -269,12 +279,16 @@ const init = (global: Global) => {
                     consent: true
                 })
             }).then((res) => {
+                if (res.status === 429) {
+                    // shared-WiFi rate cap: an immediate retry fails too, so
+                    // don't suggest one — ask for a little patience instead
+                    fail('Gerade viele Anfragen — bitte versuch es in ein paar Minuten nochmal.');
+                    return;
+                }
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 showThanks('Danke! Wir melden uns zeitnah.', SUCCESS_CLOSE_MS);
             }).catch(() => {
-                submitBtn.disabled = false;
-                submitBtn.textContent = 'Absenden';
-                showError('Das hat leider nicht geklappt. Bitte versuch es gleich nochmal.');
+                fail('Das hat leider nicht geklappt. Bitte versuch es gleich nochmal.');
             });
         });
     };
@@ -358,18 +372,23 @@ const init = (global: Global) => {
     }, ENGAGEMENT_CHECK_MS);
 
     // -- trigger 3: exiting fullscreen after a ≥30 s stint ----------------------
-    let fullscreenSince: number | null = null;
-    events.on('isFullscreen:changed', (on: boolean) => {
-        if (on) {
-            fullscreenSince = performance.now();
-        } else {
-            if (fullscreenSince !== null &&
-                performance.now() - fullscreenSince >= FULLSCREEN_MIN_MS) {
-                trigger();
+    // Only where the real Fullscreen API exists: on iPhone Safari ui.ts fakes
+    // isFullscreen by flipping it on every orientation change, and a mere
+    // device rotation is not an engagement signal.
+    if (document.fullscreenEnabled) {
+        let fullscreenSince: number | null = null;
+        events.on('isFullscreen:changed', (on: boolean) => {
+            if (on) {
+                fullscreenSince = performance.now();
+            } else {
+                if (fullscreenSince !== null &&
+                    performance.now() - fullscreenSince >= FULLSCREEN_MIN_MS) {
+                    trigger();
+                }
+                fullscreenSince = null;
             }
-            fullscreenSince = null;
-        }
-    });
+        });
+    }
 };
 
 const initSurvey = (global: Global) => {
