@@ -296,7 +296,8 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
         gamingControls: localStorage.getItem('gamingControls') === 'true',
         moveLocked: false,
         chatOpen: false,
-        prewarming: false
+        prewarming: false,
+        tourRevealActive: false
     });
 
     const global: Global = {

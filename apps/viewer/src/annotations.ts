@@ -1,4 +1,4 @@
-import { Entity } from 'playcanvas';
+import { Entity, Vec3 } from 'playcanvas';
 
 import { Annotation } from './annotation';
 import type { Annotation as AnnotationSettings } from './settings';
@@ -111,18 +111,50 @@ class Annotations {
         //     lingers nearby (the demo track circles the parquet for ~18 s),
         //   - each annotation reveals at most once per tour run (reset on
         //     'tour:start'), so a winding path can't re-pop old bubbles.
-        const TOUR_REVEAL_NEAR_M = 2.5;
-        const TOUR_REVEAL_FAR_M = 3.2;
+        // Sight is the primary criterion; distance only rules out reveals from
+        // clear across the flat. Generous on purpose — measured on the demo
+        // track: floor points (parquet) drop below the frame before the
+        // camera gets close, and the Flügeltür is only ever nicely framed
+        // from ~6 m while the path approaches it.
+        const TOUR_REVEAL_NEAR_M = 6.5;
+        const TOUR_REVEAL_FAR_M = 7.5;
         const TOUR_REVEAL_MAX_MS = 6000;
+        // trigger only when the point is INSIDE the view (6% inset from every
+        // edge) — a bubble for something the visitor can't see is noise.
+        // While showing, a small outset keeps it up until the point actually
+        // leaves the screen. The first moments of the tour are grace time:
+        // the camera is still flying its entry transition there.
+        const TOUR_REVEAL_ENTER_INSET = 0.06;
+        const TOUR_REVEAL_GRACE_S = 1.5;
         let tourReveal: Annotation | null = null;
         let tourRevealShownAt = 0;
         const tourRevealDone = new Set<Annotation>();
+        const tmpViewPos = new Vec3();
+        const tmpScreenPos = new Vec3();
+
+        // In the camera's sight field: in front of the camera and projected
+        // inside the viewport, inset by `margin` (fraction of each dimension;
+        // negative = allow slightly off-screen).
+        const inView = (script: Annotation, margin: number): boolean => {
+            const cam = global.camera.camera;
+            if (!cam) return false;
+            const pos = script.entity.getPosition();
+            cam.viewMatrix.transformPoint(pos, tmpViewPos);
+            if (tmpViewPos.z >= 0) return false;
+            const s = cam.worldToScreen(pos, tmpScreenPos);
+            const w = window.innerWidth;
+            const h = window.innerHeight;
+            return s.x > w * margin && s.x < w * (1 - margin) &&
+                   s.y > h * margin && s.y < h * (1 - margin);
+        };
 
         const hideTourReveal = () => {
             if (tourReveal) {
                 tourReveal.hideTooltipPassive();
                 tourReveal = null;
             }
+            // resume normal tour speed (camera-manager eases back up)
+            state.tourRevealActive = false;
         };
 
         global.events.on('tour:start', () => {
@@ -138,11 +170,12 @@ class Annotations {
             const camPos = global.camera.getPosition();
 
             if (tourReveal) {
-                // fade out once the camera clearly moved on — or after the
-                // time cap when the path lingers around the point
+                // fade out once the camera clearly moved on, looks away, or
+                // after the time cap when the path lingers around the point
                 const gone = camPos.distance(tourReveal.entity.getPosition()) > TOUR_REVEAL_FAR_M;
+                const outOfSight = !inView(tourReveal, -0.05);
                 const expired = performance.now() - tourRevealShownAt > TOUR_REVEAL_MAX_MS;
-                if (gone || expired) {
+                if (gone || outOfSight || expired) {
                     hideTourReveal();
                 }
                 return;
@@ -158,11 +191,14 @@ class Annotations {
                     best = script;
                 }
             }
-            if (best && bestDist <= TOUR_REVEAL_NEAR_M) {
+            if (state.animationTime < TOUR_REVEAL_GRACE_S) return;
+            if (best && bestDist <= TOUR_REVEAL_NEAR_M && inView(best, TOUR_REVEAL_ENTER_INSET)) {
                 tourReveal = best;
                 tourRevealShownAt = performance.now();
                 tourRevealDone.add(best);
                 best.showTooltipPassive();
+                // slow the tour down while the bubble is read (camera-manager)
+                state.tourRevealActive = true;
             }
         });
     }

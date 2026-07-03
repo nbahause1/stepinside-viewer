@@ -206,11 +206,24 @@ class CameraManager {
             global.app.renderNextFrame = true;
         };
 
+        // Slow-motion while a tour fly-by bubble is up (annotations.ts flips
+        // state.tourRevealActive): the track eases down to a third of its
+        // speed so the text is comfortably readable, then eases back to
+        // normal. Exponentially smoothed so the speed change never jerks.
+        const TOUR_REVEAL_SPEED = 0.3;
+        let tourSlowFactor = 1;
+
         // application update
         this.update = (deltaTime: number, frame: CameraFrame) => {
 
-            // use dt of 0 if animation is paused
-            const dt = state.cameraMode === 'anim' && state.animationPaused ? 0 : deltaTime;
+            const slowTarget = (state.cameraMode === 'anim' && state.tourRevealActive) ? TOUR_REVEAL_SPEED : 1;
+            tourSlowFactor += (slowTarget - tourSlowFactor) * Math.min(1, deltaTime * 2.5);
+
+            // use dt of 0 if animation is paused; slow the track while a
+            // fly-by bubble is being read
+            const dt = state.cameraMode === 'anim' ?
+                (state.animationPaused ? 0 : deltaTime * tourSlowFactor) :
+                deltaTime;
 
             // update transition timer
             const prevTransitionTimer = transitionTimer;
