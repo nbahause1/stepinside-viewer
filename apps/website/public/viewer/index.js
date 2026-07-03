@@ -84654,10 +84654,11 @@ const initStaging = (global) => {
 // Engagement survey + lead CTA card. Once a visit shows real engagement —
 // the guided tour played through, 75 s of accumulated *visible* time, or
 // leaving fullscreen after a ≥30 s stint — a light frosted glass card slides
-// in bottom-centre and asks, in a single tap, how interesting the property
-// is. A positive answer (👍/😍) offers two warm CTAs ("Besichtigung
-// anfragen" / "Exposé erhalten") that open a three-field mini lead form; a
-// negative one gets a warm "Danke!" and the card leaves.
+// in bottom-centre and asks, in a single tap, how helpful the tour was on a
+// 1-5 scale (1 = gar nicht hilfreich, 5 = sehr hilfreich). A 4-5 rating
+// offers two warm CTAs ("Besichtigung anfragen" / "Exposé erhalten") that
+// open a three-field mini lead form; lower ratings get a warm "Danke!" and
+// the card leaves.
 //
 // The card rides on the analytics module: survey/cta taps travel through the
 // same batched fire-and-forget queue (events.fire('analytics', …) →
@@ -84716,16 +84717,18 @@ const CARD_HTML = `
         </svg>
     </button>
     <div class="survey__step" data-step="rate">
-        <div class="survey__title">Wie interessant ist diese Wohnung für dich?</div>
+        <div class="survey__title">Wie hilfreich war dieser Rundgang für dich?</div>
         <div class="survey__emojis">
-            <button type="button" class="survey__emoji" data-rating="1" data-label="nein" aria-label="Eher nicht" title="Eher nicht">&#128078;</button>
-            <button type="button" class="survey__emoji" data-rating="2" data-label="unsicher" aria-label="Bin noch unsicher" title="Bin noch unsicher">&#129300;</button>
-            <button type="button" class="survey__emoji" data-rating="3" data-label="gut" aria-label="Gefällt mir" title="Gefällt mir">&#128077;</button>
-            <button type="button" class="survey__emoji" data-rating="4" data-label="begeistert" aria-label="Bin begeistert" title="Bin begeistert">&#128525;</button>
+            <button type="button" class="survey__emoji" data-rating="1" data-label="1" aria-label="1 – gar nicht hilfreich" title="Gar nicht hilfreich">1</button>
+            <button type="button" class="survey__emoji" data-rating="2" data-label="2" aria-label="2" title="Wenig hilfreich">2</button>
+            <button type="button" class="survey__emoji" data-rating="3" data-label="3" aria-label="3" title="Teils-teils">3</button>
+            <button type="button" class="survey__emoji" data-rating="4" data-label="4" aria-label="4" title="Hilfreich">4</button>
+            <button type="button" class="survey__emoji" data-rating="5" data-label="5" aria-label="5 – sehr hilfreich" title="Sehr hilfreich">5</button>
         </div>
+        <div class="survey__scaleHint"><span>1 = gar nicht hilfreich</span><span>5 = sehr hilfreich</span></div>
     </div>
     <div class="survey__step hidden" data-step="cta">
-        <div class="survey__title">Schön, dass sie dir gefällt!</div>
+        <div class="survey__title">Danke! Magst du direkt weitergehen?</div>
         <div class="survey__ctas">
             <button type="button" class="survey__cta" data-cta="besichtigung">Besichtigung anfragen</button>
             <button type="button" class="survey__cta survey__cta--secondary" data-cta="expose">Exposé erhalten</button>
@@ -84831,7 +84834,8 @@ const init = (global) => {
                 markAsked('answered');
                 // anonymous usage signal via the analytics queue
                 events.fire('analytics', 'survey', { rating, label: btn.dataset.label });
-                if (rating >= 3) {
+                // 1-5 helpfulness scale: 4-5 flows into the CTAs
+                if (rating >= 4) {
                     showStep('cta');
                 }
                 else {
@@ -84839,7 +84843,7 @@ const init = (global) => {
                 }
             });
         });
-        // -- step 2: CTAs (only reached after 👍/😍) ---------------------------
+        // -- step 2: CTAs (only reached after a 4-5 rating) --------------------
         let interest = 'besichtigung';
         root.querySelectorAll('.survey__cta[data-cta]').forEach((btn) => {
             btn.addEventListener('click', () => {

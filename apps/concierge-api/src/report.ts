@@ -26,7 +26,8 @@ export interface ReportData {
   shares: number;
   ctaClicks: number;
   annotations: { label: string; count: number }[];
-  survey: { down: number; hmm: number; up: number; love: number };
+  /** 1-5 helpfulness scale, index 0 = rating 1 ("gar nicht hilfreich"). */
+  survey: number[];
   questions: { ts: number; text: string }[];
   leads: ReportLeadRow[];
 }
@@ -102,7 +103,9 @@ const STYLES = `
     margin-bottom: 16px;
   }
   .card h2 { font-size: 17px; font-weight: 650; margin-bottom: 14px; letter-spacing: -0.01em; }
+  .card h2 .avg { float: right; font-size: 14px; font-weight: 600; color: #3d7bfd; }
   .hint { font-size: 13px; color: #86868b; margin: -8px 0 14px; }
+  .scale-hint { font-size: 12px; color: #86868b; margin-top: 10px; }
   .empty { color: #86868b; font-size: 14px; }
   .bar-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
   .bar-row:last-child { margin-bottom: 0; }
@@ -138,17 +141,21 @@ function kpiCell(value: string, label: string): string {
   return `<div class="kpi"><div class="v">${value}</div><div class="l">${label}</div></div>`;
 }
 
-function surveyBar(emoji: string, count: number, max: number): string {
+function surveyBar(label: string, count: number, max: number): string {
   const width = max > 0 ? Math.max(count > 0 ? 4 : 0, Math.round((count / max) * 100)) : 0;
-  return `<div class="bar-row"><span class="bar-label">${emoji}</span><div class="bar-track"><div class="bar-fill" style="width:${width}%"></div></div><span class="bar-count">${fmtInt(count)}</span></div>`;
+  return `<div class="bar-row"><span class="bar-label">${label}</span><div class="bar-track"><div class="bar-fill" style="width:${width}%"></div></div><span class="bar-count">${fmtInt(count)}</span></div>`;
 }
 
 /** Render the full report document. All dynamic strings must be escaped here. */
 export function renderReportHtml(d: ReportData): string {
   const title = d.label ? escapeHtml(d.label) : escapeHtml(d.propertyId);
 
-  const surveyTotal = d.survey.down + d.survey.hmm + d.survey.up + d.survey.love;
-  const surveyMax = Math.max(d.survey.down, d.survey.hmm, d.survey.up, d.survey.love);
+  const surveyTotal = d.survey.reduce((a, b) => a + b, 0);
+  const surveyMax = Math.max(...d.survey, 0);
+  const surveyAvg =
+    surveyTotal > 0
+      ? (d.survey.reduce((sum, n, i) => sum + n * (i + 1), 0) / surveyTotal).toFixed(1)
+      : null;
 
   const annotationMax = d.annotations.reduce((m, a) => Math.max(m, a.count), 0);
   const annotationRows = d.annotations
@@ -200,15 +207,13 @@ export function renderReportHtml(d: ReportData): string {
   </div>
 
   <div class="card">
-    <h2>Stimmungsbild</h2>
+    <h2>Wie hilfreich war der Rundgang?${surveyAvg !== null ? ` <span class="avg">Ø ${surveyAvg} / 5</span>` : ''}</h2>
     ${
       surveyTotal > 0
-        ? `${surveyBar('👎', d.survey.down, surveyMax)}
-    ${surveyBar('🤔', d.survey.hmm, surveyMax)}
-    ${surveyBar('👍', d.survey.up, surveyMax)}
-    ${surveyBar('😍', d.survey.love, surveyMax)}`
+        ? d.survey.map((n, i) => surveyBar(String(i + 1), n, surveyMax)).join('\n    ')
         : '<p class="empty">Noch keine Bewertungen abgegeben.</p>'
     }
+    ${surveyTotal > 0 ? '<p class="scale-hint">1 = gar nicht hilfreich · 5 = sehr hilfreich</p>' : ''}
   </div>
 
   <div class="card">

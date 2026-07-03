@@ -443,14 +443,12 @@ async function collectReportData(
     return typeof v === 'number' && Number.isFinite(v) ? v : 0;
   };
 
-  const surveyBuckets = { down: 0, hmm: 0, up: 0, love: 0 };
+  // 1-5 helpfulness scale ("Wie hilfreich war dieser Rundgang?")
+  const surveyBuckets = [0, 0, 0, 0, 0];
   for (const row of survey.results) {
     const rating = extractSurveyRating(row['data']);
     const n = typeof row['n'] === 'number' ? row['n'] : 0;
-    if (rating === 1) surveyBuckets.down += n;
-    else if (rating === 2) surveyBuckets.hmm += n;
-    else if (rating === 3) surveyBuckets.up += n;
-    else if (rating === 4) surveyBuckets.love += n;
+    if (rating !== null && rating >= 1 && rating <= 5) surveyBuckets[rating - 1] += n;
   }
 
   const avgDwellRaw = dwell?.['avg_dwell_s'];
