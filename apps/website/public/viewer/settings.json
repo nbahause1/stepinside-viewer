@@ -1692,5 +1692,9 @@
         "fov": 96
       }
     }
-  ]
+  ],
+  "analytics": {
+    "endpoint": "/analytics-preview-noop/events",
+    "propertyId": "demo-altbau"
+  }
 }
