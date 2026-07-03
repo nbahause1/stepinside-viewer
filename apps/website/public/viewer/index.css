@@ -450,6 +450,9 @@ body.tutorial-active #walkHint {
 #controlDome #domeMeasure .domeIcon--walk {
   display: none;
 }
+#controlDome #domeMeasureAerial .domeIcon--measureExit {
+  display: none;
+}
 #controlDome #domeTour .domeIcon--tourStop {
   display: none;
 }
@@ -886,6 +889,12 @@ body.measure-active #controlDome #domeMeasure .domeIcon--measure {
   display: none;
 }
 body.measure-active #controlDome #domeMeasure .domeIcon--walk {
+  display: block;
+}
+body.measure-active #controlDome #domeMeasureAerial .domeIcon--measure {
+  display: none;
+}
+body.measure-active #controlDome #domeMeasureAerial .domeIcon--measureExit {
   display: block;
 }
 

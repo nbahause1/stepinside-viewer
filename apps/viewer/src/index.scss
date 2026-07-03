@@ -568,6 +568,11 @@ body.tutorial-active #walkHint {
         display: none;
     }
 
+    // bird's-eye measure button: X (exit) icon hidden until measuring
+    #domeMeasureAerial .domeIcon--measureExit {
+        display: none;
+    }
+
     // tour button shows a play triangle by default and a stop square while the
     // tour ("Rundgang") is running — same swap affordance as the measure button.
     #domeTour .domeIcon--tourStop {
@@ -1112,6 +1117,16 @@ body.measure-active #controlDome {
     }
 
     #domeMeasure .domeIcon--walk {
+        display: block;
+    }
+
+    // bird's-eye variant: the ruler swaps to an X ("end measuring") — leaving
+    // measure mode there keeps the visitor in the bird's-eye view.
+    #domeMeasureAerial .domeIcon--measure {
+        display: none;
+    }
+
+    #domeMeasureAerial .domeIcon--measureExit {
         display: block;
     }
 }
