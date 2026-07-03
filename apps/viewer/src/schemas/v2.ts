@@ -90,8 +90,10 @@ type ExperienceSettings = {
     annotations: Annotation[],
 
     // 'hidden' keeps tooltips + the ‹ › navigator fully functional but never
-    // renders the in-scene number bubbles. Absent/'visible' = today's look.
-    annotationMarkers?: 'visible' | 'hidden',
+    // renders the in-scene number bubbles. 'overview' shows the bubbles ONLY
+    // in the bird's-eye view and during the guided tour — the walking view
+    // stays clean. Absent/'visible' = today's look.
+    annotationMarkers?: 'visible' | 'hidden' | 'overview',
 
     startMode: 'default' | 'animTrack' | 'annotation',
 

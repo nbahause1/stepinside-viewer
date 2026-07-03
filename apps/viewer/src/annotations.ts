@@ -19,11 +19,19 @@ class Annotations {
         this.annotations = global.settings.annotations;
         this.parentDom = parentDom;
 
-        Annotation.markersHidden = global.settings.annotationMarkers === 'hidden';
+        const markersMode = global.settings.annotationMarkers;
+        Annotation.markersHidden = markersMode === 'hidden';
 
         const { state } = global;
 
         const updateVisibility = () => {
+            // 'overview': the numbered bubbles live only in the bird's-eye view
+            // and the guided tour — the walking view stays clean. Tooltips via
+            // the ‹ › navigator keep working in every mode.
+            if (markersMode === 'overview') {
+                Annotation.markersHidden =
+                    state.cameraMode !== 'aerial' && state.cameraMode !== 'anim';
+            }
             const firstPersonGamingControls = (
                 (state.cameraMode === 'walk' || state.cameraMode === 'fly') &&
                 state.gamingControls
