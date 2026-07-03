@@ -84777,12 +84777,16 @@ const init = (global) => {
         }
         catch { /* fire-and-forget */ }
     };
-    // The card must never fight the onboarding or cover the staging overlay's
-    // "Original zeigen" peek. (While staging is open, CSS also slides an
-    // already-visible card away — body.staging-open — and back afterwards.)
+    // The card must never fight the onboarding, cover the staging overlay's
+    // "Original zeigen" peek, pop up over a running guided tour (cameraMode
+    // 'anim'), or land on top of the open concierge chat panel. (While staging
+    // is open, CSS also slides an already-visible card away — body.staging-open
+    // — and back afterwards.)
     const blocked = () => {
         return document.body.classList.contains('tutorial-active') ||
-            document.body.classList.contains('staging-open');
+            document.body.classList.contains('staging-open') ||
+            state.cameraMode === 'anim' ||
+            state.chatOpen;
     };
     // ---- card ---------------------------------------------------------------
     let card = null;
@@ -84889,6 +84893,12 @@ const init = (global) => {
             submitBtn.textContent = 'Wird gesendet…';
             // A lead is a deliberate inquiry — unlike analytics events it is NOT
             // fire-and-forget: a failure is surfaced so the visitor can retry.
+            // (The form contents stay intact either way.)
+            const fail = (text) => {
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Absenden';
+                showError(text);
+            };
             fetch(leadEndpoint, {
                 method: 'POST',
                 headers: { 'content-type': 'application/json' },
@@ -84901,13 +84911,17 @@ const init = (global) => {
                     consent: true
                 })
             }).then((res) => {
+                if (res.status === 429) {
+                    // shared-WiFi rate cap: an immediate retry fails too, so
+                    // don't suggest one — ask for a little patience instead
+                    fail('Gerade viele Anfragen — bitte versuch es in ein paar Minuten nochmal.');
+                    return;
+                }
                 if (!res.ok)
                     throw new Error(`HTTP ${res.status}`);
                 showThanks('Danke! Wir melden uns zeitnah.', SUCCESS_CLOSE_MS);
             }).catch(() => {
-                submitBtn.disabled = false;
-                submitBtn.textContent = 'Absenden';
-                showError('Das hat leider nicht geklappt. Bitte versuch es gleich nochmal.');
+                fail('Das hat leider nicht geklappt. Bitte versuch es gleich nochmal.');
             });
         });
     };
@@ -84989,19 +85003,24 @@ const init = (global) => {
             trigger();
     }, ENGAGEMENT_CHECK_MS);
     // -- trigger 3: exiting fullscreen after a ≥30 s stint ----------------------
-    let fullscreenSince = null;
-    events.on('isFullscreen:changed', (on) => {
-        if (on) {
-            fullscreenSince = performance.now();
-        }
-        else {
-            if (fullscreenSince !== null &&
-                performance.now() - fullscreenSince >= FULLSCREEN_MIN_MS) {
-                trigger();
+    // Only where the real Fullscreen API exists: on iPhone Safari ui.ts fakes
+    // isFullscreen by flipping it on every orientation change, and a mere
+    // device rotation is not an engagement signal.
+    if (document.fullscreenEnabled) {
+        let fullscreenSince = null;
+        events.on('isFullscreen:changed', (on) => {
+            if (on) {
+                fullscreenSince = performance.now();
             }
-            fullscreenSince = null;
-        }
-    });
+            else {
+                if (fullscreenSince !== null &&
+                    performance.now() - fullscreenSince >= FULLSCREEN_MIN_MS) {
+                    trigger();
+                }
+                fullscreenSince = null;
+            }
+        });
+    }
 };
 const initSurvey = (global) => {
     try {
@@ -88648,6 +88667,12 @@ class CameraManager {
         const transitionSpeed = 1.0;
         let transitionTimer = 1;
         let clearOrbitTargetOnTransitionEnd = false;
+        // Set when a guided tour starts from the top ('tour:start'), consumed
+        // by the single 'tour:complete' that started tour may fire. Scrubbing
+        // ('scrubAnim') enters anim mode WITHOUT resetting the cursor, so a
+        // scrub-to-end — or a pointerup parking the cursor at the end again —
+        // must not (re)fire 'tour:complete'.
+        let tourStarted = false;
         // start a new camera transition from the current pose
         const startTransition = () => {
             from.copy(this.camera);
@@ -88695,8 +88720,12 @@ class CameraManager {
                 if (cursor.loopMode === 'none' && cursor.duration > 0 && cursor.value >= cursor.duration) {
                     state.cameraMode = fromMode;
                     // played through to the end (interrupt/cancel exits don't
-                    // come this way) — signal it, e.g. for analytics
-                    events.fire('tour:complete');
+                    // come this way) — signal it, e.g. for analytics; at most
+                    // once per started tour (see tourStarted)
+                    if (tourStarted) {
+                        tourStarted = false;
+                        events.fire('tour:complete');
+                    }
                 }
             }
             if (clearOrbitTargetOnTransitionEnd && prevTransitionTimer < 1 && transitionTimer === 1) {
@@ -88818,6 +88847,7 @@ class CameraManager {
                             state.animationPaused = false;
                             // the guided tour started from the top — signal it,
                             // e.g. for analytics
+                            tourStarted = true;
                             events.fire('tour:start');
                         }
                     }
