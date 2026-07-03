@@ -174,6 +174,18 @@ type ExperienceSettings = {
         email?: string,
         url?: string,
         subject?: string
+    },
+
+    // Anonymous usage analytics (optional; cast-through like `inquiry`). With
+    // both `endpoint` and `propertyId` set, the viewer batches anonymous
+    // interaction events (opens, dwell heartbeats, feature usage) to the
+    // endpoint for the owner's report. Absent or incomplete, the whole module
+    // is an inert no-op. Privacy by design: no cookies, no localStorage, no
+    // fingerprinting — the session id is crypto-random and in-memory only, so
+    // two visits by the same person are two unrelated sessions.
+    analytics?: {
+        endpoint?: string,
+        propertyId?: string
     }
 };
 

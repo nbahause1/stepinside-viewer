@@ -172,6 +172,10 @@ const initShare = (global: Global) => {
         const url = buildShareUrl();
         if (!url) return;
 
+        // anonymous usage signal (no-op unless analytics is configured); the
+        // shared URL itself is never sent anywhere
+        events.fire('analytics', 'share');
+
         if (navigator.share) {
             try {
                 await navigator.share({ url });

@@ -125,6 +125,9 @@ const initConcierge = (global: Global) => {
             chip.className = 'chatChip';
             chip.textContent = question;
             chip.addEventListener('click', () => {
+                // anonymous usage signal (no-op unless analytics is configured):
+                // in scripted mode the chip label is the "question"
+                events.fire('analytics', 'concierge_question', { question: question.slice(0, 300), mode: 'scripted' });
                 appendBubble('user', question);
                 appendBubble('bot', answer);
                 // Fly the camera to the object the answer is about.
@@ -188,6 +191,10 @@ const initConcierge = (global: Global) => {
         if (history.length > MAX_HISTORY) history.splice(0, history.length - MAX_HISTORY);
         appendBubble('user', content);
         input.value = '';
+
+        // anonymous usage signal (no-op unless analytics is configured): the
+        // question the visitor deliberately typed, truncated for the wire cap
+        events.fire('analytics', 'concierge_question', { question: content.slice(0, 300), mode: 'ai' });
 
         setLoading(true);
         showThinking();

@@ -20,7 +20,7 @@ const asText = (value: unknown): string | undefined => {
 };
 
 const initInquiry = (global: Global) => {
-    const { settings } = global;
+    const { settings, events } = global;
 
     const cfg = settings.inquiry;
     const url = asText(cfg?.url);
@@ -40,6 +40,8 @@ const initInquiry = (global: Global) => {
     trigger.setAttribute('title', labelText);
 
     trigger.addEventListener('click', () => {
+        // anonymous usage signal (no-op unless analytics is configured)
+        events.fire('analytics', 'inquiry_click', { target: url ? 'url' : 'email' });
         if (url) {
             window.open(url, '_blank', 'noopener,noreferrer');
             return;

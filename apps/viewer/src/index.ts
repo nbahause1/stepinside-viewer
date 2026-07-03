@@ -15,6 +15,7 @@ import {
     version as engineVersion
 } from 'playcanvas';
 
+import { initAnalytics } from './analytics';
 import { App } from './app';
 import { initBranding } from './branding';
 import { MeshCollision, loadVoxelCollision } from './collision';
@@ -323,6 +324,10 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
     initConcierge(global);
     initStaging(global);
     initInquiry(global);
+    // anonymous usage analytics (inert no-op without settings.analytics); must
+    // init before the Viewer so its 'inputEvent' listener registers ahead of
+    // the camera manager's (it reads the pre-transition camera mode)
+    initAnalytics(global);
 
     // Load model
     const gsplatLoad = loadGsplat(

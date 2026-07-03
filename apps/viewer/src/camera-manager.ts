@@ -243,6 +243,9 @@ class CameraManager {
                 // the same exit path 'cancel'/'interrupt' use.
                 if (cursor.loopMode === 'none' && cursor.duration > 0 && cursor.value >= cursor.duration) {
                     state.cameraMode = fromMode;
+                    // played through to the end (interrupt/cancel exits don't
+                    // come this way) — signal it, e.g. for analytics
+                    events.fire('tour:complete');
                 }
             }
 
@@ -359,6 +362,9 @@ class CameraManager {
                             controllers.anim.animState.update(0);
                             state.cameraMode = 'anim';
                             state.animationPaused = false;
+                            // the guided tour started from the top — signal it,
+                            // e.g. for analytics
+                            events.fire('tour:start');
                         }
                     }
                     break;
