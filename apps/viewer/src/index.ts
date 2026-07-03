@@ -29,6 +29,7 @@ import { initConcierge } from './concierge';
 import { initInquiry } from './inquiry';
 import { initShare } from './share';
 import { initStaging } from './staging';
+import { initSurvey } from './survey';
 import { initTutorial } from './tutorial';
 import { initPoster, initUI } from './ui';
 import { Viewer } from './viewer';
@@ -328,6 +329,8 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
     // init before the Viewer so its 'inputEvent' listener registers ahead of
     // the camera manager's (it reads the pre-transition camera mode)
     initAnalytics(global);
+    // engagement survey + lead CTA card (rides on analytics; inert without it)
+    initSurvey(global);
 
     // Load model
     const gsplatLoad = loadGsplat(
