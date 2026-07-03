@@ -86706,6 +86706,32 @@ class Annotation extends Script {
         }, 200); // Match the transition duration
     }
     /**
+     * Display-only tooltip reveal for the guided tour's fly-by: identical
+     * visuals (same 0.2s opacity fade) to showTooltip, but fires NO events —
+     * the camera manager must never treat it as an annotation pick, which
+     * would hijack the running tour into orbit mode.
+     */
+    showTooltipPassive() {
+        Annotation.activeAnnotation = this;
+        Annotation.tooltipDom.style.visibility = 'visible';
+        Annotation.tooltipDom.style.opacity = '1';
+        Annotation.titleDom.textContent = this.title;
+        Annotation.textDom.textContent = this.text;
+        this._update();
+    }
+    /** Event-free counterpart of hideTooltip (see showTooltipPassive). */
+    hideTooltipPassive() {
+        if (Annotation.activeAnnotation === this) {
+            Annotation.activeAnnotation = null;
+        }
+        Annotation.tooltipDom.style.opacity = '0';
+        setTimeout(() => {
+            if (Annotation.tooltipDom.style.opacity === '0') {
+                Annotation.tooltipDom.style.visibility = 'hidden';
+            }
+        }, 200); // Match the transition duration
+    }
+    /**
      * Hide all elements when annotation is behind camera.
      * @private
      */
@@ -86874,6 +86900,69 @@ class Annotations {
             const script = scriptMap.get(ann);
             if (script) {
                 script.showTooltip();
+            }
+        });
+        // --- guided-tour fly-by reveal -----------------------------------
+        // While the tour ("Rundgang") flies the scene, the text bubble of the
+        // annotation the camera passes fades in near the point and fades out
+        // again as the camera leaves (the shared tooltip's 0.2s opacity
+        // transition does the animating). Display-only via the passive
+        // tooltip methods — no events, so the tour keeps flying.
+        //
+        // Three rules keep it calm:
+        //   - hysteresis (NEAR < FAR) prevents flicker at the boundary,
+        //   - a bubble never stays longer than MAX_MS even when the path
+        //     lingers nearby (the demo track circles the parquet for ~18 s),
+        //   - each annotation reveals at most once per tour run (reset on
+        //     'tour:start'), so a winding path can't re-pop old bubbles.
+        const TOUR_REVEAL_NEAR_M = 2.5;
+        const TOUR_REVEAL_FAR_M = 3.2;
+        const TOUR_REVEAL_MAX_MS = 6000;
+        let tourReveal = null;
+        let tourRevealShownAt = 0;
+        const tourRevealDone = new Set();
+        const hideTourReveal = () => {
+            if (tourReveal) {
+                tourReveal.hideTooltipPassive();
+                tourReveal = null;
+            }
+        };
+        global.events.on('tour:start', () => {
+            tourRevealDone.clear();
+        });
+        global.app.on('update', () => {
+            if (state.cameraMode !== 'anim') {
+                hideTourReveal();
+                tourRevealDone.clear();
+                return;
+            }
+            const camPos = global.camera.getPosition();
+            if (tourReveal) {
+                // fade out once the camera clearly moved on — or after the
+                // time cap when the path lingers around the point
+                const gone = camPos.distance(tourReveal.entity.getPosition()) > TOUR_REVEAL_FAR_M;
+                const expired = performance.now() - tourRevealShownAt > TOUR_REVEAL_MAX_MS;
+                if (gone || expired) {
+                    hideTourReveal();
+                }
+                return;
+            }
+            let best = null;
+            let bestDist = Infinity;
+            for (const script of scriptMap.values()) {
+                if (tourRevealDone.has(script))
+                    continue;
+                const d = camPos.distance(script.entity.getPosition());
+                if (d < bestDist) {
+                    bestDist = d;
+                    best = script;
+                }
+            }
+            if (best && bestDist <= TOUR_REVEAL_NEAR_M) {
+                tourReveal = best;
+                tourRevealShownAt = performance.now();
+                tourRevealDone.add(best);
+                best.showTooltipPassive();
             }
         });
     }

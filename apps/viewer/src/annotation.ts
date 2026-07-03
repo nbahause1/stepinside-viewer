@@ -581,6 +581,34 @@ export class Annotation extends Script {
     }
 
     /**
+     * Display-only tooltip reveal for the guided tour's fly-by: identical
+     * visuals (same 0.2s opacity fade) to showTooltip, but fires NO events —
+     * the camera manager must never treat it as an annotation pick, which
+     * would hijack the running tour into orbit mode.
+     */
+    showTooltipPassive() {
+        Annotation.activeAnnotation = this;
+        Annotation.tooltipDom.style.visibility = 'visible';
+        Annotation.tooltipDom.style.opacity = '1';
+        Annotation.titleDom.textContent = this.title;
+        Annotation.textDom.textContent = this.text;
+        this._update();
+    }
+
+    /** Event-free counterpart of hideTooltip (see showTooltipPassive). */
+    hideTooltipPassive() {
+        if (Annotation.activeAnnotation === this) {
+            Annotation.activeAnnotation = null;
+        }
+        Annotation.tooltipDom.style.opacity = '0';
+        setTimeout(() => {
+            if (Annotation.tooltipDom.style.opacity === '0') {
+                Annotation.tooltipDom.style.visibility = 'hidden';
+            }
+        }, 200); // Match the transition duration
+    }
+
+    /**
      * Hide all elements when annotation is behind camera.
      * @private
      */
