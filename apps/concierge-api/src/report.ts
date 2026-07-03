@@ -222,7 +222,7 @@ export function renderReportHtml(d: ReportData): string {
 
   <div class="card">
     <h2>Fragen an den Concierge</h2>
-    <p class="hint">Alle Fragen sind anonym – sie lassen sich keiner Person oder Sitzung dauerhaft zuordnen.</p>
+    <p class="hint">Wörtliche Fragen der Besucher — können persönliche Angaben enthalten, bitte vertraulich behandeln.</p>
     ${questionItems.length > 0 ? `<ul class="questions">${questionItems}</ul>` : '<p class="empty">Noch keine Fragen gestellt.</p>'}
   </div>
 

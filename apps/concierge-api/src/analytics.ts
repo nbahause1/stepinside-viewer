@@ -23,6 +23,7 @@
 import { ValidationError } from './validation.js';
 import { renderReportHtml, renderReportNotFoundHtml } from './report.js';
 import type { ReportData, ReportLeadRow } from './report.js';
+import type { RateLimitResult } from './ratelimit.js';
 
 // ---------------------------------------------------------------------------
 // Structural D1 slice (same pattern as KvLike in ratelimit.ts): declared
@@ -46,7 +47,16 @@ export interface D1Like {
 export interface AnalyticsResult {
   status: number;
   body: Record<string, unknown>;
+  retryAfterSeconds?: number;
 }
+
+/**
+ * Optional global daily flood cap (see KvDailyBudget in ratelimit.ts). It is
+ * consumed AFTER validation and the database check, so garbage requests and
+ * unprovisioned deployments never burn budget. When omitted (dev server,
+ * Vercel, no KV), no cap is enforced.
+ */
+export type DailyBudget = { consume(): Promise<RateLimitResult> };
 
 // ---------------------------------------------------------------------------
 // Validation caps
@@ -153,6 +163,7 @@ export function validateEventsRequest(body: unknown): EventsRequest {
 export async function handleEvents(
   rawBody: unknown,
   db: D1Like | undefined,
+  dailyBudget?: DailyBudget,
 ): Promise<AnalyticsResult> {
   let request: EventsRequest;
   try {
@@ -168,6 +179,15 @@ export async function handleEvents(
     // No ANALYTICS_DB binding: accept and drop. The viewer must never break
     // because analytics is not provisioned.
     return { status: 202, body: { ok: true } };
+  }
+
+  // Global daily flood cap: past the cap the batch is accepted (202) and
+  // DROPPED silently — same fail-soft contract as everything else here.
+  if (dailyBudget) {
+    const budget = await dailyBudget.consume();
+    if (!budget.allowed) {
+      return { status: 202, body: { ok: true } };
+    }
   }
 
   const now = Date.now();
@@ -245,6 +265,7 @@ export function validateLeadRequest(body: unknown): LeadRequest {
 export async function handleLead(
   rawBody: unknown,
   db: D1Like | undefined,
+  dailyBudget?: DailyBudget,
 ): Promise<AnalyticsResult> {
   let request: LeadRequest;
   try {
@@ -258,6 +279,20 @@ export async function handleLead(
 
   if (!db) {
     return { status: 202, body: { ok: true } };
+  }
+
+  // Global daily flood cap. A lead is a customer inquiry, so — unlike /events —
+  // hitting the cap IS surfaced (429 + Retry-After) instead of dropped silently;
+  // the viewer's form shows a friendly retry message on 429.
+  if (dailyBudget) {
+    const budget = await dailyBudget.consume();
+    if (!budget.allowed) {
+      return {
+        status: 429,
+        body: { error: 'The daily inquiry limit is reached. Please try again tomorrow.' },
+        retryAfterSeconds: budget.retryAfterSeconds,
+      };
+    }
   }
 
   try {
@@ -349,16 +384,20 @@ async function collectReportData(
     .bind(propertyId)
     .first();
 
-  // Dwell time per session from the open/heartbeat trail (server timestamps):
-  // span between the first and last beacon of each session, averaged.
+  // Dwell time per session from the heartbeat payloads: each heartbeat carries
+  // the session's accumulated VISIBLE seconds (the viewer's clock stops while
+  // the tab is hidden), so the highest value per session is that session's
+  // dwell — unlike server-timestamp spans, hidden-tab gaps don't count. Each
+  // session is capped at 30 min so one tab left open cannot inflate the
+  // average; sessions without heartbeats are ignored.
   const dwell = await db
     .prepare(
-      `SELECT AVG(dur) AS avg_dwell_ms FROM (
-         SELECT MAX(ts) - MIN(ts) AS dur
+      `SELECT AVG(dur_s) AS avg_dwell_s FROM (
+         SELECT MIN(MAX(json_extract(data, '$.seconds')), 1800) AS dur_s
          FROM events
-         WHERE property_id = ?1 AND type IN ('open', 'heartbeat')
+         WHERE property_id = ?1 AND type = 'heartbeat'
+           AND typeof(json_extract(data, '$.seconds')) IN ('integer', 'real')
          GROUP BY session_id
-         HAVING COUNT(*) > 1
        )`,
     )
     .bind(propertyId)
@@ -414,14 +453,14 @@ async function collectReportData(
     else if (rating === 4) surveyBuckets.love += n;
   }
 
-  const avgDwellRaw = dwell?.['avg_dwell_ms'];
+  const avgDwellRaw = dwell?.['avg_dwell_s'];
 
   return {
     propertyId,
     label,
     generatedAt: Date.now(),
     opens: num(kpis, 'opens'),
-    avgDwellMs: typeof avgDwellRaw === 'number' && Number.isFinite(avgDwellRaw) ? avgDwellRaw : null,
+    avgDwellMs: typeof avgDwellRaw === 'number' && Number.isFinite(avgDwellRaw) ? avgDwellRaw * 1000 : null,
     tourStarts: num(kpis, 'tour_starts'),
     tourCompletes: num(kpis, 'tour_completes'),
     stagings: num(kpis, 'stagings'),

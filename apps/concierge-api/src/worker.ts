@@ -13,6 +13,8 @@
  *     limits are SOFT: on a KV error they log and fail open (see ratelimit.ts).
  *   - STAGE_DAILY_LIMIT      -> max /stage generations per UTC day (default 200).
  *   - CONCIERGE_DAILY_LIMIT  -> max concierge chat turns per UTC day (default 1000).
+ *   - EVENTS_DAILY_LIMIT     -> max /events batches stored per UTC day (default 50000).
+ *   - LEAD_DAILY_LIMIT       -> max leads stored per UTC day (default 200).
  *
  * Request-order hardening (this file): oversized bodies are rejected via
  * Content-Length and the per-IP rate limit runs BEFORE request.json(), so a
@@ -49,6 +51,10 @@ interface Env {
   STAGE_DAILY_LIMIT?: string;
   /** Max concierge chat turns per UTC day across ALL clients. Default 1000. */
   CONCIERGE_DAILY_LIMIT?: string;
+  /** Max /events batches stored per UTC day across ALL clients. Default 50000. */
+  EVENTS_DAILY_LIMIT?: string;
+  /** Max leads stored per UTC day across ALL clients. Default 200. */
+  LEAD_DAILY_LIMIT?: string;
   /** Optional shared secret; when set, /stage requires the x-stage-token header. */
   STAGE_AUTH_TOKEN?: string;
   /**
@@ -76,13 +82,20 @@ const CONCIERGE_WINDOW_MS = 5 * 60 * 1000;
 const STAGING_LIMIT = 6;
 const STAGING_WINDOW_MS = 5 * 60 * 1000;
 // Analytics beacons are cheap (D1 insert, no paid upstream), so the limit is
-// generous; the lead form is a human action, so 5 per window is plenty.
+// generous. The lead form is a human action, but an open house on shared WiFi
+// (NAT) puts many humans behind ONE IP — so the per-IP window is generous too;
+// abuse is bounded by the global daily caps below instead.
 const EVENTS_LIMIT = 60;
 const EVENTS_WINDOW_MS = 5 * 60 * 1000;
-const LEAD_LIMIT = 5;
+const LEAD_LIMIT = 20;
 const LEAD_WINDOW_MS = 5 * 60 * 1000;
 const DEFAULT_STAGE_DAILY_LIMIT = 200;
 const DEFAULT_CONCIERGE_DAILY_LIMIT = 1000;
+// /events and /lead hit no paid upstream but DO write to D1 (and feed the
+// Makler report), so they get global daily flood caps too: generous for
+// beacons, tight for leads (200 real inquiries a day would be a luxury problem).
+const DEFAULT_EVENTS_DAILY_LIMIT = 50_000;
+const DEFAULT_LEAD_DAILY_LIMIT = 200;
 
 // Hard ceilings on the request body, enforced via the Content-Length header
 // BEFORE the body is parsed — so an oversized payload is rejected without ever
@@ -283,13 +296,37 @@ export default {
     // NOTE: clientIp was used for rate limiting ONLY — the analytics handlers
     // never receive it, so no IP can ever end up in the database.
     if (isEvents) {
-      const result = await handleEvents(rawBody, env.ANALYTICS_DB);
+      // Global daily flood cap (D1 writes + report noise). Over the cap the
+      // handler answers 202 and DROPS — analytics must never break the viewer.
+      const result = await handleEvents(
+        rawBody,
+        env.ANALYTICS_DB,
+        env.RATE_LIMIT_KV
+          ? new KvDailyBudget(
+              env.RATE_LIMIT_KV,
+              resolveDailyLimit(env.EVENTS_DAILY_LIMIT, DEFAULT_EVENTS_DAILY_LIMIT),
+              'spend:events',
+            )
+          : undefined,
+      );
       return jsonResponse(result.status, result.body, cors);
     }
 
     if (isLead) {
-      const result = await handleLead(rawBody, env.ANALYTICS_DB);
-      return jsonResponse(result.status, result.body, cors);
+      // Global daily flood cap. Unlike /events a capped lead is surfaced as a
+      // 429 with Retry-After — a lead matters, the client shows a message.
+      const result = await handleLead(
+        rawBody,
+        env.ANALYTICS_DB,
+        env.RATE_LIMIT_KV
+          ? new KvDailyBudget(
+              env.RATE_LIMIT_KV,
+              resolveDailyLimit(env.LEAD_DAILY_LIMIT, DEFAULT_LEAD_DAILY_LIMIT),
+              'spend:lead',
+            )
+          : undefined,
+      );
+      return jsonResponse(result.status, result.body, cors, result.retryAfterSeconds);
     }
 
     if (isStage) {

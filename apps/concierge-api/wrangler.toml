@@ -15,12 +15,13 @@ compatibility_flags = ["nodejs_compat"]
 # localhost dev allowlist is used.
 #   ALLOWED_ORIGINS=https://viewer.example.com
 
-# --- Rate limiting + daily spend caps (KV) -----------------------------------
-# Real (cross-isolate) rate limiting AND the global daily spend caps (/stage
-# and concierge) require a KV namespace bound as RATE_LIMIT_KV. Without it the
-# worker falls back to a weak per-isolate in-memory limiter and the spend caps
-# are disabled (it logs a warning on the first request). All KV-backed limits
-# are SOFT: on a KV error they log a warning and fail open (see README.md).
+# --- Rate limiting + daily spend/flood caps (KV) ------------------------------
+# Real (cross-isolate) rate limiting AND the global daily caps (/stage,
+# concierge, /events, /lead) require a KV namespace bound as RATE_LIMIT_KV.
+# Without it the worker falls back to a weak per-isolate in-memory limiter and
+# the daily caps are disabled (it logs a warning on the first request). All
+# KV-backed limits are SOFT: on a KV error they log a warning and fail open
+# (see README.md).
 #
 # Provision once (needs account access), then uncomment with the printed id:
 #   npx wrangler kv namespace create RATE_LIMIT_KV
@@ -53,10 +54,16 @@ compatibility_flags = ["nodejs_compat"]
 #   STAGE_DAILY_LIMIT — max staged images per UTC day across ALL visitors
 #   (kill-switch against cost abuse; default 200; requires RATE_LIMIT_KV).
 #   CONCIERGE_DAILY_LIMIT — max concierge chat turns per UTC day across ALL
-#   visitors (default 1000; requires RATE_LIMIT_KV):
+#   visitors (default 1000; requires RATE_LIMIT_KV).
+#   EVENTS_DAILY_LIMIT — max /events batches stored per UTC day (flood cap for
+#   D1/the report; default 50000; past the cap: 202 + silent drop).
+#   LEAD_DAILY_LIMIT — max leads stored per UTC day (default 200; past the
+#   cap: 429 with Retry-After):
 # [vars]
 # STAGE_DAILY_LIMIT = "200"
 # CONCIERGE_DAILY_LIMIT = "1000"
+# EVENTS_DAILY_LIMIT = "50000"
+# LEAD_DAILY_LIMIT = "200"
 #
 #   STAGE_AUTH_TOKEN — when set, /stage requires a matching `x-stage-token`
 #   header (401 otherwise). Leave unset for the frictionless public demo.
