@@ -28,7 +28,7 @@ import type { Global } from './types';
 //     comes back afterwards) — only an explicit answer or dismissal ("Nein
 //     danke" / close X) sets the once-per-device flag.
 
-const ENGAGEMENT_TRIGGER_MS = 75000;    // accumulated visible time that counts as engaged
+const ENGAGEMENT_TRIGGER_MS = 40000;    // accumulated visible time that counts as engaged (settings.survey.afterSeconds overrides)
 const ENGAGEMENT_CHECK_MS = 1000;       // how often the engagement clock is compared
 const FULLSCREEN_MIN_MS = 30000;        // fullscreen stint that counts as engaged on exit
 const BLOCKED_RETRY_MS = 2000;          // re-check cadence while tutorial/staging block the card
@@ -118,12 +118,23 @@ const init = (global: Global) => {
 
     // Once per property per device. The flag is set ONLY on an explicit answer
     // or dismissal (see markAsked) — never merely because the card appeared.
+    // It suppresses the automatic survey TRIGGERS only: the inquiry pill can
+    // always open the lead form deliberately (see 'inquiry:open' below).
     const storageKey = `sse:survey:${propertyId}`;
+    let alreadyAsked = false;
     try {
-        if (localStorage.getItem(storageKey) !== null) return;
+        alreadyAsked = localStorage.getItem(storageKey) !== null;
     } catch { /* storage unavailable (private mode): worst case we ask again */ }
 
     const leadEndpoint = asText(cfg?.leadEndpoint) ?? deriveLeadEndpoint(analyticsEndpoint);
+
+    // Owner-tunable engagement threshold (settings.survey.afterSeconds),
+    // clamped to a sane range so a typo can neither spam instantly nor
+    // effectively disable the card.
+    const rawAfter = cfg?.afterSeconds;
+    const triggerMs = (typeof rawAfter === 'number' && rawAfter >= 5 && rawAfter <= 600)
+        ? rawAfter * 1000
+        : ENGAGEMENT_TRIGGER_MS;
 
     const markAsked = (value: 'answered' | 'dismissed') => {
         try {
@@ -139,8 +150,13 @@ const init = (global: Global) => {
     // 'anim'), or land on top of the open concierge chat panel. (While staging
     // is open, CSS also slides an already-visible card away — body.staging-open
     // — and back afterwards.)
+    //
+    // Onboarding check: an actually VISIBLE tutorial card (#tutorial.visible),
+    // not body.tutorial-active — that class stays set through the whole linear
+    // tutorial including the free-explore phase, and most visitors never play
+    // the tutorial to its end, so the class alone would block the card forever.
     const blocked = () => {
-        return document.body.classList.contains('tutorial-active') ||
+        return document.querySelector('#tutorial.visible') !== null ||
             document.body.classList.contains('staging-open') ||
             state.cameraMode === 'anim' ||
             state.chatOpen;
@@ -149,17 +165,25 @@ const init = (global: Global) => {
     // ---- card ---------------------------------------------------------------
 
     let card: HTMLDivElement | null = null;
+    // Set by wire(): jumps the mounted card straight to the lead form. Used by
+    // the inquiry pill path, which skips the rating step entirely.
+    let openLeadForm: ((interestValue: string) => void) | null = null;
+    // True while the card exists only because the inquiry pill opened it —
+    // closing it then must NOT set the once-per-device "asked" flag (the
+    // visitor was never asked anything).
+    let fromInquiry = false;
 
     const close = () => {
         if (!card) return;
         const el = card;
         card = null;
+        openLeadForm = null;
         el.classList.remove('visible');
         window.setTimeout(() => el.remove(), HIDE_ANIM_MS);
     };
 
     const dismiss = () => {
-        markAsked('dismissed');
+        if (!fromInquiry) markAsked('dismissed');
         close();
     };
 
@@ -186,6 +210,15 @@ const init = (global: Global) => {
         root.addEventListener('keydown', e => e.stopPropagation());
         root.addEventListener('keyup', e => e.stopPropagation());
         root.addEventListener('keypress', e => e.stopPropagation());
+        // click must not bubble to #ui either: its global handler blurs the
+        // active element after every click ("free the keyboard for hotkeys"),
+        // which would instantly steal focus from the form fields — typing
+        // becomes impossible. We keep that behavior for our BUTTONS ourselves
+        // so hotkeys never stick to them, but never for inputs.
+        root.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (e.target instanceof HTMLButtonElement) e.target.blur();
+        });
 
         q('.survey__close').addEventListener('click', dismiss);
         q('.survey__decline').addEventListener('click', dismiss);
@@ -217,6 +250,14 @@ const init = (global: Global) => {
                 showStep('form');
             });
         });
+
+        // Inquiry-pill entry: jump straight to the form, no rating step.
+        openLeadForm = (interestValue: string) => {
+            interest = interestValue;
+            q('[data-role="formTitle"]').textContent =
+                interestValue === 'expose' ? 'Exposé erhalten' : 'Besichtigung anfragen';
+            showStep('form');
+        };
 
         // -- step 3: mini lead form --------------------------------------------
         const form = q<HTMLFormElement>('[data-step="form"]');
@@ -290,6 +331,9 @@ const init = (global: Global) => {
                     return;
                 }
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                // a sent inquiry is the strongest possible "answered": never
+                // bother this visitor with the automatic survey afterwards
+                markAsked('answered');
                 showThanks('Danke! Wir melden uns zeitnah.', SUCCESS_CLOSE_MS);
             }).catch(() => {
                 fail('Das hat leider nicht geklappt. Bitte versuch es gleich nochmal.');
@@ -299,6 +343,7 @@ const init = (global: Global) => {
 
     const show = () => {
         if (card) return;
+        fromInquiry = false;
         card = document.createElement('div');
         card.id = 'surveyCard';
         card.setAttribute('role', 'dialog');
@@ -320,7 +365,7 @@ const init = (global: Global) => {
     let engagementTimer = 0;
 
     const trigger = () => {
-        if (triggered) return;
+        if (triggered || alreadyAsked) return;
         triggered = true;
         window.clearInterval(engagementTimer);
         if (blocked()) {
@@ -371,9 +416,26 @@ const init = (global: Global) => {
         return activeMs + (visibleSince !== null ? performance.now() - visibleSince : 0);
     };
 
-    engagementTimer = window.setInterval(() => {
-        if (engagedMs() >= ENGAGEMENT_TRIGGER_MS) trigger();
-    }, ENGAGEMENT_CHECK_MS);
+    if (!alreadyAsked) {
+        engagementTimer = window.setInterval(() => {
+            if (engagedMs() >= triggerMs) trigger();
+        }, ENGAGEMENT_CHECK_MS);
+    }
+
+    // ---- inquiry pill → straight to the lead form -----------------------------
+    // A deliberate tap on "Besichtigung anfragen" opens the mini form directly
+    // (no rating step). Fires regardless of the once-per-device survey flag —
+    // a visitor who dismissed the survey must still be able to inquire.
+    // inquiry.ts falls back to url/mailto when this module is inert.
+    events.on('inquiry:open', () => {
+        if (card) {
+            openLeadForm?.('besichtigung');
+            return;
+        }
+        show();
+        fromInquiry = true;
+        openLeadForm?.('besichtigung');
+    });
 
     // -- trigger 3: exiting fullscreen after a ≥30 s stint ----------------------
     // Only where the real Fullscreen API exists: on iPhone Safari ui.ts fakes

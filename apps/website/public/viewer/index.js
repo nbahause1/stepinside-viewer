@@ -81729,13 +81729,18 @@ const initConcierge = (global) => {
 // in the top-right corner turns a visitor into an inquiry:
 //
 //   settings.inquiry.url    — tap opens the customer's booking/contact page in
-//                             a new tab (takes precedence over email).
-//   settings.inquiry.email  — tap opens a pre-addressed e-mail; the subject is
+//                             a new tab (takes precedence over everything).
+//   lead form               — with analytics configured (and the survey module
+//                             not disabled), tap opens the in-viewer mini lead
+//                             form ('inquiry:open' → survey.ts). Preferred over
+//                             mailto: a desktop without a configured mail
+//                             client silently does NOTHING on mailto links.
+//   settings.inquiry.email  — mailto fallback; the subject is
 //                             settings.inquiry.subject or
 //                             "Anfrage: {branding.title or document.title}".
 //
-// The pill stays hidden unless one of the two targets is configured, so a
-// build without lead capture never shows a dead button. `label` overrides the
+// The pill stays hidden unless one of the targets is available, so a build
+// without lead capture never shows a dead button. `label` overrides the
 // default "Besichtigung anfragen".
 // Lenient read (matches branding.ts): settings.json is authored per customer
 // and a bad value must never break the tour.
@@ -81747,7 +81752,12 @@ const initInquiry = (global) => {
     const cfg = settings.inquiry;
     const url = asText$1(cfg?.url);
     const email = asText$1(cfg?.email);
-    if (!url && !email)
+    // Mirrors the survey module's own activation check (survey.ts): when it is
+    // live, it listens for 'inquiry:open' and owns the lead flow.
+    const leadFormAvailable = !!asText$1(settings.analytics?.endpoint) &&
+        !!asText$1(settings.analytics?.propertyId) &&
+        settings.survey?.enabled !== false;
+    if (!url && !email && !leadFormAvailable)
         return;
     const pill = document.getElementById('inquiryPill');
     const trigger = document.getElementById('inquiryTrigger');
@@ -81762,9 +81772,15 @@ const initInquiry = (global) => {
     trigger.setAttribute('title', labelText);
     trigger.addEventListener('click', () => {
         // anonymous usage signal (no-op unless analytics is configured)
-        events.fire('analytics', 'inquiry_click', { target: url ? 'url' : 'email' });
+        events.fire('analytics', 'inquiry_click', {
+            target: url ? 'url' : (leadFormAvailable ? 'form' : 'email')
+        });
         if (url) {
             window.open(url, '_blank', 'noopener,noreferrer');
+            return;
+        }
+        if (leadFormAvailable) {
+            events.fire('inquiry:open');
             return;
         }
         // initBranding runs first, so branding.title (when set) names the
@@ -84678,7 +84694,7 @@ const initStaging = (global) => {
 //     overlay is up merely WAITS (and a card the staging overlay slides away
 //     comes back afterwards) — only an explicit answer or dismissal ("Nein
 //     danke" / close X) sets the once-per-device flag.
-const ENGAGEMENT_TRIGGER_MS = 75000; // accumulated visible time that counts as engaged
+const ENGAGEMENT_TRIGGER_MS = 40000; // accumulated visible time that counts as engaged (settings.survey.afterSeconds overrides)
 const ENGAGEMENT_CHECK_MS = 1000; // how often the engagement clock is compared
 const FULLSCREEN_MIN_MS = 30000; // fullscreen stint that counts as engaged on exit
 const BLOCKED_RETRY_MS = 2000; // re-check cadence while tutorial/staging block the card
@@ -84764,13 +84780,22 @@ const init = (global) => {
         return;
     // Once per property per device. The flag is set ONLY on an explicit answer
     // or dismissal (see markAsked) — never merely because the card appeared.
+    // It suppresses the automatic survey TRIGGERS only: the inquiry pill can
+    // always open the lead form deliberately (see 'inquiry:open' below).
     const storageKey = `sse:survey:${propertyId}`;
+    let alreadyAsked = false;
     try {
-        if (localStorage.getItem(storageKey) !== null)
-            return;
+        alreadyAsked = localStorage.getItem(storageKey) !== null;
     }
     catch { /* storage unavailable (private mode): worst case we ask again */ }
     const leadEndpoint = asText(cfg?.leadEndpoint) ?? deriveLeadEndpoint(analyticsEndpoint);
+    // Owner-tunable engagement threshold (settings.survey.afterSeconds),
+    // clamped to a sane range so a typo can neither spam instantly nor
+    // effectively disable the card.
+    const rawAfter = cfg?.afterSeconds;
+    const triggerMs = (typeof rawAfter === 'number' && rawAfter >= 5 && rawAfter <= 600)
+        ? rawAfter * 1000
+        : ENGAGEMENT_TRIGGER_MS;
     const markAsked = (value) => {
         try {
             // never downgrade "answered" to "dismissed" (X after answering)
@@ -84785,24 +84810,38 @@ const init = (global) => {
     // 'anim'), or land on top of the open concierge chat panel. (While staging
     // is open, CSS also slides an already-visible card away — body.staging-open
     // — and back afterwards.)
+    //
+    // Onboarding check: an actually VISIBLE tutorial card (#tutorial.visible),
+    // not body.tutorial-active — that class stays set through the whole linear
+    // tutorial including the free-explore phase, and most visitors never play
+    // the tutorial to its end, so the class alone would block the card forever.
     const blocked = () => {
-        return document.body.classList.contains('tutorial-active') ||
+        return document.querySelector('#tutorial.visible') !== null ||
             document.body.classList.contains('staging-open') ||
             state.cameraMode === 'anim' ||
             state.chatOpen;
     };
     // ---- card ---------------------------------------------------------------
     let card = null;
+    // Set by wire(): jumps the mounted card straight to the lead form. Used by
+    // the inquiry pill path, which skips the rating step entirely.
+    let openLeadForm = null;
+    // True while the card exists only because the inquiry pill opened it —
+    // closing it then must NOT set the once-per-device "asked" flag (the
+    // visitor was never asked anything).
+    let fromInquiry = false;
     const close = () => {
         if (!card)
             return;
         const el = card;
         card = null;
+        openLeadForm = null;
         el.classList.remove('visible');
         window.setTimeout(() => el.remove(), HIDE_ANIM_MS);
     };
     const dismiss = () => {
-        markAsked('dismissed');
+        if (!fromInquiry)
+            markAsked('dismissed');
         close();
     };
     const wire = (root) => {
@@ -84825,6 +84864,16 @@ const init = (global) => {
         root.addEventListener('keydown', e => e.stopPropagation());
         root.addEventListener('keyup', e => e.stopPropagation());
         root.addEventListener('keypress', e => e.stopPropagation());
+        // click must not bubble to #ui either: its global handler blurs the
+        // active element after every click ("free the keyboard for hotkeys"),
+        // which would instantly steal focus from the form fields — typing
+        // becomes impossible. We keep that behavior for our BUTTONS ourselves
+        // so hotkeys never stick to them, but never for inputs.
+        root.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (e.target instanceof HTMLButtonElement)
+                e.target.blur();
+        });
         q('.survey__close').addEventListener('click', dismiss);
         q('.survey__decline').addEventListener('click', dismiss);
         // -- step 1: one-tap rating ------------------------------------------
@@ -84854,6 +84903,13 @@ const init = (global) => {
                 showStep('form');
             });
         });
+        // Inquiry-pill entry: jump straight to the form, no rating step.
+        openLeadForm = (interestValue) => {
+            interest = interestValue;
+            q('[data-role="formTitle"]').textContent =
+                interestValue === 'expose' ? 'Exposé erhalten' : 'Besichtigung anfragen';
+            showStep('form');
+        };
         // -- step 3: mini lead form --------------------------------------------
         const form = q('[data-step="form"]');
         const nameInput = form.elements.namedItem('name');
@@ -84923,6 +84979,9 @@ const init = (global) => {
                 }
                 if (!res.ok)
                     throw new Error(`HTTP ${res.status}`);
+                // a sent inquiry is the strongest possible "answered": never
+                // bother this visitor with the automatic survey afterwards
+                markAsked('answered');
                 showThanks('Danke! Wir melden uns zeitnah.', SUCCESS_CLOSE_MS);
             }).catch(() => {
                 fail('Das hat leider nicht geklappt. Bitte versuch es gleich nochmal.');
@@ -84932,6 +84991,7 @@ const init = (global) => {
     const show = () => {
         if (card)
             return;
+        fromInquiry = false;
         card = document.createElement('div');
         card.id = 'surveyCard';
         card.setAttribute('role', 'dialog');
@@ -84950,7 +85010,7 @@ const init = (global) => {
     let retryTimer = 0;
     let engagementTimer = 0;
     const trigger = () => {
-        if (triggered)
+        if (triggered || alreadyAsked)
             return;
         triggered = true;
         window.clearInterval(engagementTimer);
@@ -85002,10 +85062,26 @@ const init = (global) => {
     const engagedMs = () => {
         return activeMs + (visibleSince !== null ? performance.now() - visibleSince : 0);
     };
-    engagementTimer = window.setInterval(() => {
-        if (engagedMs() >= ENGAGEMENT_TRIGGER_MS)
-            trigger();
-    }, ENGAGEMENT_CHECK_MS);
+    if (!alreadyAsked) {
+        engagementTimer = window.setInterval(() => {
+            if (engagedMs() >= triggerMs)
+                trigger();
+        }, ENGAGEMENT_CHECK_MS);
+    }
+    // ---- inquiry pill → straight to the lead form -----------------------------
+    // A deliberate tap on "Besichtigung anfragen" opens the mini form directly
+    // (no rating step). Fires regardless of the once-per-device survey flag —
+    // a visitor who dismissed the survey must still be able to inquire.
+    // inquiry.ts falls back to url/mailto when this module is inert.
+    events.on('inquiry:open', () => {
+        if (card) {
+            openLeadForm?.('besichtigung');
+            return;
+        }
+        show();
+        fromInquiry = true;
+        openLeadForm?.('besichtigung');
+    });
     // -- trigger 3: exiting fullscreen after a ≥30 s stint ----------------------
     // Only where the real Fullscreen API exists: on iPhone Safari ui.ts fakes
     // isFullscreen by flipping it on every orientation change, and a mere

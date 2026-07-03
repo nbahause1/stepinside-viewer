@@ -191,9 +191,10 @@ type ExperienceSettings = {
     // Engagement survey + lead CTA card (optional; cast-through like
     // `analytics`, on which it rides). With analytics configured the card is
     // ON by default — `enabled: false` switches it off. After genuine
-    // engagement (tour complete / 75 s visible / a long fullscreen stint) it
-    // asks one emoji question and, on a positive answer, offers
-    // "Besichtigung anfragen" / "Exposé erhalten" CTAs with a mini lead form.
+    // engagement (tour complete / `afterSeconds` of visible time, default
+    // 40 s / a long fullscreen stint) it asks one 1-5 question and, on a
+    // positive answer, offers "Besichtigung anfragen" / "Exposé erhalten"
+    // CTAs with a mini lead form.
     // `leadEndpoint` overrides where the form POSTs; it defaults to the
     // analytics endpoint with /events swapped for /lead. Privacy: the only
     // thing persisted is a one-word "already asked" flag per property
@@ -201,7 +202,8 @@ type ExperienceSettings = {
     // identifiers, nothing linking sessions or properties.
     survey?: {
         enabled?: boolean,
-        leadEndpoint?: string
+        leadEndpoint?: string,
+        afterSeconds?: number
     }
 };
 

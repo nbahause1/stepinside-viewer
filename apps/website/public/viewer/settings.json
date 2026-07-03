@@ -1694,7 +1694,7 @@
     }
   ],
   "analytics": {
-    "endpoint": "/analytics-preview-noop/events",
+    "endpoint": "https://concierge-api.stepinside.workers.dev/events",
     "propertyId": "demo-altbau"
   }
 }

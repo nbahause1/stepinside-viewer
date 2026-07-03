@@ -1692,5 +1692,9 @@
         "fov": 96
       }
     }
-  ]
+  ],
+  "analytics": {
+    "endpoint": "https://concierge-api.stepinside.workers.dev/events",
+    "propertyId": "demo-altbau"
+  }
 }

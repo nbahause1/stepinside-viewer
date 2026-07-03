@@ -4,13 +4,18 @@ import type { Global } from './types';
 // in the top-right corner turns a visitor into an inquiry:
 //
 //   settings.inquiry.url    — tap opens the customer's booking/contact page in
-//                             a new tab (takes precedence over email).
-//   settings.inquiry.email  — tap opens a pre-addressed e-mail; the subject is
+//                             a new tab (takes precedence over everything).
+//   lead form               — with analytics configured (and the survey module
+//                             not disabled), tap opens the in-viewer mini lead
+//                             form ('inquiry:open' → survey.ts). Preferred over
+//                             mailto: a desktop without a configured mail
+//                             client silently does NOTHING on mailto links.
+//   settings.inquiry.email  — mailto fallback; the subject is
 //                             settings.inquiry.subject or
 //                             "Anfrage: {branding.title or document.title}".
 //
-// The pill stays hidden unless one of the two targets is configured, so a
-// build without lead capture never shows a dead button. `label` overrides the
+// The pill stays hidden unless one of the targets is available, so a build
+// without lead capture never shows a dead button. `label` overrides the
 // default "Besichtigung anfragen".
 
 // Lenient read (matches branding.ts): settings.json is authored per customer
@@ -25,7 +30,13 @@ const initInquiry = (global: Global) => {
     const cfg = settings.inquiry;
     const url = asText(cfg?.url);
     const email = asText(cfg?.email);
-    if (!url && !email) return;
+    // Mirrors the survey module's own activation check (survey.ts): when it is
+    // live, it listens for 'inquiry:open' and owns the lead flow.
+    const leadFormAvailable =
+        !!asText(settings.analytics?.endpoint) &&
+        !!asText(settings.analytics?.propertyId) &&
+        settings.survey?.enabled !== false;
+    if (!url && !email && !leadFormAvailable) return;
 
     const pill = document.getElementById('inquiryPill');
     const trigger = document.getElementById('inquiryTrigger');
@@ -41,9 +52,15 @@ const initInquiry = (global: Global) => {
 
     trigger.addEventListener('click', () => {
         // anonymous usage signal (no-op unless analytics is configured)
-        events.fire('analytics', 'inquiry_click', { target: url ? 'url' : 'email' });
+        events.fire('analytics', 'inquiry_click', {
+            target: url ? 'url' : (leadFormAvailable ? 'form' : 'email')
+        });
         if (url) {
             window.open(url, '_blank', 'noopener,noreferrer');
+            return;
+        }
+        if (leadFormAvailable) {
+            events.fire('inquiry:open');
             return;
         }
         // initBranding runs first, so branding.title (when set) names the
