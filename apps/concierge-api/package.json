@@ -8,7 +8,8 @@
     "dev": "node --env-file=.dev.vars --import tsx src/dev-server.ts",
     "dev:worker": "wrangler dev",
     "deploy": "wrangler deploy",
-    "type:check": "tsc --noEmit"
+    "type:check": "tsc --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.106.0"
@@ -18,6 +19,7 @@
     "@types/node": "^22.0.0",
     "tsx": "^4.19.0",
     "typescript": "^5.6.0",
+    "vitest": "^4.1.9",
     "wrangler": "^4.105.0"
   }
 }

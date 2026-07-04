@@ -40,7 +40,7 @@ jobs:
           test "$size" -lt 2400000
 
   concierge-api:
-    name: concierge-api (typecheck)
+    name: concierge-api (typecheck + tests)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -54,6 +54,7 @@ jobs:
           cache-dependency-path: apps/concierge-api/package-lock.json
       - run: npm ci
       - run: npm run type:check
+      - run: npm test
 
   viewer:
     name: viewer (typecheck)
