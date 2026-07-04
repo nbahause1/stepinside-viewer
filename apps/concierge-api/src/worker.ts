@@ -41,6 +41,7 @@ import set3Sofa from '../staging-refs/set3-colour-pop/soft-modular-sofa.jpg';
 import { Buffer } from 'node:buffer';
 import { validateKnowledge } from './knowledge.js';
 import type { KnowledgeBase } from './knowledge.js';
+import { STAGING_STYLES } from './staging-prompt.js';
 import type { StagingStyle } from './staging-prompt.js';
 import type { ReferenceImage } from './staging.js';
 import {
@@ -113,6 +114,18 @@ const STAGING_REF_BYTES: Record<string, ArrayBuffer> = {
   'set3-colour-pop/eames-dsw-chair.jpg': set3Dsw,
   'set3-colour-pop/soft-modular-sofa.jpg': set3Sofa,
 };
+
+// Startup assert (once per isolate): the STAGING_REF_BYTES map is maintained
+// BY HAND against style.refs in staging-prompt.ts — a typo would silently
+// drop a style's reference photos (visibly worse furniture fidelity, no
+// error anywhere). Make the mismatch loud in the logs instead.
+for (const style of STAGING_STYLES) {
+  for (const file of style.refs) {
+    if (!STAGING_REF_BYTES[`${style.dir}/${file}`]) {
+      console.error(`REF_MISSING style=${style.id} file=${style.dir}/${file} — update STAGING_REF_BYTES in worker.ts`);
+    }
+  }
+}
 
 // Base64 is what the Gemini/fal payloads need; encode lazily once per isolate.
 const refBase64Cache = new Map<string, string>();

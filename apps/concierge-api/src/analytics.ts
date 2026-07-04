@@ -485,7 +485,7 @@ async function collectReportData(
 }
 
 /** Parse `{ "rating": 1..5 }` (canonical), a bare number, or numeric string. */
-function extractSurveyRating(data: unknown): number | null {
+export function extractSurveyRating(data: unknown): number | null {
   if (typeof data !== 'string') return null;
   try {
     const parsed: unknown = JSON.parse(data);
