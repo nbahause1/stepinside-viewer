@@ -27,7 +27,10 @@ const zoomState = {
 
 let notify: ((zoom: number) => void) | null = null;
 
-/** Forward zoom-target changes (e.g. onto the global event bus as 'zoom:changed'). */
+/**
+ * Forward zoom-target changes (e.g. onto the global event bus as 'zoom:changed').
+ * @param fn
+ */
 const registerZoomNotifier = (fn: (zoom: number) => void) => {
     notify = fn;
 };
@@ -41,10 +44,16 @@ const setZoom = (value: number) => {
     notify?.(clamped);
 };
 
-/** Multiplicative step — the natural unit for pinch/wheel gestures. */
+/**
+ * Multiplicative step — the natural unit for pinch/wheel gestures.
+ * @param factor
+ */
 const multiplyZoom = (factor: number) => setZoom(zoomState.target * factor);
 
-/** Ease back to 1× (used when the camera mode changes). */
+/**
+ * Ease back to 1× (used when the camera mode changes).
+ * @param immediate
+ */
 const resetZoom = (immediate = false) => {
     setZoom(1);
     if (immediate) zoomState.smoothed = 1;
@@ -53,6 +62,8 @@ const resetZoom = (immediate = false) => {
 /**
  * Advance the smoothed zoom by dt and return the zoomed FOV for this frame.
  * Called by the walk/fly controllers exactly where they write camera.fov.
+ * @param baseFovDeg
+ * @param dt
  */
 const applySmoothedZoom = (baseFovDeg: number, dt: number): number => {
     const t = 1 - Math.exp(-dt * SMOOTHING_RATE);

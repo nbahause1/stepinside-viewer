@@ -132,9 +132,9 @@ const init = (global: Global) => {
     // clamped to a sane range so a typo can neither spam instantly nor
     // effectively disable the card.
     const rawAfter = cfg?.afterSeconds;
-    const triggerMs = (typeof rawAfter === 'number' && rawAfter >= 5 && rawAfter <= 600)
-        ? rawAfter * 1000
-        : ENGAGEMENT_TRIGGER_MS;
+    const triggerMs = (typeof rawAfter === 'number' && rawAfter >= 5 && rawAfter <= 600) ?
+        rawAfter * 1000 :
+        ENGAGEMENT_TRIGGER_MS;
 
     const markAsked = (value: 'answered' | 'dismissed') => {
         try {

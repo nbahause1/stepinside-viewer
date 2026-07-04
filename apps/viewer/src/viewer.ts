@@ -250,8 +250,12 @@ class Viewer {
         // if the input controller stops propagation or the finger lifts off-canvas.
         let pointerActive = false;
         if (platform.mobile) {
-            const down = () => { pointerActive = true; };
-            const up = () => { pointerActive = false; };
+            const down = () => {
+                pointerActive = true;
+            };
+            const up = () => {
+                pointerActive = false;
+            };
             const canvasEl = app.graphicsDevice.canvas;
             canvasEl.addEventListener('pointerdown', down, { capture: true });
             window.addEventListener('pointerup', up, { capture: true });

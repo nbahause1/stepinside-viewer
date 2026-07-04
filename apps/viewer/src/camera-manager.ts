@@ -91,9 +91,9 @@ class CameraManager {
         // top-down look — it was tuned for the demo scan and is no substitute
         // for authoring real views per property.
         const authoredAerial = (settings.aerialViews ?? [])
-            .filter(v => Array.isArray(v?.position) && v.position.length === 3 &&
+        .filter(v => Array.isArray(v?.position) && v.position.length === 3 &&
                          Array.isArray(v?.target) && v.target.length === 3)
-            .map(v => createCamera(new Vec3(v.position), new Vec3(v.target), v.fov ?? 92));
+        .map(v => createCamera(new Vec3(v.position), new Vec3(v.target), v.fov ?? 92));
 
         const cx = bbox.center.x;
         const cz = bbox.center.z;

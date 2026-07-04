@@ -2,6 +2,7 @@ name: CI
 
 on:
   push:
+    branches: [aker-redesign, analytics-leads]
   pull_request:
 
 concurrency:
@@ -10,7 +11,10 @@ concurrency:
 
 jobs:
   website:
-    name: website (typecheck)
+    # Full production build: exercises the prebuild hook, which installs and
+    # builds the viewer and syncs its artifacts — so a broken viewer build or
+    # a broken sync fails HERE, not on the Vercel prod deploy.
+    name: website (typecheck + build)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -21,9 +25,19 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: apps/website/package-lock.json
+          cache-dependency-path: |
+            apps/website/package-lock.json
+            apps/viewer/package-lock.json
       - run: npm ci
       - run: npx tsc --noEmit
+      - run: npm run build
+      - name: bundle size guard
+        # The viewer bundle is the mobile-loadtime budget. Fails when the
+        # minified main chunk grows past 2.4 MB raw (currently ~1.9 MB).
+        run: |
+          size=$(wc -c < $(ls public/viewer/index-*.js | head -1))
+          echo "viewer main chunk: ${size} bytes"
+          test "$size" -lt 2400000
 
   concierge-api:
     name: concierge-api (typecheck)
