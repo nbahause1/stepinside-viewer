@@ -93811,31 +93811,54 @@ class Viewer {
                 this.debugPanel = new DebugPanel(global, this.cameraManager);
             }
             const { gsplat } = app.scene;
-            // quality budget
+            // Quality budget. Mobile numbers follow the 2026 industry consensus
+            // (PlayCanvas docs, Spark, WebSplatter measurements): ~1M splats is
+            // the ceiling an iPhone renders fluidly — and thermal throttling
+            // takes 30-50% off peak within minutes, so budget for sustained,
+            // not cold-start performance.
             const budgets = {
                 mobile: {
-                    low: 1,
-                    high: 2
+                    low: 0.6,
+                    high: 1
                 },
                 desktop: {
                     low: 2,
                     high: 4
                 }
             };
+            const isWebglMobile = platform.mobile && renderer === 'webgl';
+            // The LOD range knobs live on the COMPONENT in 2.20.5 — the
+            // scene-level lodRangeMin/Max setters are deprecated no-op stubs
+            // (getter returns a constant), so writing them does nothing.
+            const splatComponent = results[0].gsplat;
             const applyPerfSettings = () => {
                 const budget = () => {
                     if (config.budget !== undefined && Number.isFinite(config.budget) && config.budget > 0) {
                         return config.budget;
                     }
+                    if (isWebglMobile) {
+                        // CPU-sorted path without per-chunk frustum culling —
+                        // the weakest devices get the hardest cap.
+                        return state.performanceMode ? 0.4 : 0.6;
+                    }
                     const quality = platform.mobile ? budgets.mobile : budgets.desktop;
                     return state.performanceMode ? quality.low : quality.high;
                 };
                 gsplat.splatBudget = budget() * 1000000;
-                gsplat.lodRangeMin = 0;
-                gsplat.lodRangeMax = 1000;
+                // Mobile GPUs (TBDR) blend EVERY overlapping splat fragment —
+                // fill rate is the bottleneck, so: never stream the finest LOD
+                // near the camera (halves close-range splats), cull
+                // low-contribution splats GPU-side, clip near-zero alpha
+                // earlier, and thin the periphery slightly (walk mode centres
+                // the gaze anyway). Desktop keeps maximum quality.
+                if (splatComponent) {
+                    splatComponent.lodRangeMin = isWebglMobile ? 2 : (platform.mobile ? 1 : 0);
+                    splatComponent.lodRangeMax = 1000;
+                }
                 gsplat.colorUpdateAngle = state.performanceMode ? 4 : 2;
-                gsplat.minContribution = 1;
-                gsplat.alphaClip = 1 / 255;
+                gsplat.minContribution = platform.mobile ? (state.performanceMode ? 8 : 4) : 1;
+                gsplat.alphaClip = platform.mobile ? 8 / 255 : 1 / 255;
+                gsplat.foveationStrength = platform.mobile ? 0.35 : 0;
                 gsplat.antiAlias = config.aa;
             };
             if (config.fullload) {
@@ -93846,8 +93869,8 @@ class Viewer {
                 // reveal once low lod has loaded for fastest possible reveal
                 const resource = results[0].gsplat.resource;
                 const lodLevels = resource?.octree?.lodLevels;
-                if (lodLevels) {
-                    gsplat.lodRangeMax = gsplat.lodRangeMin = lodLevels - 1;
+                if (lodLevels && splatComponent) {
+                    splatComponent.lodRangeMax = splatComponent.lodRangeMin = lodLevels - 1;
                 }
             }
             // these two allow LOD behind camera to drop, saves lots of splats
@@ -94963,6 +94986,14 @@ const loadGsplat = async (app, config, progressCallback) => {
                 unified: true,
                 asset
             });
+            if (platform.mobile && entity.gsplat) {
+                // Indoor LOD distances: the engine default (5 m base, 3x per
+                // level) keeps the NEIGHBOURING room at full detail. In a flat
+                // the next room starts 2-3 m away — drop it a level sooner.
+                // Mobile only; desktop has fill rate to spare.
+                entity.gsplat.lodBaseDistance = 2.5;
+                entity.gsplat.lodMultiplier = 2.5;
+            }
             app.root.addChild(entity);
             resolve(entity);
         });
@@ -95070,7 +95101,10 @@ const initCanvas = (global) => {
     // address the resulting softness with a sharpening post-pass instead (see
     // settings.json), which costs no extra render resolution.
     const webgl = global.renderer === 'webgl';
-    const maxPixelDim = platform.mobile ? (webgl ? 768 : 1080) : (webgl ? 1080 : 1536);
+    // Mobile WebGPU: 900 instead of 1080 — 1080 was ~native Retina on a phone
+    // (2.5M pixels of alpha-blended splat fill per frame); TBDR GPUs are fill-
+    // rate bound on splats and throttle 30-50% when warm, so leave headroom.
+    const maxPixelDim = platform.mobile ? (webgl ? 768 : 900) : (webgl ? 1080 : 1536);
     // Optical-zoom sharpness: while zoomed in, raise the cap in step with the
     // zoom factor (quantized to half steps so the swap chain doesn't
     // reallocate on every pinch frame). devicePixelRatio stays the hard

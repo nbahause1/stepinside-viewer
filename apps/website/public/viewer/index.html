@@ -32,15 +32,17 @@
             const renderer = url.searchParams.has('webgpu') ? 'webgpu' :
                 (url.searchParams.has('webgl') || !hasWebGPU) ? 'webgl' : 'webgpu';
 
-            // Serve a lighter scan to the WebGL path (Safari) so it loads fast and
-            // stays smooth. WebGPU gets the streamed multi-LOD SOG (`lod-meta.json`):
-            // the viewer shows the lowest LOD almost instantly, then streams in
-            // higher detail on demand — far faster first paint than the 42MB
-            // single-file scan. `?content=` overrides; `?webgl` keeps the light scan.
-            // Both defaults point at the PRUNED asset set (tools/prepare-scan.mjs):
-            // 47% fewer splats than the raw capture at identical visual quality,
-            // verified on-device. Old assets remain deployed for ?content= A/B.
-            const defaultContent = renderer === 'webgl' ? './scene-pruned-light.sog' : './scene-pruned/lod-meta.json';
+            // BOTH renderers stream the multi-LOD SOG (`lod-meta.json`): lowest
+            // LOD paints almost instantly, higher detail streams on demand. The
+            // WebGL path used to get the single-file SH0 blob instead — but that
+            // meant ALL 2.9M splats with no LOD on exactly the oldest, weakest
+            // devices (the CPU-sort path has no per-chunk frustum culling
+            // either); the viewer now caps it hard via lodRangeMin/splatBudget
+            // instead (see viewer.ts). `?content=./scene-pruned-light.sog`
+            // restores the old blob for A/B. Defaults point at the PRUNED asset
+            // set (tools/prepare-scan.mjs): 47% fewer splats than the raw
+            // capture at identical visual quality, verified on-device.
+            const defaultContent = './scene-pruned/lod-meta.json';
             const contentUrl = url.searchParams.has('content') ? url.searchParams.get('content') : defaultContent;
 
             const budgetParam = url.searchParams.get('budget');

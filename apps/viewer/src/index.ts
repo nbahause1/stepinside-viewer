@@ -56,6 +56,14 @@ const loadGsplat = async (app: AppBase, config: Config, progressCallback: (progr
                 unified: true,
                 asset
             });
+            if (platform.mobile && entity.gsplat) {
+                // Indoor LOD distances: the engine default (5 m base, 3x per
+                // level) keeps the NEIGHBOURING room at full detail. In a flat
+                // the next room starts 2-3 m away — drop it a level sooner.
+                // Mobile only; desktop has fill rate to spare.
+                entity.gsplat.lodBaseDistance = 2.5;
+                entity.gsplat.lodMultiplier = 2.5;
+            }
             app.root.addChild(entity);
             resolve(entity);
         });
@@ -184,7 +192,10 @@ const initCanvas = (global: Global) => {
     // address the resulting softness with a sharpening post-pass instead (see
     // settings.json), which costs no extra render resolution.
     const webgl = global.renderer === 'webgl';
-    const maxPixelDim = platform.mobile ? (webgl ? 768 : 1080) : (webgl ? 1080 : 1536);
+    // Mobile WebGPU: 900 instead of 1080 — 1080 was ~native Retina on a phone
+    // (2.5M pixels of alpha-blended splat fill per frame); TBDR GPUs are fill-
+    // rate bound on splats and throttle 30-50% when warm, so leave headroom.
+    const maxPixelDim = platform.mobile ? (webgl ? 768 : 900) : (webgl ? 1080 : 1536);
 
     // Optical-zoom sharpness: while zoomed in, raise the cap in step with the
     // zoom factor (quantized to half steps so the swap chain doesn't
