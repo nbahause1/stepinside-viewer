@@ -1,0 +1,2721 @@
+@charset "UTF-8";
+:root {
+  --canvas-opacity: 1;
+  --accent: #F60;
+  --glass-blur: 24px;
+  --glass-dim: rgba(0, 0, 0, 0.35);
+  --glass-edge: rgba(255, 255, 255, 0.12);
+  --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
+  --label-1: rgba(255, 255, 255, 0.95);
+  --label-2: rgba(255, 255, 255, 0.65);
+  --label-3: rgba(255, 255, 255, 0.40);
+  --ease-glass: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-soft: cubic-bezier(0.45, 0, 0.55, 1);
+  --ink-1: rgba(24, 24, 26, 0.94);
+  --ink-2: rgba(28, 28, 30, 0.62);
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  touch-action: none;
+}
+
+body {
+  overflow: hidden;
+  font-family: "Arial", sans-serif;
+  -moz-user-select: none;
+       user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+canvas {
+  opacity: var(--canvas-opacity);
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+}
+
+body::after {
+  content: "";
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 1px;
+  height: 1px;
+  backdrop-filter: blur(1px);
+  -webkit-backdrop-filter: blur(1px);
+  pointer-events: none;
+}
+
+button {
+  -webkit-appearance: none;
+     -moz-appearance: none;
+          appearance: none;
+}
+
+.hidden {
+  display: none !important;
+}
+
+.spacer {
+  flex-grow: 1;
+}
+
+#ui {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+#peripheralVignette {
+  --vig-darken: 0.34;
+  --vig-blur: 2px;
+  --vig-darken-inner: 52%;
+  --vig-blur-inner: 46%;
+  --vig-blur-outer: 96%;
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.4s ease;
+  background: radial-gradient(ellipse at center, transparent var(--vig-darken-inner), rgba(0, 0, 0, var(--vig-darken)) 100%);
+  backdrop-filter: blur(var(--vig-blur));
+  -webkit-backdrop-filter: blur(var(--vig-blur));
+  mask-image: radial-gradient(ellipse at center, transparent var(--vig-blur-inner), #000 var(--vig-blur-outer));
+  -webkit-mask-image: radial-gradient(ellipse at center, transparent var(--vig-blur-inner), #000 var(--vig-blur-outer));
+}
+
+#peripheralVignette.visible {
+  opacity: 1;
+}
+
+/* premium thin glowing white frame around the viewport (decorative).
+   Sits above the canvas but below the UI (DOM order), never catches input. */
+#screenFrame {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+}
+#screenFrame::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  box-shadow: inset 0 0 110px rgba(0, 0, 0, 0.12);
+}
+#screenFrame::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.95), inset 0 0 9px rgba(255, 255, 255, 0.5), inset 0 0 32px rgba(255, 255, 255, 0.2);
+}
+
+#ui * {
+  pointer-events: auto;
+}
+
+.walkHint {
+  position: absolute;
+  top: max(60px, env(safe-area-inset-top));
+  left: 50%;
+  transform: translateX(-50%);
+  background-color: rgba(0, 0, 0, 0.7);
+  color: #fff;
+  font-size: 14px;
+  padding: 10px 20px;
+  border-radius: 8px;
+  cursor: pointer;
+  pointer-events: auto;
+  white-space: nowrap;
+}
+
+/* StepInside brand dome — ported 1:1 from the website hero.
+   A downward-opening half-circle: a frosted-glass blur masked into the dome
+   shape, a soft white radial glow on top, and the breathing wordmark centred. */
+#brandDome {
+  position: absolute;
+  inset-inline: 0;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  justify-content: center;
+  padding-top: 14px;
+  pointer-events: none;
+}
+#brandDome .brandMark {
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 18px;
+  border-radius: 999px;
+  cursor: pointer;
+  text-decoration: none;
+  transition: opacity 150ms ease, transform 150ms var(--ease-out);
+  background: linear-gradient(180deg, rgba(30, 30, 32, 0.5), rgba(18, 18, 20, 0.42));
+  backdrop-filter: blur(20px) saturate(150%);
+  -webkit-backdrop-filter: blur(20px) saturate(150%);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 8px 24px -10px rgba(0, 0, 0, 0.4), inset 0 1px 0 0 rgba(255, 255, 255, 0.14);
+}
+#brandDome .brandMark:active {
+  transform: scale(0.97);
+}
+#brandDome .brandMark > .brandMark__inner {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  animation: logoGlow 3.6s ease-in-out 0.75s infinite;
+}
+#brandDome .brandMark .brandMark__diamond {
+  display: block;
+  width: 8px;
+  height: 8px;
+  flex-shrink: 0;
+  transform: rotate(45deg);
+  background: #fff;
+}
+#brandDome .brandMark .brandMark__word {
+  font-family: "Montserrat", "Arial", sans-serif;
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  color: #fff;
+}
+#brandDome .brandMark .brandMark__logo {
+  display: block;
+  height: 20px;
+  max-width: 160px;
+  -o-object-fit: contain;
+     object-fit: contain;
+  -webkit-user-drag: none;
+}
+
+@keyframes logoGlow {
+  0%, 100% {
+    filter: drop-shadow(0 0 1px rgba(255, 255, 255, 0.15));
+    transform: scale(1);
+  }
+  50% {
+    filter: drop-shadow(0 0 3px rgba(255, 255, 255, 0.42)) drop-shadow(0 0 1px rgba(255, 255, 255, 0.26));
+    transform: scale(1.012);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  #brandDome .brandMark__inner {
+    animation: none;
+  }
+}
+/* guided onboarding (tutorial) */
+#tutorial {
+  position: absolute;
+  left: 50%;
+  bottom: 96px;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateX(-50%) translateY(10px) scale(0.98);
+  transition: opacity 0.4s var(--ease-out), transform 0.4s var(--ease-out);
+}
+#tutorial.visible {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0) scale(1);
+}
+#tutorial .tutorialCard {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 22px 12px 14px;
+  border-radius: 18px;
+  white-space: nowrap;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.64), rgba(250, 250, 251, 0.5));
+  backdrop-filter: blur(30px) saturate(150%) brightness(1.06);
+  -webkit-backdrop-filter: blur(30px) saturate(150%) brightness(1.06);
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  box-shadow: 0 18px 44px -14px rgba(0, 0, 0, 0.32), inset 0 1px 0 0 rgba(255, 255, 255, 0.85), inset 0 -1px 0 0 rgba(0, 0, 0, 0.04);
+}
+#tutorial .tutorialCard > .tutorialCard__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  flex-shrink: 0;
+}
+#tutorial .tutorialCard .tutorialCard__title {
+  font-family: "Montserrat", "Arial", sans-serif;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  color: var(--ink-1);
+}
+#tutorial .tutorialCard .tutorialCard__text {
+  font-family: "Montserrat", "Arial", sans-serif;
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 1.35;
+  margin-top: 3px;
+  color: var(--ink-2);
+}
+#tutorial .tutorialCard:not(.hidden) {
+  animation: tutorialCardGlow 2.2s var(--ease-soft) infinite;
+}
+#tutorial .tutorialCard__icon svg {
+  fill: none;
+  stroke: var(--ink-1);
+  stroke-width: 1.75;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transform-origin: center;
+}
+#tutorial svg.hintLook {
+  animation: hintLookRock 2.4s var(--ease-soft) infinite;
+}
+#tutorial svg.hintWalk {
+  animation: hintWalkBob 2s var(--ease-soft) infinite;
+}
+#tutorial svg.hintArrows {
+  animation: hintArrowsSpread 2.2s var(--ease-soft) infinite;
+}
+#tutorial svg.hintWalkBack {
+  animation: hintWalkBob 2s var(--ease-soft) infinite;
+}
+#tutorial svg.hintDrone,
+#tutorial svg.hintMeasure,
+#tutorial svg.hintMeasuring,
+#tutorial svg.hintHome,
+#tutorial svg.hintChat {
+  animation: hintDronePulse 2s var(--ease-soft) infinite;
+}
+
+@keyframes hintLookRock {
+  0%, 100% {
+    transform: translateX(-2.5px);
+  }
+  50% {
+    transform: translateX(2.5px);
+  }
+}
+@keyframes hintWalkBob {
+  0%, 100% {
+    transform: translateY(2.5px);
+    opacity: 0.6;
+  }
+  50% {
+    transform: translateY(-2.5px);
+    opacity: 1;
+  }
+}
+@keyframes hintDronePulse {
+  0%, 100% {
+    transform: scale(0.92);
+    opacity: 0.6;
+  }
+  50% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+@keyframes hintArrowsSpread {
+  0%, 100% {
+    transform: scaleX(0.86);
+    opacity: 0.6;
+  }
+  50% {
+    transform: scaleX(1.08);
+    opacity: 1;
+  }
+}
+@keyframes tutorialCardGlow {
+  0%, 100% {
+    box-shadow: 0 18px 44px -14px rgba(0, 0, 0, 0.32), inset 0 1px 0 0 rgba(255, 255, 255, 0.85), inset 0 -1px 0 0 rgba(0, 0, 0, 0.04), 0 0 0 0 rgba(255, 255, 255, 0);
+  }
+  50% {
+    box-shadow: 0 18px 44px -14px rgba(0, 0, 0, 0.32), inset 0 1px 0 0 rgba(255, 255, 255, 0.85), inset 0 -1px 0 0 rgba(0, 0, 0, 0.04), 0 0 22px 3px rgba(255, 255, 255, 0.55);
+  }
+}
+.domeBtn.tutorial-hint {
+  animation: domeHintPulse 1.5s var(--ease-soft) infinite;
+}
+
+@keyframes domeHintPulse {
+  0%, 100% {
+    background-color: rgba(255, 255, 255, 0.1);
+    box-shadow: 0 0 0 0 rgba(255, 255, 255, 0);
+  }
+  50% {
+    background-color: rgba(255, 255, 255, 0.22);
+    box-shadow: 0 0 16px 4px rgba(255, 255, 255, 0.55);
+  }
+}
+#chatToggle.tutorial-hint {
+  animation: chatHintPulse 1.5s var(--ease-soft) infinite;
+}
+
+@keyframes chatHintPulse {
+  0%, 100% {
+    box-shadow: 0 8px 24px -10px rgba(0, 0, 0, 0.4), 0 0 0 0 rgba(255, 255, 255, 0);
+  }
+  50% {
+    box-shadow: 0 8px 24px -10px rgba(0, 0, 0, 0.4), 0 0 18px 5px rgba(255, 255, 255, 0.6);
+  }
+}
+body.tutorial-active #walkHint {
+  display: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #tutorial .tutorialCard__icon svg,
+  #tutorial .tutorialCard:not(.hidden) {
+    animation: none;
+  }
+  .domeBtn.tutorial-hint {
+    animation: none;
+    background-color: rgba(255, 255, 255, 0.2);
+    box-shadow: 0 0 12px 2px rgba(255, 255, 255, 0.4);
+  }
+  #chatToggle.tutorial-hint {
+    animation: none;
+    box-shadow: 0 8px 24px -10px rgba(0, 0, 0, 0.4), 0 0 12px 2px rgba(255, 255, 255, 0.4);
+  }
+}
+/* control dome — replaces the stock SuperSplat button bar */
+#controlsWrap > #buttonsContainer {
+  display: none !important;
+}
+
+#controlDome {
+  position: absolute;
+  left: 50%;
+  bottom: 14px;
+  transform: translateX(-50%);
+  z-index: 15;
+  pointer-events: none;
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(30, 30, 32, 0.5), rgba(18, 18, 20, 0.42));
+  backdrop-filter: blur(20px) saturate(150%);
+  -webkit-backdrop-filter: blur(20px) saturate(150%);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 8px 24px -10px rgba(0, 0, 0, 0.4), inset 0 1px 0 0 rgba(255, 255, 255, 0.14);
+}
+#controlDome > .controlDome__row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 8px;
+  pointer-events: none;
+}
+#controlDome .domeBtn {
+  pointer-events: auto;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  color: #fff;
+  background-color: rgba(255, 255, 255, 0);
+  transition: background-color 160ms var(--ease-out), transform 160ms var(--ease-out);
+}
+@media (hover: hover) and (pointer: fine) {
+  #controlDome .domeBtn:hover {
+    background-color: rgba(255, 255, 255, 0.12);
+  }
+}
+#controlDome .domeBtn:active {
+  transform: scale(0.94);
+}
+#controlDome .domeBtn > svg {
+  display: block;
+  fill: none;
+  stroke: #fff;
+  stroke-width: 1.75;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+#controlDome #domeMeasure .domeIcon--walk {
+  display: none;
+}
+#controlDome #domeMeasureAerial .domeIcon--measureExit {
+  display: none;
+}
+#controlDome #domeTour .domeIcon--tourStop {
+  display: none;
+}
+#controlDome #domeTour.active .domeIcon--tourStart {
+  display: none;
+}
+#controlDome #domeTour.active .domeIcon--tourStop {
+  display: block;
+}
+#controlDome .controlDome__row--aerial {
+  display: none;
+}
+#controlDome.is-aerial .controlDome__row--walk {
+  display: none;
+}
+#controlDome.is-aerial .controlDome__row--aerial {
+  display: flex;
+}
+
+/* AI concierge chat — dark-glass pill bottom-right that expands to a panel */
+#chatPill {
+  position: fixed;
+  left: max(14px, env(safe-area-inset-left));
+  bottom: max(14px, env(safe-area-inset-bottom));
+  z-index: 16;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+}
+#chatPill #chatToggle {
+  pointer-events: auto;
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 50%;
+  cursor: pointer;
+  color: rgba(255, 255, 255, 0.82);
+  background: linear-gradient(180deg, rgba(30, 30, 32, 0.5), rgba(18, 18, 20, 0.42));
+  backdrop-filter: blur(20px) saturate(150%);
+  -webkit-backdrop-filter: blur(20px) saturate(150%);
+  box-shadow: 0 8px 24px -10px rgba(0, 0, 0, 0.4), inset 0 1px 0 0 rgba(255, 255, 255, 0.14);
+  transition: background 160ms var(--ease-out), transform 160ms var(--ease-out);
+}
+#chatPill #chatToggle * {
+  pointer-events: none;
+}
+#chatPill #chatToggle > svg {
+  display: block;
+  width: 22px;
+  height: 22px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.75;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+@media (hover: hover) and (pointer: fine) {
+  #chatPill #chatToggle:hover {
+    background: linear-gradient(180deg, rgba(42, 42, 45, 0.56), rgba(26, 26, 28, 0.48));
+  }
+}
+#chatPill #chatToggle:active {
+  transform: scale(0.94);
+}
+#chatPill.is-open #chatToggle {
+  display: none;
+}
+#chatPill #chatPanel {
+  pointer-events: auto;
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: min(360px, 100vw - 28px);
+  height: min(520px, 100vh - 120px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 20px;
+  background: linear-gradient(180deg, rgba(30, 30, 32, 0.5), rgba(18, 18, 20, 0.42));
+  backdrop-filter: blur(20px) saturate(150%);
+  -webkit-backdrop-filter: blur(20px) saturate(150%);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 18px 44px -14px rgba(0, 0, 0, 0.5), inset 0 1px 0 0 rgba(255, 255, 255, 0.14);
+  opacity: 0;
+  transform: translateY(10px) scale(0.98);
+  transform-origin: bottom left;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.4s var(--ease-out), transform 0.4s var(--ease-out), visibility 0s linear 0.4s;
+}
+#chatPill #chatPanel.is-open {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  visibility: visible;
+  pointer-events: auto;
+  transition: opacity 0.4s var(--ease-out), transform 0.4s var(--ease-out), visibility 0s;
+}
+#chatPill #chatHeader {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 12px 12px 18px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+#chatPill #chatTitle {
+  font-family: "Montserrat", "Arial", sans-serif;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--label-1);
+}
+#chatPill #chatClose {
+  pointer-events: auto;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  color: #fff;
+  background-color: rgba(255, 255, 255, 0);
+  transition: background-color 160ms var(--ease-out);
+}
+#chatPill #chatClose * {
+  pointer-events: none;
+}
+#chatPill #chatClose > svg {
+  display: block;
+  fill: none;
+  stroke: var(--label-2);
+  stroke-width: 1.75;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+@media (hover: hover) and (pointer: fine) {
+  #chatPill #chatClose:hover {
+    background-color: rgba(255, 255, 255, 0.12);
+  }
+  #chatPill #chatClose:hover > svg {
+    stroke: var(--label-1);
+  }
+}
+#chatPill #chatMessages {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+}
+#chatPill #chatMessages::-webkit-scrollbar {
+  width: 8px;
+}
+#chatPill #chatMessages::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+}
+#chatPill #chatMessages::-webkit-scrollbar-track {
+  background: transparent;
+}
+#chatPill .chatMsg {
+  max-width: 82%;
+  padding: 9px 13px;
+  border-radius: 16px;
+  font-family: "Montserrat", "Arial", sans-serif;
+  font-size: 13.5px;
+  font-weight: 500;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+#chatPill .chatMsg--user {
+  align-self: flex-end;
+  color: #fff;
+  background: linear-gradient(180deg, rgba(72, 72, 78, 0.7), rgba(54, 54, 60, 0.64));
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-bottom-right-radius: 6px;
+}
+#chatPill .chatMsg--bot {
+  align-self: flex-start;
+  color: var(--ink-1);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(248, 248, 250, 0.82));
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  border-bottom-left-radius: 6px;
+}
+#chatPill .chatMsg--thinking {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 12px 14px;
+}
+#chatPill .chatDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: var(--ink-2);
+  animation: chatDotPulse 1.2s var(--ease-soft) infinite;
+}
+#chatPill .chatDot:nth-child(2) {
+  animation-delay: 0.18s;
+}
+#chatPill .chatDot:nth-child(3) {
+  animation-delay: 0.36s;
+}
+#chatPill {
+  /* Scripted mode: suggestion buttons sit where the input row would be. */
+}
+#chatPill #chatSuggest {
+  flex-shrink: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+#chatPill #chatSuggest.hidden {
+  display: none;
+}
+#chatPill .chatChip {
+  pointer-events: auto;
+  max-width: 100%;
+  padding: 9px 15px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.05));
+  color: var(--label-1);
+  font-family: "Montserrat", "Arial", sans-serif;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.2;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 160ms var(--ease-out), background-color 160ms var(--ease-out), transform 160ms var(--ease-out);
+}
+#chatPill .chatChip:hover {
+  border-color: rgba(255, 255, 255, 0.32);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.08));
+}
+#chatPill .chatChip:active {
+  transform: translateY(1px);
+}
+#chatPill #chatInputRow {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+#chatPill #chatInputRow.hidden {
+  display: none;
+}
+#chatPill #chatInput {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 40px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background-color: rgba(255, 255, 255, 0.06);
+  color: var(--label-1);
+  font-family: "Montserrat", "Arial", sans-serif;
+  font-size: 13.5px;
+  font-weight: 500;
+  outline: none;
+  transition: border-color 160ms var(--ease-out), background-color 160ms var(--ease-out);
+}
+#chatPill #chatInput::-moz-placeholder {
+  color: var(--label-3);
+}
+#chatPill #chatInput::placeholder {
+  color: var(--label-3);
+}
+#chatPill #chatInput:focus {
+  border-color: rgba(255, 255, 255, 0.28);
+  background-color: rgba(255, 255, 255, 0.1);
+}
+#chatPill #chatInput:disabled {
+  opacity: 0.6;
+}
+#chatPill #chatSend {
+  pointer-events: auto;
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 50%;
+  cursor: pointer;
+  color: #fff;
+  background: linear-gradient(180deg, rgba(72, 72, 78, 0.7), rgba(54, 54, 60, 0.64));
+  transition: background 160ms var(--ease-out), transform 160ms var(--ease-out), opacity 160ms var(--ease-out);
+}
+#chatPill #chatSend * {
+  pointer-events: none;
+}
+#chatPill #chatSend > svg {
+  display: block;
+  fill: none;
+  stroke: #fff;
+  stroke-width: 1.75;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+@media (hover: hover) and (pointer: fine) {
+  #chatPill #chatSend:hover {
+    background: linear-gradient(180deg, rgba(88, 88, 94, 0.78), rgba(66, 66, 72, 0.7));
+  }
+}
+#chatPill #chatSend:active {
+  transform: scale(0.94);
+}
+#chatPill #chatSend:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+@keyframes chatDotPulse {
+  0%, 100% {
+    opacity: 0.3;
+    transform: translateY(0);
+  }
+  50% {
+    opacity: 1;
+    transform: translateY(-2px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  #chatPill #chatPanel {
+    transition: opacity 0.2s linear, visibility 0s;
+  }
+  #chatPill .chatDot {
+    animation: none;
+    opacity: 0.6;
+  }
+}
+/* Mobile-only (narrow viewport, e.g. the embedded viewer fullscreen on a phone).
+   Keyed on the viewer's OWN width, so the desktop layout is never affected. */
+@media (max-width: 600px) {
+  #tutorial .tutorialCard {
+    max-width: calc(100vw - 24px);
+    white-space: normal;
+  }
+  #chatPill #chatPanel {
+    width: min(300px, 100vw - 40px);
+    height: min(270px, 100dvh - 140px);
+  }
+}
+/* distance measurement overlay */
+#measureOverlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 14;
+}
+#measureOverlay * {
+  pointer-events: none;
+}
+#measureOverlay .measure__svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+#measureOverlay .measure__line {
+  stroke: #fff;
+  stroke-width: 2;
+  stroke-dasharray: 7 6;
+  stroke-linecap: round;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.55));
+}
+#measureOverlay .measure__dot {
+  position: absolute;
+  box-sizing: border-box;
+  width: 14px;
+  height: 14px;
+  margin: -7px 0 0 -7px;
+  border-radius: 50%;
+  border: 2px solid #fff;
+  background: rgba(255, 255, 255, 0.3);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.55);
+}
+#measureOverlay .measure__dot--preview {
+  width: 18px;
+  height: 18px;
+  margin: -9px 0 0 -9px;
+  background: transparent;
+  border-color: rgba(255, 255, 255, 0.85);
+}
+#measureOverlay .measure__label {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  padding: 4px 11px;
+  border-radius: 999px;
+  white-space: nowrap;
+  font-family: "Montserrat", "Arial", sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  color: var(--ink-1);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(250, 250, 251, 0.56));
+  backdrop-filter: blur(14px) saturate(150%);
+  -webkit-backdrop-filter: blur(14px) saturate(150%);
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  box-shadow: 0 6px 18px -8px rgba(0, 0, 0, 0.3), inset 0 1px 0 0 rgba(255, 255, 255, 0.85);
+}
+
+body.measure-active canvas {
+  cursor: crosshair;
+}
+
+body.measure-active #controlDome #domeMeasure .domeIcon--measure {
+  display: none;
+}
+body.measure-active #controlDome #domeMeasure .domeIcon--walk {
+  display: block;
+}
+body.measure-active #controlDome #domeMeasureAerial .domeIcon--measure {
+  display: none;
+}
+body.measure-active #controlDome #domeMeasureAerial .domeIcon--measureExit {
+  display: block;
+}
+
+/* branding link for third-party embeds */
+#viewerBranding {
+  position: absolute;
+  top: max(16px, env(safe-area-inset-top));
+  left: max(16px, env(safe-area-inset-left));
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color 150ms ease;
+  color: #E0DCDD;
+}
+#viewerBranding:hover {
+  color: #fff;
+}
+#viewerBranding > svg {
+  height: 16px;
+  width: auto;
+  flex-shrink: 0;
+  padding: 8px;
+  border-radius: 6px;
+  background-color: rgba(0, 0, 0, 0.3);
+}
+#viewerBranding > span {
+  font-size: 14px;
+  font-weight: bold;
+  text-shadow: -1px -1px 0 rgba(0, 0, 0, 0.4), 1px -1px 0 rgba(0, 0, 0, 0.4), -1px 1px 0 rgba(0, 0, 0, 0.4), 1px 1px 0 rgba(0, 0, 0, 0.4);
+}
+
+/* poster */
+#poster {
+  display: none;
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-image: var(--poster-url);
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+
+/* loadingWrap */
+#loadingWrap {
+  position: fixed;
+  bottom: 120px;
+  left: 50%;
+  transform: translate(-50%, 0);
+  width: min(380px, 100vw - 32px);
+  display: flex;
+  flex-direction: column;
+  padding: 16px;
+}
+#loadingWrap > #loadingText {
+  font-size: 18px;
+  color: #fff;
+  text-align: center;
+  text-shadow: 0 0 4px rgba(0, 0, 0, 0.5);
+}
+#loadingWrap > #loadingBar {
+  width: 100%;
+  height: 10px;
+  margin-top: 8px;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+/* controlsWrap — only the timeline inside is ever visible (the stock button
+   bar is hidden; the control dome replaces it). It shows during the guided
+   tour ("Rundgang") as a slim frosted pill floating just above the dome. */
+#controlsWrap {
+  position: absolute;
+  left: 50%;
+  bottom: 78px;
+  transform: translateX(-50%);
+  width: min(420px, 100% - 44px);
+  z-index: 15;
+  display: flex;
+  flex-direction: column;
+}
+#controlsWrap.faded-in {
+  visibility: visible;
+  opacity: 1;
+  transition: opacity 0.5s ease-out;
+}
+#controlsWrap.faded-out {
+  visibility: hidden;
+  opacity: 0;
+  transition: visibility 0s 0.5s, opacity 0.5s ease-out;
+}
+#controlsWrap > #timelineContainer {
+  height: 30px;
+  cursor: pointer;
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(30, 30, 32, 0.5), rgba(18, 18, 20, 0.42));
+  backdrop-filter: blur(20px) saturate(150%);
+  -webkit-backdrop-filter: blur(20px) saturate(150%);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 8px 24px -10px rgba(0, 0, 0, 0.4), inset 0 1px 0 0 rgba(255, 255, 255, 0.14);
+}
+#controlsWrap > #timelineContainer > #line {
+  width: 100%;
+  height: 50%;
+  border-bottom: 2px solid rgba(255, 255, 255, 0.3);
+}
+#controlsWrap > #timelineContainer > #handle {
+  position: absolute;
+  top: 17px;
+  width: 12px;
+  height: 12px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background-color: #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+}
+#controlsWrap > #timelineContainer > #time {
+  position: absolute;
+  top: -8px;
+  padding: 2px 10px;
+  transform: translate(-50%, -100%);
+  font-size: 12px;
+  border-radius: 999px;
+  color: #fff;
+  background-color: rgba(40, 40, 40, 0.5);
+}
+#controlsWrap > #buttonsContainer {
+  display: flex;
+  gap: 8px;
+}
+#controlsWrap > #buttonsContainer .buttonGroup {
+  display: flex;
+  background-color: rgba(0, 0, 0, 0.3);
+  border-radius: 6px;
+}
+#controlsWrap > #buttonsContainer .buttonGroup:not(:has(> :not(.hidden))) {
+  display: none;
+}
+#controlsWrap > #buttonsContainer {
+  /* controlButton */
+}
+#controlsWrap > #buttonsContainer .controlButton {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  cursor: pointer;
+  color: #E0DCDD;
+  background-color: transparent;
+}
+#controlsWrap > #buttonsContainer .controlButton:hover {
+  color: #fff;
+}
+#controlsWrap > #buttonsContainer .controlButton {
+  /* icon styling */
+}
+#controlsWrap > #buttonsContainer .controlButton > svg {
+  display: block;
+  margin: auto;
+}
+#controlsWrap > #buttonsContainer .controlButton > svg > g.stroke {
+  fill: none;
+  stroke: black;
+  stroke-width: 2;
+  stroke-linejoin: round;
+  opacity: 0.4;
+}
+#controlsWrap > #buttonsContainer .controlButton > svg > g.fill {
+  fill: currentColor;
+  stroke: none;
+}
+#controlsWrap > #buttonsContainer .controlButton {
+  /* active highlight for simple toggle buttons (e.g. voxel overlay) */
+}
+#controlsWrap > #buttonsContainer .controlButton.active:not(.toggle) {
+  color: var(--accent);
+}
+#controlsWrap > #buttonsContainer .controlButton {
+  /* camera toggle styling */
+}
+#controlsWrap > #buttonsContainer .controlButton.toggle {
+  background: linear-gradient(90deg, transparent 0%, transparent 50%, var(--accent) 50%, var(--accent) 100%);
+  background-size: 200% 100%;
+  background-position: 100% 0%;
+  background-repeat: no-repeat;
+  transition: background-position 0.1s ease-in-out;
+}
+#controlsWrap > #buttonsContainer .controlButton.toggle.left {
+  border-radius: 4px 0px 0px 4px;
+}
+#controlsWrap > #buttonsContainer .controlButton.toggle.left:not(.active) {
+  background-position: 0% 0%;
+}
+#controlsWrap > #buttonsContainer .controlButton.toggle.middle {
+  border-radius: 0;
+}
+#controlsWrap > #buttonsContainer .controlButton.toggle.middle:not(.active) {
+  background-position: 0% 0%;
+}
+#controlsWrap > #buttonsContainer .controlButton.toggle.right {
+  border-radius: 0px 4px 4px 0px;
+}
+#controlsWrap > #buttonsContainer .controlButton.toggle.right:not(.active) {
+  background-position: 200% 0%;
+}
+
+/* settingsPanel */
+#settingsPanel {
+  position: fixed;
+  right: max(16px, env(safe-area-inset-right));
+  bottom: calc(max(16px, env(safe-area-inset-bottom)) + 70px);
+  padding: 12px;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  font-size: 14px;
+  color: #E0DCDD;
+  background-color: rgba(51, 51, 51, 0.8);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+#settingsPanel > .settingsRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  width: 100%;
+}
+#settingsPanel > .settingsRow > button {
+  flex-grow: 1;
+  height: 34px;
+  padding: 0 20px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  font-size: 13px;
+  cursor: pointer;
+  color: #AAA;
+  background-color: rgba(255, 255, 255, 0.04);
+  transition: background-color 250ms ease, color 250ms ease;
+}
+#settingsPanel > .settingsRow > button:hover {
+  color: #fff;
+  background-color: rgba(255, 255, 255, 0.1);
+}
+#settingsPanel > .settingsRow > div {
+  height: 34px;
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  cursor: pointer;
+  color: #AAA;
+}
+#settingsPanel > .settingsRow > div.toggleSwitch {
+  padding: 0 4px;
+}
+#settingsPanel > .settingsRow > div.toggleSwitch .toggleTrack {
+  width: 36px;
+  height: 20px;
+  border-radius: 10px;
+  background-color: rgba(255, 255, 255, 0.15);
+  position: relative;
+  transition: background-color 200ms ease;
+}
+#settingsPanel > .settingsRow > div.toggleSwitch .toggleTrack .toggleThumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background-color: #777;
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  transition: transform 200ms ease, background-color 200ms ease;
+}
+#settingsPanel > .settingsRow > div.toggleSwitch.active .toggleTrack {
+  background-color: rgba(255, 102, 0, 0.35);
+  background-color: color-mix(in srgb, var(--accent) 35%, transparent);
+}
+#settingsPanel > .settingsRow > div.toggleSwitch.active .toggleTrack .toggleThumb {
+  transform: translateX(16px);
+  background-color: var(--accent);
+}
+#settingsPanel > .settingsRow > div:hover {
+  color: #E0DCDD;
+}
+#settingsPanel > .divider {
+  width: 100%;
+  height: 1px;
+  margin: 8px 0;
+  background-color: rgba(255, 255, 255, 0.08);
+}
+
+/* infoPanel */
+#infoPanel {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.4);
+  -webkit-backdrop-filter: blur(2px);
+          backdrop-filter: blur(2px);
+}
+#infoPanel > #infoPanelContent {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 360px;
+  height: min(80vh, 640px);
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  color: #E0DCDD;
+  background-color: rgba(51, 51, 51, 0.85);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+#infoPanel > #infoPanelContent > #viewerTitle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 14px 16px;
+  flex-shrink: 0;
+  background-color: rgba(0, 0, 0, 0.15);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  text-decoration: none;
+  white-space: nowrap;
+  color: #E0DCDD;
+}
+#infoPanel > #infoPanelContent > #viewerTitle > svg {
+  height: 20px;
+  width: auto;
+  flex-shrink: 0;
+}
+#infoPanel > #infoPanelContent > #viewerTitle > svg > g.stroke {
+  fill: black;
+  stroke: black;
+  stroke-width: 2;
+  stroke-linejoin: round;
+  opacity: 0.4;
+}
+#infoPanel > #infoPanelContent > #viewerTitle > svg > g.fill {
+  fill: var(--accent);
+  stroke: none;
+}
+#infoPanel > #infoPanelContent > #viewerTitle > .title-name {
+  font-size: 14px;
+  font-weight: bold;
+}
+#infoPanel > #infoPanelContent > #viewerTitle > .title-version {
+  font-size: 12px;
+  font-weight: normal;
+  color: #AAA;
+  margin-left: -2px;
+}
+#infoPanel > #infoPanelContent > #viewerTitle[href] {
+  cursor: pointer;
+  transition: color 150ms ease;
+}
+#infoPanel > #infoPanelContent > #viewerTitle[href]:hover {
+  color: #fff;
+}
+#infoPanel > #infoPanelContent > #infoPanels {
+  padding: 16px;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+#infoPanel > #infoPanelContent > #infoPanels::-webkit-scrollbar {
+  width: 6px;
+}
+#infoPanel > #infoPanelContent > #infoPanels::-webkit-scrollbar-track {
+  background: transparent;
+}
+#infoPanel > #infoPanelContent > #infoPanels::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.12);
+  border-radius: 3px;
+}
+#infoPanel > #infoPanelContent > #infoPanels h1 {
+  font-size: 11px;
+  font-weight: bold;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  padding: 4px 0 8px 0;
+  color: var(--accent);
+}
+#infoPanel > #infoPanelContent > #infoPanels .control-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 32px;
+  padding: 5px 8px;
+  margin: 0 -8px;
+  border-radius: 6px;
+  font-size: 13px;
+}
+#infoPanel > #infoPanelContent > #infoPanels .control-item > .control-action {
+  text-align: left;
+}
+#infoPanel > #infoPanelContent > #infoPanels .control-item > .control-key {
+  text-align: right;
+  color: #AAA;
+  font-size: 12px;
+}
+#infoPanel > #infoPanelContent > #infoPanels .control-item:nth-child(odd) {
+  background-color: rgba(255, 255, 255, 0.03);
+}
+#infoPanel > #infoPanelContent > #infoPanels .control-spacer {
+  margin: 14px 0;
+}
+#infoPanel > #infoPanelContent > #tabs {
+  display: flex;
+  gap: 24px;
+  padding: 8px 16px;
+  justify-content: center;
+  flex-shrink: 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+#infoPanel > #infoPanelContent > #tabs > .tab {
+  padding: 8px 4px;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  font-weight: bold;
+  font-size: 13px;
+  color: #AAA;
+  transition: color 150ms ease, border-color 150ms ease;
+}
+#infoPanel > #infoPanelContent > #tabs > .tab:hover {
+  color: #fff;
+}
+#infoPanel > #infoPanelContent > #tabs > .tab.active {
+  color: #fff;
+  border-bottom-color: var(--accent);
+}
+
+#joystickBase {
+  position: absolute;
+  width: 56px;
+  height: 100px;
+  transform: translate(-50%, -50%);
+  border-radius: 28px;
+  touch-action: none;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0.2666666667) 0%, rgba(0, 0, 0, 0) 30%, rgba(0, 0, 0, 0) 70%, rgba(0, 0, 0, 0.2666666667) 100%);
+  background-color: rgba(0, 0, 0, 0.2);
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  transition: width 0.2s ease, height 0.2s ease, border-radius 0.2s ease;
+}
+#joystickBase > #joystick {
+  position: absolute;
+  left: 8px;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  touch-action: none;
+  background-color: rgba(255, 255, 255, 0.5333333333);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  transition: left 0.1s ease;
+}
+#joystickBase.mode-2d {
+  width: 100px;
+  height: 100px;
+  border-radius: 50px;
+  background: radial-gradient(circle, rgba(0, 0, 0, 0) 40%, rgba(0, 0, 0, 0.2666666667) 100%);
+  background-color: rgba(0, 0, 0, 0.2);
+}
+#joystickBase.mode-2d > #joystick {
+  left: 30px;
+}
+
+/* xr WebGL-required modal */
+#xrModal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.4);
+  -webkit-backdrop-filter: blur(2px);
+          backdrop-filter: blur(2px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+#xrModal > #xrModalContent {
+  width: min(360px, 100vw - 32px);
+  padding: 20px;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #E0DCDD;
+  background-color: rgba(51, 51, 51, 0.9);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+#xrModal > #xrModalContent > h2 {
+  font-size: 16px;
+  font-weight: bold;
+  color: #fff;
+  margin-bottom: 12px;
+}
+#xrModal > #xrModalContent > p {
+  font-size: 13px;
+  line-height: 1.4;
+  color: #E0DCDD;
+  margin-bottom: 16px;
+}
+#xrModal > #xrModalContent > #xrModalButtons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+#xrModal > #xrModalContent > #xrModalButtons > button {
+  height: 34px;
+  padding: 0 20px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  font-size: 13px;
+  cursor: pointer;
+  color: #AAA;
+  background-color: rgba(255, 255, 255, 0.04);
+  transition: background-color 250ms ease, color 250ms ease;
+}
+#xrModal > #xrModalContent > #xrModalButtons > button:hover {
+  color: #fff;
+  background-color: rgba(255, 255, 255, 0.1);
+}
+#xrModal > #xrModalContent > #xrModalButtons > button#xrModalOk {
+  color: #fff;
+  background-color: rgba(255, 102, 0, 0.7);
+  background-color: color-mix(in srgb, var(--accent) 70%, transparent);
+  border-color: rgba(255, 102, 0, 0.8);
+  border-color: color-mix(in srgb, var(--accent) 80%, transparent);
+}
+#xrModal > #xrModalContent > #xrModalButtons > button#xrModalOk:hover {
+  background-color: var(--accent);
+}
+
+#tooltip {
+  display: none;
+  position: absolute;
+  border-radius: 4px;
+  padding: 4px 4px;
+  font-size: 12px;
+  color: #E0DCDD;
+  background-color: #282828;
+}
+
+#annotations {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: -1;
+}
+
+#annotations * {
+  pointer-events: auto;
+}
+
+/* annotationNav — a compact glass pill ("‹ Raumtitel ›") hanging centred just
+   below the brand pill: the only free centred slot (share top-left, lead
+   capture top-right, concierge bottom-left, dome bottom-centre, sofa bottom-
+   right, tour timeline + tutorial cards above the dome). It reads like a scene
+   title and keeps the prev/next paddles out of the mid-screen swipe zone. */
+#annotationNav {
+  position: absolute;
+  top: calc(max(14px, env(safe-area-inset-top)) + 50px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 15;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(30, 30, 32, 0.5), rgba(18, 18, 20, 0.42));
+  backdrop-filter: blur(20px) saturate(150%);
+  -webkit-backdrop-filter: blur(20px) saturate(150%);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 8px 24px -10px rgba(0, 0, 0, 0.4), inset 0 1px 0 0 rgba(255, 255, 255, 0.14);
+}
+#annotationNav.faded-in {
+  visibility: visible;
+  opacity: 1;
+  transition: opacity 0.5s ease-out;
+}
+#annotationNav.faded-out {
+  visibility: hidden;
+  opacity: 0;
+  transition: visibility 0s 0.5s, opacity 0.5s ease-out;
+}
+#annotationNav > button {
+  pointer-events: auto;
+  -webkit-appearance: none;
+     -moz-appearance: none;
+          appearance: none;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  color: rgba(255, 255, 255, 0.92);
+  background-color: rgba(255, 255, 255, 0);
+  transition: background-color 160ms var(--ease-out), color 160ms var(--ease-out), transform 160ms var(--ease-out);
+}
+@media (hover: hover) and (pointer: fine) {
+  #annotationNav > button:hover {
+    color: #fff;
+    background-color: rgba(255, 255, 255, 0.12);
+  }
+}
+#annotationNav > button:active {
+  transform: scale(0.94);
+}
+#annotationNav > button > svg {
+  display: block;
+}
+#annotationNav > button > svg > g.stroke {
+  display: none;
+}
+#annotationNav > button > svg > g.fill {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+#annotationNav > #annotationInfo {
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 10px;
+  white-space: nowrap;
+  max-width: min(280px, 100vw - 200px);
+}
+#annotationNav > #annotationInfo > #annotationNavTitle {
+  font-family: "Montserrat", sans-serif;
+  font-weight: 600;
+  font-size: 13.5px;
+  line-height: 1;
+  letter-spacing: 0.01em;
+  color: #fff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#annotationNav.touch > button {
+  width: 44px;
+  height: 44px;
+}
+
+#stagePill {
+  position: fixed;
+  right: max(14px, env(safe-area-inset-right));
+  bottom: max(14px, env(safe-area-inset-bottom));
+  z-index: 16;
+  pointer-events: none;
+}
+#stagePill #stageTrigger {
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 44px;
+  padding: 0 11px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 22px;
+  cursor: pointer;
+  color: #fff;
+  font-family: "Montserrat", sans-serif;
+  font-weight: 600;
+  font-size: 13.5px;
+  line-height: 1;
+  white-space: nowrap;
+  background: linear-gradient(180deg, rgba(30, 30, 32, 0.5), rgba(18, 18, 20, 0.42));
+  backdrop-filter: blur(20px) saturate(150%);
+  -webkit-backdrop-filter: blur(20px) saturate(150%);
+  box-shadow: 0 8px 24px -10px rgba(0, 0, 0, 0.4), inset 0 1px 0 0 rgba(255, 255, 255, 0.14);
+  transition: padding 300ms var(--ease-glass), background 160ms var(--ease-out), transform 160ms var(--ease-out), opacity 160ms;
+}
+#stagePill #stageTrigger * {
+  pointer-events: none;
+}
+#stagePill #stageTrigger > svg {
+  display: block;
+  flex-shrink: 0;
+  fill: none;
+  stroke: #fff;
+  stroke-width: 1.75;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+#stagePill #stageTrigger #stageLabel {
+  display: inline-block;
+  max-width: 0;
+  margin-left: 0;
+  opacity: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  transition: max-width 300ms var(--ease-glass), margin-left 300ms var(--ease-glass), opacity 220ms var(--ease-out);
+}
+@media (hover: hover) and (pointer: fine) {
+  #stagePill #stageTrigger:hover {
+    background: linear-gradient(180deg, rgba(42, 42, 45, 0.56), rgba(26, 26, 28, 0.48));
+  }
+}
+#stagePill #stageTrigger:active {
+  transform: scale(0.96);
+}
+#stagePill #stageTrigger.is-loading {
+  opacity: 0.75;
+  cursor: default;
+}
+#stagePill #stageTrigger:disabled {
+  cursor: default;
+}
+#stagePill #stageTrigger.has-message, #stagePill #stageTrigger.attention {
+  padding: 0 18px 0 14px;
+}
+#stagePill #stageTrigger.has-message #stageLabel, #stagePill #stageTrigger.attention #stageLabel {
+  max-width: 180px;
+  margin-left: 9px;
+  opacity: 1;
+}
+
+#stagePill #stageTrigger.is-revealing {
+  animation: stagePillIn 480ms var(--ease-out) both;
+}
+
+@keyframes stagePillIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  #stagePill #stageTrigger.is-revealing {
+    animation: none;
+  }
+}
+#stagePrewarmCover {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: #0d0d0f;
+  opacity: 1;
+  transition: opacity 450ms var(--ease-out);
+}
+#stagePrewarmCover.is-fading {
+  opacity: 0;
+}
+
+#stagePill #stageTrigger.attention {
+  animation: stageArrowGlow 2s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #stagePill #stageTrigger.attention {
+    animation: none;
+  }
+}
+#inquiryPill {
+  position: fixed;
+  top: max(14px, env(safe-area-inset-top));
+  right: max(14px, env(safe-area-inset-right));
+  z-index: 16;
+  pointer-events: none;
+}
+#inquiryPill #inquiryTrigger {
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 44px;
+  padding: 0 17px 0 14px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 22px;
+  cursor: pointer;
+  color: #fff;
+  font-family: "Montserrat", sans-serif;
+  font-weight: 600;
+  font-size: 13.5px;
+  line-height: 1;
+  white-space: nowrap;
+  background: linear-gradient(180deg, rgba(30, 30, 32, 0.5), rgba(18, 18, 20, 0.42));
+  backdrop-filter: blur(20px) saturate(150%);
+  -webkit-backdrop-filter: blur(20px) saturate(150%);
+  box-shadow: 0 8px 24px -10px rgba(0, 0, 0, 0.4), inset 0 1px 0 0 rgba(255, 255, 255, 0.14);
+  transition: background 160ms var(--ease-out), transform 160ms var(--ease-out);
+}
+#inquiryPill #inquiryTrigger * {
+  pointer-events: none;
+}
+#inquiryPill #inquiryTrigger > svg {
+  display: block;
+  flex-shrink: 0;
+  fill: none;
+  stroke: #fff;
+  stroke-width: 1.75;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+#inquiryPill #inquiryTrigger #inquiryLabel {
+  display: inline-block;
+  margin-left: 9px;
+}
+@media (hover: hover) and (pointer: fine) {
+  #inquiryPill #inquiryTrigger:hover {
+    background: linear-gradient(180deg, rgba(42, 42, 45, 0.56), rgba(26, 26, 28, 0.48));
+  }
+}
+#inquiryPill #inquiryTrigger:active {
+  transform: scale(0.96);
+}
+
+#sharePill {
+  position: fixed;
+  top: max(14px, env(safe-area-inset-top));
+  left: max(14px, env(safe-area-inset-left));
+  z-index: 16;
+  pointer-events: none;
+}
+#sharePill #shareTrigger {
+  pointer-events: auto;
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 50%;
+  cursor: pointer;
+  color: rgba(255, 255, 255, 0.82);
+  background: linear-gradient(180deg, rgba(30, 30, 32, 0.5), rgba(18, 18, 20, 0.42));
+  backdrop-filter: blur(20px) saturate(150%);
+  -webkit-backdrop-filter: blur(20px) saturate(150%);
+  box-shadow: 0 8px 24px -10px rgba(0, 0, 0, 0.4), inset 0 1px 0 0 rgba(255, 255, 255, 0.14);
+  transition: background 160ms var(--ease-out), transform 160ms var(--ease-out);
+}
+#sharePill #shareTrigger * {
+  pointer-events: none;
+}
+#sharePill #shareTrigger > svg {
+  display: block;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+@media (hover: hover) and (pointer: fine) {
+  #sharePill #shareTrigger:hover {
+    background: linear-gradient(180deg, rgba(42, 42, 45, 0.56), rgba(26, 26, 28, 0.48));
+  }
+}
+#sharePill #shareTrigger:active {
+  transform: scale(0.94);
+}
+#sharePill #sharePopover {
+  pointer-events: auto;
+  position: absolute;
+  top: calc(100% + 10px);
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 14px 12px;
+  border-radius: 20px;
+  animation: sharePopIn 240ms var(--ease-out) both;
+}
+#sharePill #sharePopover.hidden {
+  display: none;
+}
+#sharePill #shareQrCard {
+  padding: 10px;
+  background: #fff;
+  border-radius: 12px;
+  line-height: 0;
+}
+#sharePill #shareQrCard svg {
+  display: block;
+  width: 148px;
+  height: 148px;
+}
+#sharePill #shareQrLabel {
+  color: rgba(255, 255, 255, 0.92);
+  font-family: "Montserrat", sans-serif;
+  font-weight: 600;
+  font-size: 12.5px;
+  line-height: 1;
+  white-space: nowrap;
+}
+#sharePill #shareToast {
+  position: absolute;
+  top: 50%;
+  left: calc(100% + 10px);
+  transform: translateY(-50%);
+  padding: 9px 14px;
+  border-radius: 16px;
+  color: #fff;
+  font-family: "Montserrat", sans-serif;
+  font-weight: 600;
+  font-size: 12.5px;
+  line-height: 1;
+  white-space: nowrap;
+  background: linear-gradient(180deg, rgba(30, 30, 32, 0.6), rgba(18, 18, 20, 0.52));
+  backdrop-filter: blur(20px) saturate(150%);
+  -webkit-backdrop-filter: blur(20px) saturate(150%);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  opacity: 0;
+  transition: opacity 220ms var(--ease-out);
+  pointer-events: none;
+}
+#sharePill #shareToast.visible {
+  opacity: 1;
+}
+
+@keyframes sharePopIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  #sharePill #sharePopover {
+    animation: none;
+  }
+}
+/* engagement survey + lead CTA card ("Wie interessant ist diese Wohnung für
+   dich?"). Light frosted glass matching the tutorial cards, slides in bottom-
+   centre once the visit shows real engagement. Created and wired entirely in
+   survey.ts — without settings.analytics the element never exists. The viewer
+   stays interactive behind it (no scrim); the card only owns its own pixels. */
+#surveyCard {
+  position: absolute;
+  left: 50%;
+  bottom: 96px;
+  z-index: 18;
+  box-sizing: border-box;
+  width: min(360px, 100vw - 24px);
+  padding: 16px 18px 15px;
+  border-radius: 20px;
+  text-align: center;
+  font-family: "Montserrat", "Arial", sans-serif;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.64), rgba(250, 250, 251, 0.5));
+  backdrop-filter: blur(30px) saturate(150%) brightness(1.06);
+  -webkit-backdrop-filter: blur(30px) saturate(150%) brightness(1.06);
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  box-shadow: 0 18px 44px -14px rgba(0, 0, 0, 0.32), inset 0 1px 0 0 rgba(255, 255, 255, 0.85), inset 0 -1px 0 0 rgba(0, 0, 0, 0.04);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateX(-50%) translateY(16px) scale(0.98);
+  transition: opacity 0.45s var(--ease-out), transform 0.45s var(--ease-out), visibility 0s linear 0.45s;
+}
+#surveyCard.visible {
+  opacity: 1;
+  visibility: visible;
+  transform: translateX(-50%) translateY(0) scale(1);
+  transition: opacity 0.45s var(--ease-out), transform 0.45s var(--ease-out);
+}
+#surveyCard .survey__close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--ink-2);
+  cursor: pointer;
+  transition: background-color 160ms var(--ease-out), color 160ms var(--ease-out);
+}
+#surveyCard .survey__close > svg {
+  display: block;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.75;
+  stroke-linecap: round;
+}
+#surveyCard .survey__close:hover {
+  background-color: rgba(0, 0, 0, 0.06);
+  color: var(--ink-1);
+}
+#surveyCard .survey__title {
+  padding: 2px 24px 0;
+  font-size: 14.5px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  line-height: 1.35;
+  color: var(--ink-1);
+}
+#surveyCard .survey__emojis {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 14px;
+  padding-bottom: 2px;
+}
+#surveyCard .survey__emoji {
+  width: 46px;
+  height: 46px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  border-radius: 50%;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(246, 247, 250, 0.55));
+  box-shadow: 0 6px 16px -8px rgba(0, 0, 0, 0.25), inset 0 1px 0 0 rgba(255, 255, 255, 0.9);
+  font-family: "Montserrat", sans-serif;
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--ink-1, rgba(24, 24, 26, 0.94));
+  line-height: 1;
+  cursor: pointer;
+  transition: transform 160ms var(--ease-out), box-shadow 160ms var(--ease-out);
+}
+#surveyCard .survey__emoji:hover {
+  transform: translateY(-2px) scale(1.06);
+  box-shadow: 0 10px 22px -8px rgba(0, 0, 0, 0.3), inset 0 1px 0 0 rgba(255, 255, 255, 0.95);
+}
+#surveyCard .survey__emoji:active {
+  transform: scale(0.94);
+}
+#surveyCard .survey__scaleHint {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 8px;
+  padding: 0 4px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--ink-2, rgba(24, 24, 26, 0.55));
+}
+#surveyCard .survey__ctas {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 14px;
+}
+#surveyCard .survey__cta {
+  height: 42px;
+  border: none;
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(44, 44, 50, 0.95), rgba(24, 24, 28, 0.92));
+  box-shadow: 0 8px 18px -10px rgba(0, 0, 0, 0.45), inset 0 1px 0 0 rgba(255, 255, 255, 0.16);
+  font-family: inherit;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: #fff;
+  cursor: pointer;
+  transition: transform 160ms var(--ease-out), filter 160ms var(--ease-out), opacity 160ms var(--ease-out);
+}
+#surveyCard .survey__cta:hover {
+  filter: brightness(1.14);
+}
+#surveyCard .survey__cta:active {
+  transform: translateY(1px);
+}
+#surveyCard .survey__cta:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+#surveyCard .survey__cta--secondary {
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.8), rgba(246, 247, 250, 0.62));
+  box-shadow: 0 6px 14px -10px rgba(0, 0, 0, 0.3), inset 0 1px 0 0 rgba(255, 255, 255, 0.9);
+  color: var(--ink-1);
+}
+#surveyCard .survey__decline {
+  margin-top: 10px;
+  padding: 4px 8px;
+  border: none;
+  background: transparent;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ink-2);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+#surveyCard .survey__decline:hover {
+  color: var(--ink-1);
+}
+#surveyCard .survey__form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+#surveyCard .survey__input {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 40px;
+  padding: 10px 13px;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.66);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.4;
+  color: var(--ink-1);
+  outline: none;
+  -moz-user-select: text;
+       user-select: text;
+  -webkit-user-select: text;
+  resize: none;
+  transition: border-color 160ms var(--ease-out), background-color 160ms var(--ease-out);
+}
+#surveyCard .survey__input::-moz-placeholder {
+  color: var(--ink-2);
+}
+#surveyCard .survey__input::placeholder {
+  color: var(--ink-2);
+}
+#surveyCard .survey__input:focus {
+  border-color: rgba(0, 0, 0, 0.28);
+  background: rgba(255, 255, 255, 0.85);
+}
+#surveyCard .survey__consent {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 2px;
+  text-align: left;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.45;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+#surveyCard .survey__consent input {
+  flex-shrink: 0;
+  width: 15px;
+  height: 15px;
+  margin-top: 1px;
+  accent-color: #1a1a1e;
+  cursor: pointer;
+}
+#surveyCard .survey__consent a {
+  color: var(--ink-1);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+#surveyCard .survey__error {
+  text-align: left;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: #c9392c;
+}
+#surveyCard .survey__thanks {
+  padding: 10px 20px 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink-1);
+}
+
+#zoomBadge {
+  position: absolute;
+  left: 50%;
+  bottom: 172px;
+  z-index: 17;
+  padding: 4px 13px;
+  border-radius: 999px;
+  font-family: "Montserrat", "Arial", sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-1, #1d1d1f);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.7), rgba(250, 250, 251, 0.55));
+  backdrop-filter: blur(18px) saturate(140%);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  box-shadow: 0 8px 20px -12px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateX(-50%) translateY(6px);
+  transition: opacity 0.25s var(--ease-out), transform 0.25s var(--ease-out), visibility 0s linear 0.25s;
+}
+#zoomBadge.visible {
+  opacity: 1;
+  visibility: visible;
+  transform: translateX(-50%);
+  transition: opacity 0.25s var(--ease-out), transform 0.25s var(--ease-out);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #surveyCard {
+    transform: translateX(-50%);
+    transition: opacity 0.2s linear, visibility 0s linear 0.2s;
+  }
+  #surveyCard.visible {
+    transform: translateX(-50%);
+    transition: opacity 0.2s linear;
+  }
+}
+body.staging-open #controlDome,
+body.staging-open #controlsWrap,
+body.staging-open #annotationNav,
+body.staging-open #brandDome,
+body.staging-open #chatPill,
+body.staging-open #inquiryPill,
+body.staging-open #sharePill,
+body.staging-open #stagePill,
+body.staging-open #surveyCard {
+  opacity: 0 !important;
+  pointer-events: none !important;
+  transition: opacity 200ms var(--ease-out);
+}
+
+#stageOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 38;
+  background: transparent;
+  animation: stageFadeIn 260ms var(--ease-out);
+}
+#stageOverlay #stageImage {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  -o-object-fit: cover;
+     object-fit: cover;
+  opacity: 1;
+  transition: opacity 220ms var(--ease-out), filter 320ms var(--ease-out);
+  -webkit-user-select: none;
+     -moz-user-select: none;
+          user-select: none;
+  -webkit-user-drag: none;
+}
+#stageOverlay.is-scan #stageImage {
+  opacity: 0;
+}
+#stageOverlay #stageImage:not([src]) {
+  display: none;
+}
+#stageOverlay #stageImage.is-revealed {
+  animation: stageReveal 480ms var(--ease-out);
+}
+#stageOverlay #stageStatus {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 22px;
+  opacity: 0;
+  transition: opacity 260ms var(--ease-out);
+  pointer-events: none;
+  color: #fff;
+}
+#stageOverlay:not(.is-generating) #stageStatus {
+  display: none;
+}
+#stageOverlay .stageLoader {
+  position: relative;
+  animation: stageLoaderIn 560ms var(--ease-out) both;
+}
+#stageOverlay .stageLoader__mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 13px;
+  white-space: nowrap;
+  padding: 6px 16px;
+  font-family: "Montserrat", sans-serif;
+  font-weight: 700;
+  font-size: 30px;
+  letter-spacing: 0.01em;
+  line-height: 1;
+  text-shadow: 0 2px 22px rgba(0, 0, 0, 0.45);
+}
+#stageOverlay .stageLoader__diamond {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  transform: rotate(45deg);
+  background: currentColor;
+}
+#stageOverlay .stageLoader__mark--base {
+  color: rgba(255, 255, 255, 0.24);
+}
+#stageOverlay .stageLoader__mark--fill {
+  position: absolute;
+  inset: 0;
+  color: #fff;
+  clip-path: inset(0 100% 0 0);
+}
+#stageOverlay #stageStatusText {
+  display: none;
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: rgba(255, 255, 255, 0.6);
+  text-shadow: 0 1px 12px rgba(0, 0, 0, 0.5);
+}
+#stageOverlay.is-generating {
+  background: rgba(20, 19, 18, 0.92);
+}
+#stageOverlay.is-generating #stageImage {
+  opacity: 0;
+}
+#stageOverlay.is-generating #stageStatus {
+  opacity: 1;
+}
+#stageOverlay.is-generating .stageLoader__mark--fill {
+  animation: stageLoaderFill 13s var(--ease-out) forwards;
+}
+#stageOverlay.is-generating #stageBar {
+  opacity: 0;
+  pointer-events: none;
+}
+#stageOverlay.is-generating .stageArrow {
+  opacity: 0;
+  pointer-events: none;
+}
+#stageOverlay #stageBar {
+  position: absolute;
+  left: 50%;
+  bottom: max(20px, env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: calc(100vw - 28px);
+  padding: 8px;
+  opacity: 1;
+  transition: opacity 220ms var(--ease-out);
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: linear-gradient(180deg, rgba(30, 30, 32, 0.5), rgba(18, 18, 20, 0.42));
+  backdrop-filter: blur(20px) saturate(150%);
+  -webkit-backdrop-filter: blur(20px) saturate(150%);
+  box-shadow: 0 18px 44px -14px rgba(0, 0, 0, 0.5), inset 0 1px 0 0 rgba(255, 255, 255, 0.14);
+}
+#stageOverlay #stageStyleName {
+  min-width: 96px;
+  text-align: center;
+  font-family: "Montserrat", sans-serif;
+  font-weight: 600;
+  font-size: 13.5px;
+  color: #fff;
+  white-space: nowrap;
+}
+#stageOverlay #stageStyleName.hidden {
+  display: none;
+}
+#stageOverlay #stageStyleName:not(.hidden) + .stageBar__actions {
+  border-left: 1px solid rgba(255, 255, 255, 0.12);
+  padding-left: 8px;
+  margin-left: 2px;
+}
+#stageOverlay .stageBar__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+#stageOverlay .stageArrow {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 52px;
+  height: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 50%;
+  cursor: pointer;
+  color: #fff;
+  background: linear-gradient(180deg, rgba(30, 30, 32, 0.5), rgba(18, 18, 20, 0.42));
+  backdrop-filter: blur(20px) saturate(150%);
+  -webkit-backdrop-filter: blur(20px) saturate(150%);
+  box-shadow: 0 8px 24px -10px rgba(0, 0, 0, 0.4), inset 0 1px 0 0 rgba(255, 255, 255, 0.14);
+  transition: background 160ms var(--ease-out), opacity 220ms var(--ease-out);
+  animation: stageArrowGlow 2.6s ease-in-out infinite;
+}
+#stageOverlay .stageArrow.hidden {
+  display: none;
+}
+#stageOverlay .stageArrow > svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+@media (hover: hover) and (pointer: fine) {
+  #stageOverlay .stageArrow:hover {
+    background: linear-gradient(180deg, rgba(42, 42, 45, 0.56), rgba(26, 26, 28, 0.48));
+  }
+}
+#stageOverlay .stageArrow:active {
+  transform: translateY(-50%) scale(0.94);
+}
+#stageOverlay .stageArrow--prev {
+  left: max(14px, env(safe-area-inset-left));
+}
+#stageOverlay .stageArrow--next {
+  right: max(14px, env(safe-area-inset-right));
+}
+#stageOverlay .stageArrow--prev > svg {
+  animation: stageNudgeL 2.6s ease-in-out infinite;
+}
+#stageOverlay .stageArrow--next > svg {
+  animation: stageNudgeR 2.6s ease-in-out infinite;
+}
+#stageOverlay #stageToggle {
+  height: 38px;
+  padding: 0 16px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  cursor: pointer;
+  color: #fff;
+  font-family: "Montserrat", sans-serif;
+  font-weight: 600;
+  font-size: 13px;
+  white-space: nowrap;
+  background: rgba(255, 255, 255, 0.08);
+  transition: background 140ms var(--ease-out);
+}
+@media (hover: hover) and (pointer: fine) {
+  #stageOverlay #stageToggle:hover {
+    background: rgba(255, 255, 255, 0.16);
+  }
+}
+#stageOverlay #stageToggle:active {
+  transform: scale(0.97);
+}
+#stageOverlay #stageClose {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  flex-shrink: 0;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  cursor: pointer;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.08);
+  transition: background 140ms var(--ease-out);
+}
+#stageOverlay #stageClose > svg {
+  fill: none;
+  stroke: #fff;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+}
+@media (hover: hover) and (pointer: fine) {
+  #stageOverlay #stageClose:hover {
+    background: rgba(255, 255, 255, 0.16);
+  }
+}
+#stageOverlay #stageClose:active {
+  transform: scale(0.94);
+}
+
+@keyframes stageFadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes stageLoaderIn {
+  from {
+    transform: translateY(-34vh) scale(0.4);
+    opacity: 0;
+  }
+  55% {
+    opacity: 1;
+  }
+  to {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+  }
+}
+@keyframes stageLoaderFill {
+  0% {
+    clip-path: inset(0 100% 0 0);
+  }
+  65% {
+    clip-path: inset(0 26% 0 0);
+  }
+  100% {
+    clip-path: inset(0 8% 0 0);
+  }
+}
+@keyframes stageReveal {
+  from {
+    opacity: 0.35;
+    transform: scale(1.012);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes stageArrowGlow {
+  0%, 100% {
+    box-shadow: 0 8px 24px -10px rgba(0, 0, 0, 0.4), inset 0 1px 0 0 rgba(255, 255, 255, 0.14), 0 0 6px 0 rgba(255, 255, 255, 0.12);
+  }
+  50% {
+    box-shadow: 0 8px 24px -10px rgba(0, 0, 0, 0.4), inset 0 1px 0 0 rgba(255, 255, 255, 0.22), 0 0 26px 6px rgba(255, 255, 255, 0.55);
+  }
+}
+@keyframes stageNudgeR {
+  0%, 100% {
+    transform: translateX(0);
+  }
+  50% {
+    transform: translateX(3px);
+  }
+}
+@keyframes stageNudgeL {
+  0%, 100% {
+    transform: translateX(0);
+  }
+  50% {
+    transform: translateX(-3px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  #stageOverlay #stageImage.is-revealed {
+    animation: none;
+  }
+  #stageOverlay.is-generating .stageLoader {
+    animation: none;
+  }
+  #stageOverlay.is-generating .stageLoader__mark--fill {
+    animation: none;
+    clip-path: inset(0 45% 0 0);
+  }
+  #stageOverlay .stageArrow,
+  #stageOverlay .stageArrow > svg {
+    animation: none;
+  }
+}
+@media (max-width: 600px) {
+  #chatPill #chatToggle {
+    width: 40px;
+    height: 40px;
+  }
+  #stagePill #stageTrigger {
+    height: 40px;
+    padding: 0 9px;
+  }
+  #sharePill #shareTrigger {
+    width: 40px;
+    height: 40px;
+  }
+  #inquiryPill #inquiryTrigger {
+    height: 40px;
+    padding: 0 9px;
+  }
+  #inquiryPill #inquiryTrigger #inquiryLabel {
+    display: none;
+  }
+  #stagePill #stageTrigger.attention,
+  #stagePill #stageTrigger.has-message {
+    padding: 0 9px;
+  }
+  #stagePill #stageTrigger.attention #stageLabel,
+  #stagePill #stageTrigger.has-message #stageLabel {
+    max-width: 0;
+    margin-left: 0;
+    opacity: 0;
+  }
+}
+/* ================================================================
+   STEPINSIDE - PREMIUM LIQUID GLASS  (erweitert das Basis-Glas)
+   Mobile-first, reines CSS -> laeuft ueberall inkl. iOS Safari.
+   Desktop-Chrome erhaelt zusaetzlich echte SVG-Refraktion (unten).
+   Feintuning zentral ueber die Tokens in :root.
+   ================================================================ */
+:root {
+  --lgd-blur: 24px;
+  --lgd-sat: 180%;
+  --lgd-bright: 1.08; /* dunkles Glas */
+  --lgl-blur: 30px;
+  --lgl-sat: 180%;
+  --lgl-bright: 1.08; /* helles  Glas */
+}
+
+/* -- dunkles Glas: Pillen & Panels ueber der Szene (weisser Inhalt) -- */
+#brandDome .brandMark,
+#controlDome,
+#annotationNav,
+#controlsWrap > #timelineContainer,
+#chatPill #chatToggle,
+#chatPill #chatPanel,
+#stagePill #stageTrigger,
+#inquiryPill #inquiryTrigger,
+#sharePill #shareTrigger,
+#sharePill #sharePopover,
+#stageOverlay #stageBar,
+#stageOverlay .stageArrow {
+  background: radial-gradient(130% 120% at 50% -15%, rgba(255, 255, 255, 0.24), rgba(255, 255, 255, 0) 60%), linear-gradient(180deg, rgba(92, 94, 102, 0.22), rgba(42, 44, 52, 0.22));
+  -webkit-backdrop-filter: blur(var(--lgd-blur)) saturate(var(--lgd-sat)) brightness(var(--lgd-bright));
+  backdrop-filter: blur(var(--lgd-blur)) saturate(var(--lgd-sat)) brightness(var(--lgd-bright));
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  box-shadow: 0 8px 22px -12px rgba(0, 0, 0, 0.32), 0 24px 46px -24px rgba(0, 0, 0, 0.38), inset 0 1px 0.5px 0 rgba(255, 255, 255, 0.55), inset 0 -8px 18px -16px rgba(0, 0, 0, 0.2), inset 0 0 0 0.5px rgba(255, 255, 255, 0.1);
+}
+
+/* das grosse Chat-Panel schwebt hoeher -> etwas mehr Tiefe */
+#chatPill #chatPanel {
+  box-shadow: 0 18px 40px -18px rgba(0, 0, 0, 0.42), 0 40px 80px -36px rgba(0, 0, 0, 0.46), inset 0 1px 0.5px 0 rgba(255, 255, 255, 0.5), inset 0 -12px 26px -18px rgba(0, 0, 0, 0.22), inset 0 0 0 0.5px rgba(255, 255, 255, 0.1);
+}
+
+/* helleres Glas beim Hover (mehr Lichteinfang) */
+@media (hover: hover) and (pointer: fine) {
+  #chatPill #chatToggle:hover,
+  #stagePill #stageTrigger:hover,
+  #inquiryPill #inquiryTrigger:hover,
+  #sharePill #shareTrigger:hover,
+  #stageOverlay .stageArrow:hover {
+    background: radial-gradient(130% 120% at 50% -15%, rgba(255, 255, 255, 0.32), rgba(255, 255, 255, 0) 60%), linear-gradient(180deg, rgba(112, 114, 122, 0.26), rgba(58, 60, 68, 0.26));
+  }
+}
+/* -- helles Glas: Tutorial-Karten, Survey-Karte & Mess-Label (dunkler Text) -- */
+#tutorial .tutorialCard,
+#surveyCard,
+#measureOverlay .measure__label {
+  background: radial-gradient(135% 130% at 50% -14%, rgba(255, 255, 255, 0.96), rgba(255, 255, 255, 0) 62%), linear-gradient(180deg, rgba(255, 255, 255, 0.74), rgba(246, 247, 250, 0.56));
+  -webkit-backdrop-filter: blur(var(--lgl-blur)) saturate(var(--lgl-sat)) brightness(var(--lgl-bright));
+  backdrop-filter: blur(var(--lgl-blur)) saturate(var(--lgl-sat)) brightness(var(--lgl-bright));
+  border: 1px solid rgba(255, 255, 255, 0.68);
+  box-shadow: 0 12px 30px -12px rgba(0, 0, 0, 0.26), 0 30px 60px -28px rgba(0, 0, 0, 0.3), inset 0 1px 0 0 rgba(255, 255, 255, 0.95), inset 0 -1px 0 0 rgba(0, 0, 0, 0.05);
+}
+
+/* -- Hybrid-Bonus: echte Kanten-Refraktion (shuding-Stil), Chromium only --
+   Greift in Chrome/Edge (Desktop) UND Android-Chrome. iOS/Safari/Firefox
+   ignorieren url()-backdrop-filter -> dort bleibt das edle Frosted-Glas.
+   Wenig Blur, damit die Refraktion an den Kanten sichtbar bleibt. */
+@supports ((-webkit-backdrop-filter: url("#liquidGlass")) or (backdrop-filter: url("#liquidGlass"))) {
+  #brandDome .brandMark,
+  #controlDome,
+  #annotationNav,
+  #chatPill #chatToggle,
+  #stagePill #stageTrigger,
+  #inquiryPill #inquiryTrigger,
+  #sharePill #shareTrigger,
+  #stageOverlay .stageArrow {
+    -webkit-backdrop-filter: url("#liquidGlass") blur(7px) saturate(var(--lgd-sat)) brightness(var(--lgd-bright));
+            backdrop-filter: url("#liquidGlass") blur(7px) saturate(var(--lgd-sat)) brightness(var(--lgd-bright));
+  }
+}
+/* -- "alive" specular sheen: a slow light sweep over the hero glass --
+   Subtle moving highlight (like light gliding across glass) on the two
+   always-visible elements. Pure CSS -> works on iOS Safari. The ::after is
+   clipped to the pill via border-radius:inherit; no parent overflow needed. */
+#brandDome .brandMark {
+  position: relative;
+}
+
+#brandDome .brandMark::after,
+#controlDome::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(105deg, transparent 36%, rgba(255, 255, 255, 0.16) 50%, transparent 64%);
+  background-size: 220% 100%;
+  background-position: 160% 0;
+  animation: lgSheen 12s ease-in-out infinite;
+}
+
+@keyframes lgSheen {
+  0% {
+    background-position: 160% 0;
+  }
+  45% {
+    background-position: -60% 0;
+  }
+  100% {
+    background-position: -60% 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  #brandDome .brandMark::after,
+  #controlDome::after {
+    animation: none;
+    opacity: 0;
+  }
+}
+/* ================================================================
+   MOBILE / TOUCH: STATIC GLASS (perf)
+   ----------------------------------------------------------------
+   backdrop-filter re-samples the backdrop EVERY frame — and behind
+   the viewer chrome sits a continuously changing 3D canvas, so every
+   blurred pill/card costs real GPU on phones (`?noui` was measurably
+   smoother than with UI on iPhone). On touch devices we therefore
+   kill ALL backdrop-filters and compensate with slightly more opaque
+   static backgrounds. Borders, shadows, radii and the sheen stay —
+   the shape language carries the premium feel; only the live
+   refraction/blur goes.
+
+   Gated on (pointer: coarse) = phones/tablets. Desktops (fine
+   pointer) keep the full frosted/liquid glass, including the
+   Chromium-only `@supports (backdrop-filter: url(#liquidGlass))`
+   refraction. This section sits LAST in the file on purpose: it uses
+   the same selectors as the liquid-glass blocks above, so at equal
+   specificity source order makes it win — including over the
+   @supports block on Android Chrome (coarse pointer + url() filter
+   support).
+   ================================================================ */
+@media (pointer: coarse) {
+  /* -- dark chrome (white content): brand pill, control dome, room nav,
+        tour timeline, concierge, staging, lead capture, share.
+        Blur off; the see-through gradient (alpha ~0.22-0.5) becomes a
+        mostly-opaque dark gradient (~0.74-0.8) so white text/icons hold
+        >= 7:1 contrast even over a bright white wall. A faint top
+        radial keeps the "light catching the glass" look statically. -- */
+  #brandDome .brandMark,
+  #controlDome,
+  #annotationNav,
+  #controlsWrap > #timelineContainer,
+  #chatPill #chatToggle,
+  #chatPill #chatPanel,
+  #stagePill #stageTrigger,
+  #inquiryPill #inquiryTrigger,
+  #sharePill #shareTrigger,
+  #sharePill #sharePopover,
+  #sharePill #shareToast,
+  #stageOverlay #stageBar,
+  #stageOverlay .stageArrow {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    background: radial-gradient(130% 120% at 50% -15%, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0) 60%), linear-gradient(180deg, rgba(40, 40, 44, 0.8), rgba(22, 22, 25, 0.74));
+  }
+  /* -- light frosted cards (ink text): tutorial cards, survey/lead card
+        + measure labels. Blur off; the translucent white veil becomes a
+        mostly-opaque white so the dark ink text stays legible over dark
+        floors. -- */
+  #tutorial .tutorialCard,
+  #surveyCard,
+  #zoomBadge,
+  #measureOverlay .measure__label {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    background: radial-gradient(135% 130% at 50% -14%, rgba(255, 255, 255, 0.98), rgba(255, 255, 255, 0) 62%), linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(247, 248, 250, 0.88));
+  }
+  /* -- walk-mode peripheral vignette: the masked FULL-SCREEN edge blur
+        is the single most expensive filter here. Keep the radial edge
+        darkening (cheap, static) and drop only the blur. -- */
+  #peripheralVignette {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+  /* -- modal scrims + panels (settings / info / xr): blur off, opacity
+        up a notch so content behind stays visually separated. -- */
+  #infoPanel,
+  #xrModal {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    background-color: rgba(0, 0, 0, 0.5);
+  }
+  #infoPanel > #infoPanelContent {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    background-color: rgba(51, 51, 51, 0.94);
+  }
+  #xrModal > #xrModalContent {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    background-color: rgba(51, 51, 51, 0.96);
+  }
+  #settingsPanel {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    background-color: rgba(51, 51, 51, 0.92);
+  }
+  /* -- the 1x1px blur workaround targets Chrome on macOS (see the
+        body::after comment near the top) — never a coarse-pointer
+        device, so drop its backdrop root on touch too. -- */
+  body::after {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+
+/*# sourceMappingURL=index.css.map */
