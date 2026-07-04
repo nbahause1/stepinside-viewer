@@ -3,6 +3,13 @@ main = "src/worker.ts"
 compatibility_date = "2026-06-01"
 compatibility_flags = ["nodejs_compat"]
 
+# Reference furniture photos for /stage are bundled as raw bytes (Workers has
+# no filesystem). Scoped to staging-refs so no other asset type is affected.
+[[rules]]
+type = "Data"
+globs = ["**/*.jpg", "**/*.png"]
+fallthrough = true
+
 # ANTHROPIC_API_KEY (concierge) and GEMINI_API_KEY (/stage virtual staging,
 # "Nano Banana" = Gemini 2.5 Flash Image) are provided as secrets, never committed:
 #   wrangler secret put ANTHROPIC_API_KEY
@@ -15,29 +22,58 @@ compatibility_flags = ["nodejs_compat"]
 # localhost dev allowlist is used.
 #   ALLOWED_ORIGINS=https://viewer.example.com
 
-# --- Rate limiting + daily spend caps (KV) -----------------------------------
-# Real (cross-isolate) rate limiting AND the global daily spend caps (/stage
-# and concierge) require a KV namespace bound as RATE_LIMIT_KV. Without it the
-# worker falls back to a weak per-isolate in-memory limiter and the spend caps
-# are disabled (it logs a warning on the first request). All KV-backed limits
-# are SOFT: on a KV error they log a warning and fail open (see README.md).
+# --- Rate limiting + daily spend/flood caps (KV) ------------------------------
+# Real (cross-isolate) rate limiting AND the global daily caps (/stage,
+# concierge, /events, /lead) require a KV namespace bound as RATE_LIMIT_KV.
+# Without it the worker falls back to a weak per-isolate in-memory limiter and
+# the daily caps are disabled (it logs a warning on the first request). All
+# KV-backed limits are SOFT: on a KV error they log a warning and fail open
+# (see README.md).
 #
 # Provision once (needs account access), then uncomment with the printed id:
 #   npx wrangler kv namespace create RATE_LIMIT_KV
+
+[[kv_namespaces]]
+binding = "RATE_LIMIT_KV"
+id = "40014ed55db54b6ebcb6c85154069e01"
+
+# --- Anonymous analytics + leads (D1) ----------------------------------------
+# /events, /lead and /report/{propertyId} require a D1 database bound as
+# ANALYTICS_DB. Without it the worker still works: /events and /lead answer
+# 202 and drop silently, /report/* is a uniform 404 — the viewer never breaks.
 #
-# [[kv_namespaces]]
-# binding = "RATE_LIMIT_KV"
-# id = "<id printed by the create command>"
+# Privacy model (see README.md): no cookies, no IP addresses, no user agents;
+# the session id is crypto-random and in-memory only.
+#
+# Provision once, then uncomment with the printed database_id:
+#   npx wrangler d1 create stepinside-analytics
+#   npx wrangler d1 migrations apply stepinside-analytics --remote
+# (local dev against `wrangler dev`: npx wrangler d1 migrations apply stepinside-analytics --local)
+#
+[[d1_databases]]
+binding = "ANALYTICS_DB"
+database_name = "stepinside-analytics"
+database_id = "933ec231-8cc0-4dfb-9f26-00eee62735ae"
+migrations_dir = "migrations"
 
 # Optional hardening (details in README.md):
 #
 #   STAGE_DAILY_LIMIT — max staged images per UTC day across ALL visitors
 #   (kill-switch against cost abuse; default 200; requires RATE_LIMIT_KV).
 #   CONCIERGE_DAILY_LIMIT — max concierge chat turns per UTC day across ALL
-#   visitors (default 1000; requires RATE_LIMIT_KV):
-# [vars]
-# STAGE_DAILY_LIMIT = "200"
-# CONCIERGE_DAILY_LIMIT = "1000"
+#   visitors (default 1000; requires RATE_LIMIT_KV).
+#   EVENTS_DAILY_LIMIT — max /events batches stored per UTC day (flood cap for
+#   D1/the report; default 50000; past the cap: 202 + silent drop).
+#   LEAD_DAILY_LIMIT — max leads stored per UTC day (default 200; past the
+#   cap: 429 with Retry-After):
+[vars]
+# Exact-match origin allowlist (see src/cors.ts). Production site + local dev
+# (Next.js on 3000, incl. the LAN IP used for on-device iPhone testing).
+ALLOWED_ORIGINS = "https://stepinside.eu,https://www.stepinside.eu,https://stepinside-viewer-git-analytics-leads-nbahauses-projects.vercel.app,http://localhost:3000,http://127.0.0.1:3000,http://192.168.0.146:3000,http://localhost:4500,http://127.0.0.1:4500"
+STAGE_DAILY_LIMIT = "200"
+CONCIERGE_DAILY_LIMIT = "1000"
+EVENTS_DAILY_LIMIT = "50000"
+LEAD_DAILY_LIMIT = "200"
 #
 #   STAGE_AUTH_TOKEN — when set, /stage requires a matching `x-stage-token`
 #   header (401 otherwise). Leave unset for the frictionless public demo.

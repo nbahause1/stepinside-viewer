@@ -15,6 +15,7 @@ import {
     version as engineVersion
 } from 'playcanvas';
 
+import { initAnalytics } from './analytics';
 import { App } from './app';
 import { initBranding } from './branding';
 import { MeshCollision, loadVoxelCollision } from './collision';
@@ -26,8 +27,11 @@ import type { Config, Global } from './types';
 import { initControls } from './controls';
 import { initConcierge } from './concierge';
 import { initInquiry } from './inquiry';
+import { getZoom, registerZoomNotifier, resetZoom } from './cameras/zoom';
+import { initZoomIndicator } from './zoom-indicator';
 import { initShare } from './share';
 import { initStaging } from './staging';
+import { initSurvey } from './survey';
 import { initTutorial } from './tutorial';
 import { initPoster, initUI } from './ui';
 import { Viewer } from './viewer';
@@ -52,6 +56,16 @@ const loadGsplat = async (app: AppBase, config: Config, progressCallback: (progr
                 unified: true,
                 asset
             });
+            if (platform.mobile && entity.gsplat) {
+                // Indoor LOD distances: the engine default (5 m base, 3x per
+                // level) keeps the NEIGHBOURING room at full detail. In a flat
+                // the next room starts 2-3 m away — drop it a level sooner.
+                // High-tier phones get a milder falloff (quality first),
+                // mid/low the tight one. Mobile only; desktop untouched.
+                const high = config.tier === 'high';
+                entity.gsplat.lodBaseDistance = high ? 3.5 : 2.5;
+                entity.gsplat.lodMultiplier = high ? 3 : 2.5;
+            }
             app.root.addChild(entity);
             resolve(entity);
         });
@@ -180,15 +194,36 @@ const initCanvas = (global: Global) => {
     // address the resulting softness with a sharpening post-pass instead (see
     // settings.json), which costs no extra render resolution.
     const webgl = global.renderer === 'webgl';
-    const maxPixelDim = platform.mobile ? (webgl ? 768 : 1080) : (webgl ? 1080 : 1536);
+    // Resolution cap per device tier (fill rate is THE mobile bottleneck —
+    // TBDR GPUs blend every overlapping splat fragment):
+    //   high phones keep near-native 1080 (they proved they can, and quality
+    //   is the product), mid drops to 900, low (12-mini class) to 560 —
+    //   heat is cumulative, weak devices must run cool from second one.
+    // Reads state.deviceTier so a runtime DEMOTION resizes too.
+    const maxPixelDim = () => {
+        if (!platform.mobile) return webgl ? 1080 : 1536;
+        if (webgl) return state.deviceTier === 'low' ? 560 : 768;
+        return state.deviceTier === 'low' ? 560 : (state.deviceTier === 'mid' ? 900 : 1080);
+    };
+
+    // Optical-zoom sharpness: while zoomed in, raise the cap in step with the
+    // zoom factor (quantized to half steps so the swap chain doesn't
+    // reallocate on every pinch frame). devicePixelRatio stays the hard
+    // ceiling, so this converges on the display's NATIVE resolution — the
+    // zoomed-in view is exactly where the capped soft splat rendering would
+    // otherwise read as blur.
+    const zoomBoost = () => 1 + Math.min(1.5, Math.round((getZoom() - 1) * 2) / 2);
 
     // cap pixel ratio to limit resolution on high-DPI devices
-    const calcPixelRatio = () => Math.min(maxPixelDim / Math.min(screen.width, screen.height), window.devicePixelRatio);
+    const calcPixelRatio = () => Math.min((maxPixelDim() * zoomBoost()) / Math.min(screen.width, screen.height), window.devicePixelRatio);
 
-    // last known device pixel size (full resolution, before any quality scaling)
+    // last known client size + device pixel size (before any quality scaling)
+    const clientSize = { width: 0, height: 0 };
     const deviceSize = { width: 0, height: 0 };
 
     const set = (width: number, height: number) => {
+        clientSize.width = width;
+        clientSize.height = height;
         const ratio = calcPixelRatio();
         deviceSize.width = width * ratio;
         deviceSize.height = height * ratio;
@@ -226,6 +261,18 @@ const initCanvas = (global: Global) => {
     resizeObserver.observe(canvas);
 
     events.on('performanceMode:changed', () => {
+        app.renderNextFrame = true;
+    });
+
+    // re-derive the resolution cap when the optical zoom changes
+    events.on('zoom:changed', () => {
+        set(clientSize.width, clientSize.height);
+        app.renderNextFrame = true;
+    });
+
+    // ...and when the runtime demotes the device tier
+    events.on('deviceTier:changed', () => {
+        set(clientSize.width, clientSize.height);
         app.renderNextFrame = true;
     });
 
@@ -275,7 +322,9 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
         gamingControls: localStorage.getItem('gamingControls') === 'true',
         moveLocked: false,
         chatOpen: false,
-        prewarming: false
+        prewarming: false,
+        tourRevealActive: false,
+        deviceTier: config.tier ?? 'high'
     });
 
     const global: Global = {
@@ -288,6 +337,14 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
         renderer,
         cameraMoving: false
     };
+
+    // optical zoom (walk/fly): forward target changes onto the event bus for
+    // the resolution cap + badge, and ease back to 1× on every mode switch
+    registerZoomNotifier((zoom: number) => {
+        events.fire('zoom:changed', zoom);
+        app.renderNextFrame = true;
+    });
+    events.on('cameraMode:changed', () => resetZoom());
 
     initCanvas(global);
 
@@ -323,6 +380,13 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
     initConcierge(global);
     initStaging(global);
     initInquiry(global);
+    initZoomIndicator(global);
+    // anonymous usage analytics (inert no-op without settings.analytics); must
+    // init before the Viewer so its 'inputEvent' listener registers ahead of
+    // the camera manager's (it reads the pre-transition camera mode)
+    initAnalytics(global);
+    // engagement survey + lead CTA card (rides on analytics; inert without it)
+    initSurvey(global);
 
     // Load model
     const gsplatLoad = loadGsplat(

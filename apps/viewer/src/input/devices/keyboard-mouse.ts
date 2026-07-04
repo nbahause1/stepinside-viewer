@@ -1,6 +1,7 @@
 import { KeyboardMouseSource, Vec3 } from 'playcanvas';
 
 import { damp } from '../../core/math';
+import { multiplyZoom } from '../../cameras/zoom';
 import type { Global } from '../../types';
 import {
     DISPLACEMENT_SCALE,
@@ -56,6 +57,9 @@ class KeyboardMouseDevice implements InputDevice {
     orbitSpeed: number = 18;
 
     wheelSpeed: number = 0.06;
+
+    /** Optical-zoom gain per wheel delta unit in walk mode (~1.2×/notch). */
+    wheelZoomSensitivity: number = 0.0015;
 
     mouseRotateSensitivity: number = 0.5;
 
@@ -222,7 +226,17 @@ class KeyboardMouseDevice implements InputDevice {
         }
         screenToWorld(cameraComponent, mouse[0], mouse[1], distance, panMove);
         v.add(panMove.mulScalar(pan));
-        wheelMove.set(0, 0, -wheel[0]);
+        // Walk mode: the wheel is OPTICAL zoom (scroll up = magnify), not
+        // locomotion — moving stays on click-to-walk / WASD. Other modes keep
+        // the classic wheel dolly.
+        if (isWalk) {
+            if (wheel[0] !== 0) {
+                multiplyZoom(Math.exp(-wheel[0] * this.wheelZoomSensitivity));
+            }
+            wheelMove.set(0, 0, 0);
+        } else {
+            wheelMove.set(0, 0, -wheel[0]);
+        }
         v.add(wheelMove.mulScalar(this.wheelSpeed * DISPLACEMENT_SCALE));
         deltas.move.append([v.x, v.y, flipZForOrbit(mode, v.z)]);
 

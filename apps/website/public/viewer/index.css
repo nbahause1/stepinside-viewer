@@ -450,6 +450,9 @@ body.tutorial-active #walkHint {
 #controlDome #domeMeasure .domeIcon--walk {
   display: none;
 }
+#controlDome #domeMeasureAerial .domeIcon--measureExit {
+  display: none;
+}
 #controlDome #domeTour .domeIcon--tourStop {
   display: none;
 }
@@ -886,6 +889,12 @@ body.measure-active #controlDome #domeMeasure .domeIcon--measure {
   display: none;
 }
 body.measure-active #controlDome #domeMeasure .domeIcon--walk {
+  display: block;
+}
+body.measure-active #controlDome #domeMeasureAerial .domeIcon--measure {
+  display: none;
+}
+body.measure-active #controlDome #domeMeasureAerial .domeIcon--measureExit {
   display: block;
 }
 
@@ -1844,6 +1853,279 @@ body.measure-active #controlDome #domeMeasure .domeIcon--walk {
     animation: none;
   }
 }
+/* engagement survey + lead CTA card ("Wie interessant ist diese Wohnung für
+   dich?"). Light frosted glass matching the tutorial cards, slides in bottom-
+   centre once the visit shows real engagement. Created and wired entirely in
+   survey.ts — without settings.analytics the element never exists. The viewer
+   stays interactive behind it (no scrim); the card only owns its own pixels. */
+#surveyCard {
+  position: absolute;
+  left: 50%;
+  bottom: 96px;
+  z-index: 18;
+  box-sizing: border-box;
+  width: min(360px, 100vw - 24px);
+  padding: 16px 18px 15px;
+  border-radius: 20px;
+  text-align: center;
+  font-family: "Montserrat", "Arial", sans-serif;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.64), rgba(250, 250, 251, 0.5));
+  backdrop-filter: blur(30px) saturate(150%) brightness(1.06);
+  -webkit-backdrop-filter: blur(30px) saturate(150%) brightness(1.06);
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  box-shadow: 0 18px 44px -14px rgba(0, 0, 0, 0.32), inset 0 1px 0 0 rgba(255, 255, 255, 0.85), inset 0 -1px 0 0 rgba(0, 0, 0, 0.04);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateX(-50%) translateY(16px) scale(0.98);
+  transition: opacity 0.45s var(--ease-out), transform 0.45s var(--ease-out), visibility 0s linear 0.45s;
+}
+#surveyCard.visible {
+  opacity: 1;
+  visibility: visible;
+  transform: translateX(-50%) translateY(0) scale(1);
+  transition: opacity 0.45s var(--ease-out), transform 0.45s var(--ease-out);
+}
+#surveyCard .survey__close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--ink-2);
+  cursor: pointer;
+  transition: background-color 160ms var(--ease-out), color 160ms var(--ease-out);
+}
+#surveyCard .survey__close > svg {
+  display: block;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.75;
+  stroke-linecap: round;
+}
+#surveyCard .survey__close:hover {
+  background-color: rgba(0, 0, 0, 0.06);
+  color: var(--ink-1);
+}
+#surveyCard .survey__title {
+  padding: 2px 24px 0;
+  font-size: 14.5px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  line-height: 1.35;
+  color: var(--ink-1);
+}
+#surveyCard .survey__emojis {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 14px;
+  padding-bottom: 2px;
+}
+#surveyCard .survey__emoji {
+  width: 46px;
+  height: 46px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  border-radius: 50%;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(246, 247, 250, 0.55));
+  box-shadow: 0 6px 16px -8px rgba(0, 0, 0, 0.25), inset 0 1px 0 0 rgba(255, 255, 255, 0.9);
+  font-family: "Montserrat", sans-serif;
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--ink-1, rgba(24, 24, 26, 0.94));
+  line-height: 1;
+  cursor: pointer;
+  transition: transform 160ms var(--ease-out), box-shadow 160ms var(--ease-out);
+}
+#surveyCard .survey__emoji:hover {
+  transform: translateY(-2px) scale(1.06);
+  box-shadow: 0 10px 22px -8px rgba(0, 0, 0, 0.3), inset 0 1px 0 0 rgba(255, 255, 255, 0.95);
+}
+#surveyCard .survey__emoji:active {
+  transform: scale(0.94);
+}
+#surveyCard .survey__scaleHint {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 8px;
+  padding: 0 4px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--ink-2, rgba(24, 24, 26, 0.55));
+}
+#surveyCard .survey__ctas {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 14px;
+}
+#surveyCard .survey__cta {
+  height: 42px;
+  border: none;
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(44, 44, 50, 0.95), rgba(24, 24, 28, 0.92));
+  box-shadow: 0 8px 18px -10px rgba(0, 0, 0, 0.45), inset 0 1px 0 0 rgba(255, 255, 255, 0.16);
+  font-family: inherit;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: #fff;
+  cursor: pointer;
+  transition: transform 160ms var(--ease-out), filter 160ms var(--ease-out), opacity 160ms var(--ease-out);
+}
+#surveyCard .survey__cta:hover {
+  filter: brightness(1.14);
+}
+#surveyCard .survey__cta:active {
+  transform: translateY(1px);
+}
+#surveyCard .survey__cta:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+#surveyCard .survey__cta--secondary {
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.8), rgba(246, 247, 250, 0.62));
+  box-shadow: 0 6px 14px -10px rgba(0, 0, 0, 0.3), inset 0 1px 0 0 rgba(255, 255, 255, 0.9);
+  color: var(--ink-1);
+}
+#surveyCard .survey__decline {
+  margin-top: 10px;
+  padding: 4px 8px;
+  border: none;
+  background: transparent;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ink-2);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+#surveyCard .survey__decline:hover {
+  color: var(--ink-1);
+}
+#surveyCard .survey__form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+#surveyCard .survey__input {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 40px;
+  padding: 10px 13px;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.66);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.4;
+  color: var(--ink-1);
+  outline: none;
+  -moz-user-select: text;
+       user-select: text;
+  -webkit-user-select: text;
+  resize: none;
+  transition: border-color 160ms var(--ease-out), background-color 160ms var(--ease-out);
+}
+#surveyCard .survey__input::-moz-placeholder {
+  color: var(--ink-2);
+}
+#surveyCard .survey__input::placeholder {
+  color: var(--ink-2);
+}
+#surveyCard .survey__input:focus {
+  border-color: rgba(0, 0, 0, 0.28);
+  background: rgba(255, 255, 255, 0.85);
+}
+#surveyCard .survey__consent {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 2px;
+  text-align: left;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.45;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+#surveyCard .survey__consent input {
+  flex-shrink: 0;
+  width: 15px;
+  height: 15px;
+  margin-top: 1px;
+  accent-color: #1a1a1e;
+  cursor: pointer;
+}
+#surveyCard .survey__consent a {
+  color: var(--ink-1);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+#surveyCard .survey__error {
+  text-align: left;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: #c9392c;
+}
+#surveyCard .survey__thanks {
+  padding: 10px 20px 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink-1);
+}
+
+#zoomBadge {
+  position: absolute;
+  left: 50%;
+  bottom: 172px;
+  z-index: 17;
+  padding: 4px 13px;
+  border-radius: 999px;
+  font-family: "Montserrat", "Arial", sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-1, #1d1d1f);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.7), rgba(250, 250, 251, 0.55));
+  backdrop-filter: blur(18px) saturate(140%);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  box-shadow: 0 8px 20px -12px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateX(-50%) translateY(6px);
+  transition: opacity 0.25s var(--ease-out), transform 0.25s var(--ease-out), visibility 0s linear 0.25s;
+}
+#zoomBadge.visible {
+  opacity: 1;
+  visibility: visible;
+  transform: translateX(-50%);
+  transition: opacity 0.25s var(--ease-out), transform 0.25s var(--ease-out);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #surveyCard {
+    transform: translateX(-50%);
+    transition: opacity 0.2s linear, visibility 0s linear 0.2s;
+  }
+  #surveyCard.visible {
+    transform: translateX(-50%);
+    transition: opacity 0.2s linear;
+  }
+}
 body.staging-open #controlDome,
 body.staging-open #controlsWrap,
 body.staging-open #annotationNav,
@@ -1851,7 +2133,8 @@ body.staging-open #brandDome,
 body.staging-open #chatPill,
 body.staging-open #inquiryPill,
 body.staging-open #sharePill,
-body.staging-open #stagePill {
+body.staging-open #stagePill,
+body.staging-open #surveyCard {
   opacity: 0 !important;
   pointer-events: none !important;
   transition: opacity 200ms var(--ease-out);
@@ -2272,8 +2555,9 @@ body.staging-open #stagePill {
     background: radial-gradient(130% 120% at 50% -15%, rgba(255, 255, 255, 0.32), rgba(255, 255, 255, 0) 60%), linear-gradient(180deg, rgba(112, 114, 122, 0.26), rgba(58, 60, 68, 0.26));
   }
 }
-/* -- helles Glas: Tutorial-Karten & Mess-Label (dunkler Text) -- */
+/* -- helles Glas: Tutorial-Karten, Survey-Karte & Mess-Label (dunkler Text) -- */
 #tutorial .tutorialCard,
+#surveyCard,
 #measureOverlay .measure__label {
   background: radial-gradient(135% 130% at 50% -14%, rgba(255, 255, 255, 0.96), rgba(255, 255, 255, 0) 62%), linear-gradient(180deg, rgba(255, 255, 255, 0.74), rgba(246, 247, 250, 0.56));
   -webkit-backdrop-filter: blur(var(--lgl-blur)) saturate(var(--lgl-sat)) brightness(var(--lgl-bright));
@@ -2383,10 +2667,13 @@ body.staging-open #stagePill {
     -webkit-backdrop-filter: none;
     background: radial-gradient(130% 120% at 50% -15%, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0) 60%), linear-gradient(180deg, rgba(40, 40, 44, 0.8), rgba(22, 22, 25, 0.74));
   }
-  /* -- light frosted cards (ink text): tutorial cards + measure labels.
-        Blur off; the translucent white veil becomes a mostly-opaque
-        white so the dark ink text stays legible over dark floors. -- */
+  /* -- light frosted cards (ink text): tutorial cards, survey/lead card
+        + measure labels. Blur off; the translucent white veil becomes a
+        mostly-opaque white so the dark ink text stays legible over dark
+        floors. -- */
   #tutorial .tutorialCard,
+  #surveyCard,
+  #zoomBadge,
   #measureOverlay .measure__label {
     backdrop-filter: none;
     -webkit-backdrop-filter: none;

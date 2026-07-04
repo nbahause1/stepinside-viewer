@@ -12,6 +12,7 @@ const initControls = (global: Global) => {
     const tour = document.getElementById('domeTour');
     const reset = document.getElementById('domeReset');
     const measure = document.getElementById('domeMeasure');
+    const measureAerial = document.getElementById('domeMeasureAerial');
     const aerial = document.getElementById('domeAerial');
     const aerialExit = document.getElementById('domeAerialExit');
     const prev = document.getElementById('domePrev');
@@ -51,9 +52,12 @@ const initControls = (global: Global) => {
     });
 
     // Measurement tool: toggles measure mode (handled in measure.ts, which also
-    // sets body.measure-active — the button then shows a walk figure to signal
-    // "press again to return to walking").
+    // sets body.measure-active — the walk-row button then shows a walk figure
+    // ("press again to return to walking"), the bird's-eye button an X.
     measure?.addEventListener('click', () => {
+        events.fire('inputEvent', 'measure');
+    });
+    measureAerial?.addEventListener('click', () => {
         events.fire('inputEvent', 'measure');
     });
 };

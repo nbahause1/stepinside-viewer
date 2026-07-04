@@ -375,6 +375,8 @@ const initStaging = (global: Global) => {
         styleIndex = (styleIndex + dir + n) % n;
         selectedStyle = styles[styleIndex]?.id;
         showStyleName();
+        // anonymous usage signal (no-op unless analytics is configured)
+        events.fire('analytics', 'staging', { action: 'style', style: selectedStyle });
         // generate() handles the rest: cached styles swap in instantly, new ones
         // show the generating loader.
         generate(selectedStyle);
@@ -388,7 +390,11 @@ const initStaging = (global: Global) => {
     }
 
     // Pill: kick off a generation.
-    trigger.addEventListener('click', () => generate());
+    trigger.addEventListener('click', () => {
+        // anonymous usage signal (no-op unless analytics is configured)
+        events.fire('analytics', 'staging', { action: 'open', style: selectedStyle });
+        generate();
+    });
 
     // Overlay controls. Stop pointer/wheel from reaching the canvas/camera.
     overlay.addEventListener('wheel', event => event.stopPropagation());

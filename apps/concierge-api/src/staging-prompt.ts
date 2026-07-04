@@ -16,6 +16,8 @@
  * reference set, so a client can never inject prompt content.
  */
 
+import type { LayoutPlan } from './staging-planner.js';
+
 /** A selectable furnishing style. */
 export interface StagingStyle {
   id: string;
@@ -27,6 +29,8 @@ export interface StagingStyle {
   refs: string[];
   /** The placement instructions; assumes image 1 = room, images 2..N = refs in `refs` order. */
   placement: string;
+  /** Plain-words piece list handed to the layout PLANNER (staging-planner.ts). */
+  planPieces: string;
 }
 
 /** Shared rule block appended to every style prompt. */
@@ -46,6 +50,7 @@ export const STAGING_STYLES: StagingStyle[] = [
     label: 'Designklassiker',
     dir: 'set1-vitra-klassiker',
     refs: ['anagram-sofa.jpg', 'eames-lounge-chair.jpg', 'noguchi-coffee-table.jpg', 'vitra-akari-lamp.png'],
+    planPieces: 'a 3-seat designer sofa, a lounge chair with ottoman, a glass coffee table on a rug, a paper floor lamp',
     placement: `Furnish the empty room (image 1) with these exact designer pieces; in images 2-5 use ONLY the furniture item itself and ignore its background. Reproduce each faithfully (exact shape, proportions and materials):
 - Image 2: a Vitra "Anagram" sofa by Panter&Tourron - low rounded arms, a slim lacquered base frame with short curved legs, soft boxy cushions, warm terracotta/rust fabric. Place it flat against the largest blank wall, facing the windows.
 - Image 3: a Vitra Eames Lounge Chair with Ottoman - black leather buttoned cushions, curved walnut plywood shell, polished aluminium five-star swivel base. Angle it toward the seating.
@@ -57,6 +62,7 @@ export const STAGING_STYLES: StagingStyle[] = [
     label: 'Minimal',
     dir: 'set2-usm-vitra-minimal',
     refs: ['usm-haller-sideboard.jpg', 'soft-modular-sofa.jpg', 'eames-dsw-chair.jpg'],
+    planPieces: 'a low modular sofa, a white modular sideboard, a pair of side chairs, a low oak coffee table on a rug, a green plant',
     placement: `Furnish the empty room (image 1) in a clean, minimalist Swiss-design style with these exact pieces; in images 2-4 use ONLY the furniture item itself and ignore its background. Reproduce each faithfully (exact shape, proportions and materials):
 - Image 2: a USM Haller modular sideboard in pure white (RAL 9010) - a chrome tubular frame with flat white metal panels, two drop-down doors with the signature round chrome ball handles and chrome ball joints at every corner, low on small chrome feet. Place it flat against a free wall.
 - Image 3: a Vitra "Soft Modular" sofa by Jasper Morrison - a low, ground-hugging sofa with thick boxy cushions, soft square arms and a recessed dark plinth base, in a cream/ivory fabric. Place it against the largest blank wall, facing the windows.
@@ -68,6 +74,7 @@ Add a simple low rectangular coffee table in light oak in front of the sofa on a
     label: 'Colour-Pop',
     dir: 'set3-colour-pop',
     refs: ['usm-haller-sideboard.jpg', 'panton-chair.jpg', 'eames-dsw-chair.jpg', 'soft-modular-sofa.jpg'],
+    planPieces: 'a modular sofa, a golden-yellow sideboard, one red statement chair, a pair of side chairs, a low coffee table on a rug',
     placement: `Furnish the empty room (image 1) in a confident, characterful colour-pop style with one or two bold accents against the calm room; in images 2-5 use ONLY the furniture item itself and ignore its background. Reproduce each faithfully (exact shape, proportions and materials):
 - Image 2: a USM Haller modular sideboard - chrome tubular frame, flat metal panels with the signature round chrome ball handles and ball joints - rendered in a bold GOLDEN YELLOW. Place it flat against a free wall as the statement piece.
 - Image 3: a Vitra Panton Chair - a single flowing S-shaped cantilever chair moulded in one piece, glossy, in classic RED. Place it as an accent near the window.
@@ -86,14 +93,37 @@ export function resolveStyle(id: string | undefined): StagingStyle {
     STAGING_STYLES.find(s => s.id === DEFAULT_STYLE_ID)!;
 }
 
+/** Human phrase for a plan's wall token (unknown tokens pass through as-is). */
+const WALL_PHRASE: Record<string, string> = {
+  left: 'against the left-hand wall',
+  right: 'against the right-hand wall',
+  back: 'against the far back wall',
+  far: 'against the far back wall',
+  front: 'against the near wall',
+  near: 'against the near wall',
+  center: 'in the centre of the room',
+  centre: 'in the centre of the room',
+};
+
 /**
  * Build the full text prompt for a style. Image 1 is the room to furnish (the
- * captured scan frame); images 2..N are the style's reference pieces.
+ * captured scan frame); images 2..N are the style's reference pieces. When a
+ * layout plan is provided (staging-planner.ts), it decides WHERE each piece
+ * goes — the style's reference descriptions still define WHAT each piece
+ * looks like.
  */
-export function buildStagingPrompt(style: StagingStyle): string {
+export function buildStagingPrompt(style: StagingStyle, plan?: LayoutPlan | null): string {
+  const planBlock = plan
+    ? `\n\nFURNISH EXACTLY PER THIS LAYOUT PLAN — it was computed for THIS room and overrides any generic placement advice above (the reference descriptions above still define what each piece looks like):
+${plan.pieces.map((p) => {
+    const wall = WALL_PHRASE[p.wall.toLowerCase()] ?? p.wall;
+    return `- ${p.item.replace(/_/g, ' ')}: ${wall}, ${p.placement}${p.orientation ? `, ${p.orientation}` : ''}`;
+  }).join('\n')}${plan.keepClear.length > 0 ? `\nKeep completely clear: ${plan.keepClear.join('; ')}.` : ''}`
+    : '';
+
   return `You are a professional real-estate home stager. Image 1 is the room to furnish, shot from a high angle. If it already contains any furniture, remove it first.
 
-${style.placement}
+${style.placement}${planBlock}
 
 ${PRESERVE}`;
 }

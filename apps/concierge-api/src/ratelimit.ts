@@ -207,9 +207,10 @@ export class KvRateLimiter implements RateLimiter {
  * Maintains one counter per UTC day (`<prefix>:YYYY-MM-DD`, TTL 2 days) shared
  * by ALL clients. Once `limit` calls have been consumed, every further request
  * is rejected until UTC midnight — this bounds the worst-case daily cost of a
- * paid endpoint no matter how distributed an abuser is. Each paid endpoint gets
- * its own prefix (`spend` for /stage, `spend:concierge` for the concierge) so
- * one budget can't be drained through the other.
+ * paid endpoint (or D1 flooding of an analytics endpoint) no matter how
+ * distributed an abuser is. Each capped endpoint gets its own prefix (`spend`
+ * for /stage, `spend:concierge`, `spend:events`, `spend:lead`) so one budget
+ * can't be drained through another.
  *
  * SOFT LIMIT: same caveats as KvRateLimiter — KV get/put races can overshoot
  * by a few requests under a burst, and any KV I/O error (e.g. the

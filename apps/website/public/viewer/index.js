@@ -78708,6 +78708,235 @@ let OrbitController$1 = class OrbitController extends InputController$1 {
 	}
 };
 
+const FLUSH_INTERVAL_MS = 5000; // flush at least this often while queued
+const FLUSH_AT_QUEUE_SIZE = 10; // ...or immediately at this many events
+const MAX_BATCH = 20; // server cap per request (analytics.ts)
+const MAX_DATA_CHARS = 500; // server cap per event's JSON data
+const MAX_QUEUE = 100; // offline retention cap (drop oldest)
+const HEARTBEAT_INTERVAL_MS = 30000;
+// Lenient read (matches inquiry.ts): settings.json is authored per customer
+// and a bad value must never break the tour.
+const asText$3 = (value) => {
+    return (typeof value === 'string' && value.trim() !== '') ? value.trim() : undefined;
+};
+// Session id: crypto-random, held in memory only (NEVER persisted). The
+// fallbacks keep the shape within the server's ^[a-f0-9-]{8,64}$ contract on
+// insecure origins (LAN dev) where crypto.randomUUID is unavailable.
+const randomSessionId = () => {
+    try {
+        if (typeof crypto.randomUUID === 'function')
+            return crypto.randomUUID();
+    }
+    catch { /* fall through */ }
+    try {
+        const bytes = new Uint8Array(16);
+        crypto.getRandomValues(bytes);
+        return Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
+    }
+    catch {
+        return `${Date.now().toString(16)}-${Math.floor(Math.random() * 0xffffffff).toString(16)}`;
+    }
+};
+// Where the visit came from: an explicit utm_source wins, then the referrer's
+// hostname, then 'direct'. Never more than a coarse origin label — no full
+// URLs, no query strings.
+const deriveSource = () => {
+    try {
+        const utm = new URLSearchParams(location.search).get('utm_source');
+        if (utm && utm.trim() !== '')
+            return utm.trim().slice(0, 64);
+    }
+    catch { /* fall through */ }
+    try {
+        if (document.referrer) {
+            const host = new URL(document.referrer).hostname;
+            if (host)
+                return host.slice(0, 64);
+        }
+    }
+    catch { /* fall through */ }
+    return 'direct';
+};
+const init$1 = (global) => {
+    const { settings, state, events } = global;
+    // Cast-through config (not part of the validated schema core; see v2.ts).
+    // Both values are required; anything less leaves the module fully inert.
+    const cfg = settings.analytics;
+    const endpoint = asText$3(cfg?.endpoint);
+    const propertyId = asText$3(cfg?.propertyId);
+    if (!endpoint || !propertyId)
+        return;
+    const sessionId = randomSessionId();
+    // ---- queue + batching ---------------------------------------------------
+    const queue = [];
+    let flushTimer = 0;
+    const scheduleFlush = () => {
+        if (flushTimer)
+            return;
+        flushTimer = window.setTimeout(() => {
+            flushTimer = 0;
+            flush();
+        }, FLUSH_INTERVAL_MS);
+    };
+    // Send everything queued. `useBeacon` is the pagehide path: sendBeacon
+    // survives the page teardown; fetch keepalive is the fallback. Every
+    // failure is swallowed — losing a beacon must never surface in the tour.
+    const flush = (useBeacon = false) => {
+        if (queue.length === 0)
+            return;
+        if (flushTimer) {
+            window.clearTimeout(flushTimer);
+            flushTimer = 0;
+        }
+        // Offline: hold the (capped) queue and retry later instead of burning
+        // requests that can only fail.
+        if (!useBeacon && navigator.onLine === false) {
+            scheduleFlush();
+            return;
+        }
+        while (queue.length > 0) {
+            const batch = queue.splice(0, MAX_BATCH);
+            try {
+                const body = JSON.stringify({ propertyId, sessionId, events: batch });
+                if (useBeacon && typeof navigator.sendBeacon === 'function' &&
+                    navigator.sendBeacon(endpoint, body)) {
+                    continue;
+                }
+                fetch(endpoint, {
+                    method: 'POST',
+                    body,
+                    keepalive: true
+                }).catch(() => { });
+            }
+            catch { /* fire-and-forget */ }
+        }
+    };
+    const track = (type, data) => {
+        try {
+            // Defensive size guard: one oversized payload would 400 the whole
+            // batch server-side. Better a bare event than losing its siblings.
+            if (data !== undefined && JSON.stringify(data).length > MAX_DATA_CHARS) {
+                data = undefined;
+            }
+            if (queue.length >= MAX_QUEUE)
+                queue.shift();
+            queue.push(data === undefined ? { type } : { type, data });
+            if (queue.length >= FLUSH_AT_QUEUE_SIZE) {
+                flush();
+            }
+            else {
+                scheduleFlush();
+            }
+        }
+        catch { /* fire-and-forget */ }
+    };
+    // ---- open (once, when the scene is ready) --------------------------------
+    // Carries the traffic source exactly once per session.
+    let opened = false;
+    const trackOpen = () => {
+        if (opened)
+            return;
+        opened = true;
+        track('open', { source: deriveSource() });
+    };
+    if (state.loaded)
+        trackOpen();
+    events.on('loaded:changed', (loaded) => {
+        if (loaded)
+            trackOpen();
+    });
+    // ---- guided tour (Rundgang) ----------------------------------------------
+    // Fired by camera-manager.ts: start via the 'tour' control, complete when a
+    // non-looping track plays through to its end (interrupt/cancel don't count).
+    events.on('tour:start', () => track('tour_start'));
+    events.on('tour:complete', () => track('tour_complete'));
+    // ---- bird's-eye (drone) views ---------------------------------------------
+    // This listener registers before the camera manager's own 'inputEvent'
+    // handler (initAnalytics runs before the Viewer is constructed), so
+    // state.cameraMode still holds the PREVIOUS mode here: the 'aerial' toggle
+    // counts only on the way in. 'aerialGoto' is the direct-jump path (staging,
+    // deep features); the silent load-time staging prewarm detour is not a
+    // visitor action and is skipped.
+    events.on('inputEvent', (name, arg) => {
+        if (name === 'aerial') {
+            if (state.cameraMode !== 'aerial')
+                track('aerial', { index: 0 });
+        }
+        else if (name === 'aerialGoto') {
+            if (!state.prewarming)
+                track('aerial', { index: Math.max(0, Number(arg) | 0) });
+        }
+    });
+    // ---- annotations ----------------------------------------------------------
+    events.on('annotation.activate', (annotation) => {
+        const label = typeof annotation?.title === 'string' ? annotation.title.slice(0, 200) : '';
+        track('annotation', { label });
+    });
+    // ---- feature modules (staging / share / inquiry / concierge) ---------------
+    // Producers fire 'analytics' on the global bus (staging.ts, share.ts,
+    // inquiry.ts, concierge.ts). With analytics unconfigured nothing listens,
+    // so those fires are free no-ops and the modules stay decoupled.
+    events.on('analytics', (type, data) => track(type, data));
+    // ---- dwell time -------------------------------------------------------------
+    // Active seconds = time the tab was actually visible (hidden tabs don't
+    // count). Sent as a session-cumulative counter so a lost beacon only costs
+    // precision, never correctness (the server can take the max per session).
+    let activeMs = 0;
+    let visibleSince = document.visibilityState === 'visible' ? performance.now() : null;
+    const settleVisibility = () => {
+        if (visibleSince !== null) {
+            activeMs += performance.now() - visibleSince;
+            visibleSince = null;
+        }
+    };
+    const activeSeconds = () => Math.round((activeMs + (visibleSince !== null ? performance.now() - visibleSince : 0)) / 1000);
+    let lastHeartbeatSeconds = 0;
+    const heartbeat = () => {
+        const seconds = activeSeconds();
+        if (seconds <= 0 || seconds === lastHeartbeatSeconds)
+            return;
+        lastHeartbeatSeconds = seconds;
+        track('heartbeat', { seconds });
+    };
+    window.setInterval(() => {
+        if (document.visibilityState === 'visible')
+            heartbeat();
+    }, HEARTBEAT_INTERVAL_MS);
+    // Tab hidden or page going away: settle the clock, queue a final heartbeat
+    // and push the WHOLE queue out via sendBeacon (fetch keepalive fallback) —
+    // the last reliable chance to get data out before the page dies.
+    const onHidden = () => {
+        settleVisibility();
+        heartbeat();
+        flush(true);
+    };
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden') {
+            onHidden();
+        }
+        else if (visibleSince === null) {
+            visibleSince = performance.now();
+        }
+    });
+    window.addEventListener('pagehide', onHidden);
+    // bfcache restore: pagehide ran, the page came back — resume the clock.
+    window.addEventListener('pageshow', () => {
+        if (document.visibilityState === 'visible' && visibleSince === null) {
+            visibleSince = performance.now();
+        }
+    });
+};
+const initAnalytics = (global) => {
+    try {
+        init$1(global);
+    }
+    catch (err) {
+        // Analytics must never break the tour — not even at init.
+        if (global.config.devtools)
+            console.warn('Analytics init failed:', err);
+    }
+};
+
 class App extends AppBase {
     constructor(canvas, options) {
         super(canvas);
@@ -78746,7 +78975,7 @@ class App extends AppBase {
 // a bad value must never break the tour — it just falls back to the default
 // (validateV2 additionally strips invalid values, but the visitor path only
 // casts, so we re-check here).
-const asText$1 = (value) => {
+const asText$2 = (value) => {
     return (typeof value === 'string' && value.trim() !== '') ? value.trim() : undefined;
 };
 const makeWord = (text) => {
@@ -78760,10 +78989,10 @@ const initBranding = (global) => {
     if (!branding || typeof branding !== 'object') {
         return;
     }
-    const title = asText$1(branding.title);
-    const logoText = asText$1(branding.logoText);
-    const logoUrl = asText$1(branding.logoUrl);
-    const accentColor = asText$1(branding.accentColor);
+    const title = asText$2(branding.title);
+    const logoText = asText$2(branding.logoText);
+    const logoUrl = asText$2(branding.logoUrl);
+    const accentColor = asText$2(branding.accentColor);
     // browser tab: "{title} — StepInside" (the engine brand stays as suffix)
     if (title) {
         document.title = `${title} — StepInside`;
@@ -81229,6 +81458,7 @@ const initControls = (global) => {
     const tour = document.getElementById('domeTour');
     const reset = document.getElementById('domeReset');
     const measure = document.getElementById('domeMeasure');
+    const measureAerial = document.getElementById('domeMeasureAerial');
     const aerial = document.getElementById('domeAerial');
     const aerialExit = document.getElementById('domeAerialExit');
     const prev = document.getElementById('domePrev');
@@ -81262,9 +81492,12 @@ const initControls = (global) => {
         dome.classList.toggle('is-aerial', mode === 'aerial');
     });
     // Measurement tool: toggles measure mode (handled in measure.ts, which also
-    // sets body.measure-active — the button then shows a walk figure to signal
-    // "press again to return to walking").
+    // sets body.measure-active — the walk-row button then shows a walk figure
+    // ("press again to return to walking"), the bird's-eye button an X.
     measure?.addEventListener('click', () => {
+        events.fire('inputEvent', 'measure');
+    });
+    measureAerial?.addEventListener('click', () => {
         events.fire('inputEvent', 'measure');
     });
 };
@@ -81355,6 +81588,9 @@ const initConcierge = (global) => {
             chip.className = 'chatChip';
             chip.textContent = question;
             chip.addEventListener('click', () => {
+                // anonymous usage signal (no-op unless analytics is configured):
+                // in scripted mode the chip label is the "question"
+                events.fire('analytics', 'concierge_question', { question: question.slice(0, 300), mode: 'scripted' });
                 appendBubble('user', question);
                 appendBubble('bot', answer);
                 // Fly the camera to the object the answer is about.
@@ -81414,6 +81650,9 @@ const initConcierge = (global) => {
             history.splice(0, history.length - MAX_HISTORY);
         appendBubble('user', content);
         input.value = '';
+        // anonymous usage signal (no-op unless analytics is configured): the
+        // question the visitor deliberately typed, truncated for the wire cap
+        events.fire('analytics', 'concierge_question', { question: content.slice(0, 300), mode: 'ai' });
         setLoading(true);
         showThinking();
         // Offline: don't even attempt the request.
@@ -81494,25 +81733,35 @@ const initConcierge = (global) => {
 // in the top-right corner turns a visitor into an inquiry:
 //
 //   settings.inquiry.url    — tap opens the customer's booking/contact page in
-//                             a new tab (takes precedence over email).
-//   settings.inquiry.email  — tap opens a pre-addressed e-mail; the subject is
+//                             a new tab (takes precedence over everything).
+//   lead form               — with analytics configured (and the survey module
+//                             not disabled), tap opens the in-viewer mini lead
+//                             form ('inquiry:open' → survey.ts). Preferred over
+//                             mailto: a desktop without a configured mail
+//                             client silently does NOTHING on mailto links.
+//   settings.inquiry.email  — mailto fallback; the subject is
 //                             settings.inquiry.subject or
 //                             "Anfrage: {branding.title or document.title}".
 //
-// The pill stays hidden unless one of the two targets is configured, so a
-// build without lead capture never shows a dead button. `label` overrides the
+// The pill stays hidden unless one of the targets is available, so a build
+// without lead capture never shows a dead button. `label` overrides the
 // default "Besichtigung anfragen".
 // Lenient read (matches branding.ts): settings.json is authored per customer
 // and a bad value must never break the tour.
-const asText = (value) => {
+const asText$1 = (value) => {
     return (typeof value === 'string' && value.trim() !== '') ? value.trim() : undefined;
 };
 const initInquiry = (global) => {
-    const { settings } = global;
+    const { settings, events } = global;
     const cfg = settings.inquiry;
-    const url = asText(cfg?.url);
-    const email = asText(cfg?.email);
-    if (!url && !email)
+    const url = asText$1(cfg?.url);
+    const email = asText$1(cfg?.email);
+    // Mirrors the survey module's own activation check (survey.ts): when it is
+    // live, it listens for 'inquiry:open' and owns the lead flow.
+    const leadFormAvailable = !!asText$1(settings.analytics?.endpoint) &&
+        !!asText$1(settings.analytics?.propertyId) &&
+        settings.survey?.enabled !== false;
+    if (!url && !email && !leadFormAvailable)
         return;
     const pill = document.getElementById('inquiryPill');
     const trigger = document.getElementById('inquiryTrigger');
@@ -81521,23 +81770,121 @@ const initInquiry = (global) => {
         return;
     // On narrow phones the pill collapses to its icon (see index.scss), so the
     // accessible name/tooltip must carry the label too.
-    const labelText = asText(cfg?.label) ?? 'Besichtigung anfragen';
+    const labelText = asText$1(cfg?.label) ?? 'Besichtigung anfragen';
     label.textContent = labelText;
     trigger.setAttribute('aria-label', labelText);
     trigger.setAttribute('title', labelText);
     trigger.addEventListener('click', () => {
+        // anonymous usage signal (no-op unless analytics is configured)
+        events.fire('analytics', 'inquiry_click', {
+            target: url ? 'url' : (leadFormAvailable ? 'form' : 'email')
+        });
         if (url) {
             window.open(url, '_blank', 'noopener,noreferrer');
             return;
         }
+        if (leadFormAvailable) {
+            events.fire('inquiry:open');
+            return;
+        }
         // initBranding runs first, so branding.title (when set) names the
         // property; document.title is the already-branded fallback.
-        const subject = asText(cfg?.subject) ??
-            `Anfrage: ${asText(settings.branding?.title) ?? document.title}`;
+        const subject = asText$1(cfg?.subject) ??
+            `Anfrage: ${asText$1(settings.branding?.title) ?? document.title}`;
         window.location.href = `mailto:${email}?subject=${encodeURIComponent(subject)}`;
     });
     // Reveal only once wiring succeeded (mirrors the concierge/staging pills).
     pill.classList.remove('hidden');
+};
+
+// Optical zoom for the first-person modes (walk/fly): a shared zoom factor
+// that narrows the camera FOV like a lens, NOT a dolly. Input devices set the
+// target (pinch on touch, wheel on desktop); the controllers apply it with
+// exponential smoothing every frame, so zooming always eases like the rest of
+// the camera motion.
+//
+// The FOV transform is tan-true (fov' = 2·atan(tan(fov/2)/zoom)) so 2× zoom
+// really doubles the apparent size of what's in the centre of the view.
+//
+// Module-level singleton on purpose: the camera controllers are constructed
+// without access to Global (see camera-manager.ts), and there is exactly one
+// camera. Interested parties (resolution scaling, the zoom badge) register a
+// notifier that forwards changes onto the global event bus.
+const ZOOM_MIN = 1;
+const ZOOM_MAX = 2.5;
+/** How fast the smoothed zoom eases toward the target (higher = snappier). */
+const SMOOTHING_RATE = 12;
+const zoomState = {
+    target: 1,
+    smoothed: 1
+};
+let notify = null;
+/** Forward zoom-target changes (e.g. onto the global event bus as 'zoom:changed'). */
+const registerZoomNotifier = (fn) => {
+    notify = fn;
+};
+const getZoom = () => zoomState.target;
+const setZoom = (value) => {
+    const clamped = math.clamp(value, ZOOM_MIN, ZOOM_MAX);
+    if (clamped === zoomState.target)
+        return;
+    zoomState.target = clamped;
+    notify?.(clamped);
+};
+/** Multiplicative step — the natural unit for pinch/wheel gestures. */
+const multiplyZoom = (factor) => setZoom(zoomState.target * factor);
+/** Ease back to 1× (used when the camera mode changes). */
+const resetZoom = (immediate = false) => {
+    setZoom(1);
+    if (immediate)
+        zoomState.smoothed = 1;
+};
+/**
+ * Advance the smoothed zoom by dt and return the zoomed FOV for this frame.
+ * Called by the walk/fly controllers exactly where they write camera.fov.
+ */
+const applySmoothedZoom = (baseFovDeg, dt) => {
+    const t = 1 - Math.exp(-dt * SMOOTHING_RATE);
+    zoomState.smoothed += (zoomState.target - zoomState.smoothed) * t;
+    if (Math.abs(zoomState.smoothed - zoomState.target) < 1e-3) {
+        zoomState.smoothed = zoomState.target;
+    }
+    if (zoomState.smoothed === 1)
+        return baseFovDeg;
+    const halfTan = Math.tan(baseFovDeg * 0.5 * math.DEG_TO_RAD) / zoomState.smoothed;
+    return 2 * Math.atan(halfTan) * math.RAD_TO_DEG;
+};
+
+// Subtle zoom badge ("1,6×"): appears bottom-centre while the optical zoom is
+// active, fades away when the view returns to 1×. Display-only — it never
+// takes pointer events, so it can't interfere with the camera or the cards.
+const initZoomIndicator = (global) => {
+    const { events } = global;
+    let badge = null;
+    let hideTimer = 0;
+    const ensure = () => {
+        if (badge)
+            return badge;
+        badge = document.createElement('div');
+        badge.id = 'zoomBadge';
+        badge.setAttribute('aria-hidden', 'true');
+        (document.getElementById('ui') ?? document.body).appendChild(badge);
+        return badge;
+    };
+    events.on('zoom:changed', (zoom) => {
+        const el = ensure();
+        window.clearTimeout(hideTimer);
+        if (zoom > 1.001) {
+            // German decimal comma, one digit — reads like a camera app
+            el.textContent = `${zoom.toFixed(1).replace('.', ',')}×`;
+            el.classList.add('visible');
+        }
+        else {
+            // brief "1,0×" so zooming back out lands with feedback, then fade
+            el.textContent = '1,0×';
+            hideTimer = window.setTimeout(() => el?.classList.remove('visible'), 700);
+        }
+    });
 };
 
 //---------------------------------------------------------------------
@@ -83908,6 +84255,9 @@ const initShare = (global) => {
         const url = buildShareUrl();
         if (!url)
             return;
+        // anonymous usage signal (no-op unless analytics is configured); the
+        // shared URL itself is never sent anywhere
+        events.fire('analytics', 'share');
         if (navigator.share) {
             try {
                 await navigator.share({ url });
@@ -84271,6 +84621,8 @@ const initStaging = (global) => {
         styleIndex = (styleIndex + dir + n) % n;
         selectedStyle = styles[styleIndex]?.id;
         showStyleName();
+        // anonymous usage signal (no-op unless analytics is configured)
+        events.fire('analytics', 'staging', { action: 'style', style: selectedStyle });
         // generate() handles the rest: cached styles swap in instantly, new ones
         // show the generating loader.
         generate(selectedStyle);
@@ -84283,7 +84635,11 @@ const initStaging = (global) => {
         // the style name stays hidden: the bottom bar shows only "Original zeigen"
     }
     // Pill: kick off a generation.
-    trigger.addEventListener('click', () => generate());
+    trigger.addEventListener('click', () => {
+        // anonymous usage signal (no-op unless analytics is configured)
+        events.fire('analytics', 'staging', { action: 'open', style: selectedStyle });
+        generate();
+    });
     // Overlay controls. Stop pointer/wheel from reaching the canvas/camera.
     overlay.addEventListener('wheel', event => event.stopPropagation());
     toggleBtn.addEventListener('click', (event) => {
@@ -84405,6 +84761,452 @@ const initStaging = (global) => {
     }
 };
 
+// Engagement survey + lead CTA card. Once a visit shows real engagement —
+// the guided tour played through, 75 s of accumulated *visible* time, or
+// leaving fullscreen after a ≥30 s stint — a light frosted glass card slides
+// in bottom-centre and asks, in a single tap, how helpful the tour was on a
+// 1-5 scale (1 = gar nicht hilfreich, 5 = sehr hilfreich). A 4-5 rating
+// offers two warm CTAs ("Besichtigung anfragen" / "Exposé erhalten") that
+// open a three-field mini lead form; lower ratings get a warm "Danke!" and
+// the card leaves.
+//
+// The card rides on the analytics module: survey/cta taps travel through the
+// same batched fire-and-forget queue (events.fire('analytics', …) →
+// analytics.ts), and the lead form POSTs to settings.survey.leadEndpoint
+// (default: the analytics endpoint with /events swapped for /lead). Without
+// settings.analytics — or with settings.survey.enabled === false — this
+// module is a true no-op: zero DOM, zero listeners, zero timers.
+//
+// TRUST RULES (privacy is a feature; mirrors analytics.ts):
+//   - The viewer stays fully interactive behind the card (no scrim, no
+//     blocking), the close X is always visible, nothing is pre-checked and
+//     consent is a deliberate tap on an unchecked box.
+//   - Asked ONCE per property per device: localStorage `sse:survey:{propertyId}`
+//     holds a one-word "answered"/"dismissed" flag — no identifier, no
+//     timestamp, nothing that links sessions, visitors or properties.
+//   - A trigger that fires while the onboarding tutorial or the staging
+//     overlay is up merely WAITS (and a card the staging overlay slides away
+//     comes back afterwards) — only an explicit answer or dismissal ("Nein
+//     danke" / close X) sets the once-per-device flag.
+const ENGAGEMENT_TRIGGER_MS = 40000; // accumulated visible time that counts as engaged (settings.survey.afterSeconds overrides)
+const ENGAGEMENT_CHECK_MS = 1000; // how often the engagement clock is compared
+const FULLSCREEN_MIN_MS = 30000; // fullscreen stint that counts as engaged on exit
+const BLOCKED_RETRY_MS = 2000; // re-check cadence while tutorial/staging block the card
+const THANKS_CLOSE_MS = 2400; // linger on the plain "Danke!" before sliding away
+const SUCCESS_CLOSE_MS = 3200; // linger on the lead-sent confirmation
+const HIDE_ANIM_MS = 450; // matches the CSS exit transition
+// Lenient read (matches analytics.ts): settings.json is authored per customer
+// and a bad value must never break the tour.
+const asText = (value) => {
+    return (typeof value === 'string' && value.trim() !== '') ? value.trim() : undefined;
+};
+// ".../events" → ".../lead" (the concierge-api pairing); any other analytics
+// endpoint shape gets "/lead" appended to its base.
+const deriveLeadEndpoint = (eventsEndpoint) => {
+    const base = eventsEndpoint.replace(/\/+$/, '');
+    return base.endsWith('/events') ? `${base.slice(0, -'/events'.length)}/lead` : `${base}/lead`;
+};
+// The single contact field auto-detects what it holds: an e-mail address or a
+// phone number. Deliberately loose — it only guards against entries that are
+// clearly neither, it must never bounce a real person.
+const detectContact = (value) => {
+    const v = value.trim();
+    if (/^[^\s@]+@[^\s@.]+(?:\.[^\s@.]+)+$/.test(v))
+        return 'email';
+    if (/^\+?\d[\d\s()/.-]{5,}$/.test(v))
+        return 'phone';
+    return undefined;
+};
+// Card markup (created lazily at trigger time — an unconfigured or already-
+// answered build never carries this DOM). Styles live in index.scss
+// (#surveyCard, incl. the (pointer: coarse) static-glass override).
+const CARD_HTML = `
+    <button type="button" class="survey__close" aria-label="Schließen" title="Schließen">
+        <svg width="18" height="18" viewBox="0 0 22 22" aria-hidden="true">
+            <path d="M6 6 L16 16 M16 6 L6 16" />
+        </svg>
+    </button>
+    <div class="survey__step" data-step="rate">
+        <div class="survey__title">Wie hilfreich war dieser Rundgang für dich?</div>
+        <div class="survey__emojis">
+            <button type="button" class="survey__emoji" data-rating="1" data-label="1" aria-label="1 – gar nicht hilfreich" title="Gar nicht hilfreich">1</button>
+            <button type="button" class="survey__emoji" data-rating="2" data-label="2" aria-label="2" title="Wenig hilfreich">2</button>
+            <button type="button" class="survey__emoji" data-rating="3" data-label="3" aria-label="3" title="Teils-teils">3</button>
+            <button type="button" class="survey__emoji" data-rating="4" data-label="4" aria-label="4" title="Hilfreich">4</button>
+            <button type="button" class="survey__emoji" data-rating="5" data-label="5" aria-label="5 – sehr hilfreich" title="Sehr hilfreich">5</button>
+        </div>
+        <div class="survey__scaleHint"><span>1 = gar nicht hilfreich</span><span>5 = sehr hilfreich</span></div>
+    </div>
+    <div class="survey__step hidden" data-step="cta">
+        <div class="survey__title">Danke! Magst du direkt weitergehen?</div>
+        <div class="survey__ctas">
+            <button type="button" class="survey__cta" data-cta="besichtigung">Besichtigung anfragen</button>
+            <button type="button" class="survey__cta survey__cta--secondary" data-cta="expose">Exposé erhalten</button>
+        </div>
+        <button type="button" class="survey__decline">Nein, danke</button>
+    </div>
+    <form class="survey__step survey__form hidden" data-step="form" novalidate>
+        <div class="survey__title" data-role="formTitle">Besichtigung anfragen</div>
+        <input class="survey__input" name="name" type="text" placeholder="Dein Name" autocomplete="name" />
+        <input class="survey__input" name="contact" type="text" placeholder="E-Mail oder Telefon" autocomplete="email" />
+        <textarea class="survey__input" name="message" rows="2" placeholder="Nachricht (optional)"></textarea>
+        <label class="survey__consent">
+            <input type="checkbox" name="consent" />
+            <span>Ich bin einverstanden, dass meine Angaben zur Kontaktaufnahme gespeichert
+                werden. <a href="/datenschutz" target="_blank" rel="noopener noreferrer">Datenschutz</a></span>
+        </label>
+        <div class="survey__error hidden" data-role="error" aria-live="polite"></div>
+        <button type="submit" class="survey__cta" data-role="submit">Absenden</button>
+    </form>
+    <div class="survey__step survey__thanks hidden" data-step="thanks" aria-live="polite"></div>
+`;
+const init = (global) => {
+    const { settings, state, events } = global;
+    // The survey rides on analytics: without its endpoint + propertyId there is
+    // nowhere to send answers or leads, so the module stays fully inert.
+    // settings.survey.enabled defaults to true once analytics is configured.
+    const analyticsEndpoint = asText(settings.analytics?.endpoint);
+    const propertyId = asText(settings.analytics?.propertyId);
+    if (!analyticsEndpoint || !propertyId)
+        return;
+    const cfg = settings.survey;
+    if (cfg?.enabled === false)
+        return;
+    // Once per property per device. The flag is set ONLY on an explicit answer
+    // or dismissal (see markAsked) — never merely because the card appeared.
+    // It suppresses the automatic survey TRIGGERS only: the inquiry pill can
+    // always open the lead form deliberately (see 'inquiry:open' below).
+    const storageKey = `sse:survey:${propertyId}`;
+    let alreadyAsked = false;
+    try {
+        alreadyAsked = localStorage.getItem(storageKey) !== null;
+    }
+    catch { /* storage unavailable (private mode): worst case we ask again */ }
+    const leadEndpoint = asText(cfg?.leadEndpoint) ?? deriveLeadEndpoint(analyticsEndpoint);
+    // Owner-tunable engagement threshold (settings.survey.afterSeconds),
+    // clamped to a sane range so a typo can neither spam instantly nor
+    // effectively disable the card.
+    const rawAfter = cfg?.afterSeconds;
+    const triggerMs = (typeof rawAfter === 'number' && rawAfter >= 5 && rawAfter <= 600)
+        ? rawAfter * 1000
+        : ENGAGEMENT_TRIGGER_MS;
+    const markAsked = (value) => {
+        try {
+            // never downgrade "answered" to "dismissed" (X after answering)
+            if (localStorage.getItem(storageKey) === null) {
+                localStorage.setItem(storageKey, value);
+            }
+        }
+        catch { /* fire-and-forget */ }
+    };
+    // The card must never fight the onboarding, cover the staging overlay's
+    // "Original zeigen" peek, pop up over a running guided tour (cameraMode
+    // 'anim'), or land on top of the open concierge chat panel. (While staging
+    // is open, CSS also slides an already-visible card away — body.staging-open
+    // — and back afterwards.)
+    //
+    // Onboarding check: an actually VISIBLE tutorial card (#tutorial.visible),
+    // not body.tutorial-active — that class stays set through the whole linear
+    // tutorial including the free-explore phase, and most visitors never play
+    // the tutorial to its end, so the class alone would block the card forever.
+    const blocked = () => {
+        return document.querySelector('#tutorial.visible') !== null ||
+            document.body.classList.contains('staging-open') ||
+            state.cameraMode === 'anim' ||
+            state.chatOpen;
+    };
+    // ---- card ---------------------------------------------------------------
+    let card = null;
+    // Set by wire(): jumps the mounted card straight to the lead form. Used by
+    // the inquiry pill path, which skips the rating step entirely.
+    let openLeadForm = null;
+    // True while the card exists only because the inquiry pill opened it —
+    // closing it then must NOT set the once-per-device "asked" flag (the
+    // visitor was never asked anything).
+    let fromInquiry = false;
+    const close = () => {
+        if (!card)
+            return;
+        const el = card;
+        card = null;
+        openLeadForm = null;
+        el.classList.remove('visible');
+        window.setTimeout(() => el.remove(), HIDE_ANIM_MS);
+    };
+    const dismiss = () => {
+        if (!fromInquiry)
+            markAsked('dismissed');
+        close();
+    };
+    const wire = (root) => {
+        const q = (sel) => root.querySelector(sel);
+        const showStep = (name) => {
+            root.querySelectorAll('.survey__step').forEach((el) => {
+                el.classList.toggle('hidden', el.dataset.step !== name);
+            });
+        };
+        const showThanks = (text, closeAfterMs) => {
+            q('[data-step="thanks"]').textContent = text;
+            showStep('thanks');
+            window.setTimeout(close, closeAfterMs);
+        };
+        // Interactions on the card must never reach the canvas/camera, and keys
+        // typed into the form must not fire the viewer's global shortcuts
+        // (same rationale as the concierge input; see concierge.ts).
+        root.addEventListener('pointerdown', e => e.stopPropagation());
+        root.addEventListener('wheel', e => e.stopPropagation());
+        root.addEventListener('keydown', e => e.stopPropagation());
+        root.addEventListener('keyup', e => e.stopPropagation());
+        root.addEventListener('keypress', e => e.stopPropagation());
+        // click must not bubble to #ui either: its global handler blurs the
+        // active element after every click ("free the keyboard for hotkeys"),
+        // which would instantly steal focus from the form fields — typing
+        // becomes impossible. We keep that behavior for our BUTTONS ourselves
+        // so hotkeys never stick to them, but never for inputs.
+        root.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (e.target instanceof HTMLButtonElement)
+                e.target.blur();
+        });
+        q('.survey__close').addEventListener('click', dismiss);
+        q('.survey__decline').addEventListener('click', dismiss);
+        // -- step 1: one-tap rating ------------------------------------------
+        root.querySelectorAll('.survey__emoji').forEach((btn) => {
+            btn.addEventListener('click', () => {
+                const rating = Number(btn.dataset.rating) || 0;
+                markAsked('answered');
+                // anonymous usage signal via the analytics queue
+                events.fire('analytics', 'survey', { rating, label: btn.dataset.label });
+                // 1-5 helpfulness scale: 4-5 flows into the CTAs
+                if (rating >= 4) {
+                    showStep('cta');
+                }
+                else {
+                    showThanks('Danke für dein Feedback!', THANKS_CLOSE_MS);
+                }
+            });
+        });
+        // -- step 2: CTAs (only reached after a 4-5 rating) --------------------
+        let interest = 'besichtigung';
+        root.querySelectorAll('.survey__cta[data-cta]').forEach((btn) => {
+            btn.addEventListener('click', () => {
+                interest = btn.dataset.cta ?? 'besichtigung';
+                events.fire('analytics', 'cta_click', { cta: interest });
+                q('[data-role="formTitle"]').textContent =
+                    interest === 'expose' ? 'Exposé erhalten' : 'Besichtigung anfragen';
+                showStep('form');
+            });
+        });
+        // Inquiry-pill entry: jump straight to the form, no rating step.
+        openLeadForm = (interestValue) => {
+            interest = interestValue;
+            q('[data-role="formTitle"]').textContent =
+                interestValue === 'expose' ? 'Exposé erhalten' : 'Besichtigung anfragen';
+            showStep('form');
+        };
+        // -- step 3: mini lead form --------------------------------------------
+        const form = q('[data-step="form"]');
+        const nameInput = form.elements.namedItem('name');
+        const contactInput = form.elements.namedItem('contact');
+        const messageInput = form.elements.namedItem('message');
+        const consentInput = form.elements.namedItem('consent');
+        const submitBtn = q('[data-role="submit"]');
+        const errorEl = q('[data-role="error"]');
+        const showError = (text) => {
+            errorEl.textContent = text;
+            errorEl.classList.remove('hidden');
+        };
+        // auto-detect: nudge the browser's autofill/keyboard toward what the
+        // visitor is actually typing into the single contact field
+        contactInput.addEventListener('input', () => {
+            const kind = detectContact(contactInput.value);
+            if (kind) {
+                contactInput.setAttribute('autocomplete', kind === 'email' ? 'email' : 'tel');
+                contactInput.setAttribute('inputmode', kind === 'email' ? 'email' : 'tel');
+            }
+        });
+        form.addEventListener('submit', (event) => {
+            event.preventDefault();
+            const name = nameInput.value.trim();
+            const contact = contactInput.value.trim();
+            const message = messageInput.value.trim();
+            if (name === '') {
+                showError('Bitte sag uns kurz deinen Namen.');
+                return;
+            }
+            if (contact === '' || !detectContact(contact)) {
+                showError('Bitte gib eine gültige E-Mail-Adresse oder Telefonnummer an.');
+                return;
+            }
+            if (!consentInput.checked) {
+                showError('Bitte bestätige die Einwilligung, damit wir dich kontaktieren dürfen.');
+                return;
+            }
+            errorEl.classList.add('hidden');
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Wird gesendet…';
+            // A lead is a deliberate inquiry — unlike analytics events it is NOT
+            // fire-and-forget: a failure is surfaced so the visitor can retry.
+            // (The form contents stay intact either way.)
+            const fail = (text) => {
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Absenden';
+                showError(text);
+            };
+            fetch(leadEndpoint, {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({
+                    propertyId,
+                    name,
+                    contact,
+                    message: message !== '' ? message : undefined,
+                    interest,
+                    consent: true
+                })
+            }).then((res) => {
+                if (res.status === 429) {
+                    // shared-WiFi rate cap: an immediate retry fails too, so
+                    // don't suggest one — ask for a little patience instead
+                    fail('Gerade viele Anfragen — bitte versuch es in ein paar Minuten nochmal.');
+                    return;
+                }
+                if (!res.ok)
+                    throw new Error(`HTTP ${res.status}`);
+                // a sent inquiry is the strongest possible "answered": never
+                // bother this visitor with the automatic survey afterwards
+                markAsked('answered');
+                showThanks('Danke! Wir melden uns zeitnah.', SUCCESS_CLOSE_MS);
+            }).catch(() => {
+                fail('Das hat leider nicht geklappt. Bitte versuch es gleich nochmal.');
+            });
+        });
+    };
+    const show = () => {
+        if (card)
+            return;
+        fromInquiry = false;
+        card = document.createElement('div');
+        card.id = 'surveyCard';
+        card.setAttribute('role', 'dialog');
+        card.setAttribute('aria-label', 'Kurzes Feedback');
+        card.innerHTML = CARD_HTML;
+        wire(card);
+        (document.getElementById('ui') ?? document.body).appendChild(card);
+        // entrance on the next frame so the slide-in transition runs
+        const el = card;
+        requestAnimationFrame(() => el.classList.add('visible'));
+    };
+    // ---- trigger plumbing -----------------------------------------------------
+    // Whichever fires first wins; a blocked trigger politely waits (poll) until
+    // the tutorial/staging clears. Waiting or sliding away never sets the flag.
+    let triggered = false;
+    let retryTimer = 0;
+    let engagementTimer = 0;
+    const trigger = () => {
+        if (triggered || alreadyAsked)
+            return;
+        triggered = true;
+        window.clearInterval(engagementTimer);
+        if (blocked()) {
+            retryTimer = window.setInterval(() => {
+                if (!blocked()) {
+                    window.clearInterval(retryTimer);
+                    show();
+                }
+            }, BLOCKED_RETRY_MS);
+        }
+        else {
+            show();
+        }
+    };
+    // -- trigger 1: the guided tour ("Rundgang") played through ---------------
+    events.on('tour:complete', trigger);
+    // -- trigger 2: 75 s of ACCUMULATED visible engagement ---------------------
+    // Same visibility bookkeeping as the analytics dwell clock: hidden tabs do
+    // not count, and the clock only arms once the scene has actually loaded (a
+    // slow download is not engagement).
+    let activeMs = 0;
+    let visibleSince = null;
+    let clockArmed = false;
+    const armClock = () => {
+        if (clockArmed)
+            return;
+        clockArmed = true;
+        if (document.visibilityState === 'visible')
+            visibleSince = performance.now();
+    };
+    if (state.loaded)
+        armClock();
+    events.on('loaded:changed', (loaded) => {
+        if (loaded)
+            armClock();
+    });
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden') {
+            if (visibleSince !== null) {
+                activeMs += performance.now() - visibleSince;
+                visibleSince = null;
+            }
+        }
+        else if (clockArmed && visibleSince === null) {
+            visibleSince = performance.now();
+        }
+    });
+    const engagedMs = () => {
+        return activeMs + (visibleSince !== null ? performance.now() - visibleSince : 0);
+    };
+    if (!alreadyAsked) {
+        engagementTimer = window.setInterval(() => {
+            if (engagedMs() >= triggerMs)
+                trigger();
+        }, ENGAGEMENT_CHECK_MS);
+    }
+    // ---- inquiry pill → straight to the lead form -----------------------------
+    // A deliberate tap on "Besichtigung anfragen" opens the mini form directly
+    // (no rating step). Fires regardless of the once-per-device survey flag —
+    // a visitor who dismissed the survey must still be able to inquire.
+    // inquiry.ts falls back to url/mailto when this module is inert.
+    events.on('inquiry:open', () => {
+        if (card) {
+            openLeadForm?.('besichtigung');
+            return;
+        }
+        show();
+        fromInquiry = true;
+        openLeadForm?.('besichtigung');
+    });
+    // -- trigger 3: exiting fullscreen after a ≥30 s stint ----------------------
+    // Only where the real Fullscreen API exists: on iPhone Safari ui.ts fakes
+    // isFullscreen by flipping it on every orientation change, and a mere
+    // device rotation is not an engagement signal.
+    if (document.fullscreenEnabled) {
+        let fullscreenSince = null;
+        events.on('isFullscreen:changed', (on) => {
+            if (on) {
+                fullscreenSince = performance.now();
+            }
+            else {
+                if (fullscreenSince !== null &&
+                    performance.now() - fullscreenSince >= FULLSCREEN_MIN_MS) {
+                    trigger();
+                }
+                fullscreenSince = null;
+            }
+        });
+    }
+};
+const initSurvey = (global) => {
+    try {
+        init(global);
+    }
+    catch (err) {
+        // The survey must never break the tour — not even at init.
+        if (global.config.devtools)
+            console.warn('Survey init failed:', err);
+    }
+};
+
 // Guided onboarding shown on first entry into walk mode. A chain of gated,
 // glowing glass cards, each pointing at the control it teaches:
 //   1. look       — drag to sweep the view ~LOOK_EACH_SIDE_DEG° to BOTH sides
@@ -84465,7 +85267,7 @@ const initTutorial = (global) => {
     const chatPill = document.getElementById('chatPill');
     const chatAvailable = () => !!chatPill && !chatPill.classList.contains('hidden');
     // Control-dome buttons the onboarding can point at.
-    const domeIds = ['domeReset', 'domeMeasure', 'domeAerial', 'domePrev', 'domeNext', 'domeAerialExit'];
+    const domeIds = ['domeReset', 'domeMeasure', 'domeMeasureAerial', 'domeAerial', 'domePrev', 'domeNext', 'domeAerialExit'];
     let phase = 'idle';
     const yaw = () => camera.getEulerAngles().y;
     // look tracking (relative to the yaw at which the step began)
@@ -84538,16 +85340,19 @@ const initTutorial = (global) => {
         hintButtons('domePrev', 'domeNext');
         showCard(cardEls.arrows);
     };
-    // After paging a couple of views: point at the walk-figure return button.
+    // After the measuring leg: point at the walk-figure return button.
     const beginArrowsBack = () => {
         phase = 'arrowsBack';
         hintButtons('domeAerialExit');
         showCard(cardEls.walkBack);
     };
-    // Back in walk mode: point at the measure button.
+    // Point at the measure button — the AERIAL one while in the bird's-eye
+    // (the measuring leg now lives there: the floor-plan view is where
+    // measuring shines), the walk-row one as fallback when the visitor left
+    // the bird's-eye before measuring.
     const beginMeasureHint = () => {
         phase = 'measure';
-        hintButtons('domeMeasure');
+        hintButtons(state.cameraMode === 'aerial' ? 'domeMeasureAerial' : 'domeMeasure');
         showCard(cardEls.measure);
     };
     // In measure mode: ask for two points (the action is on the scene, not a
@@ -84635,13 +85440,19 @@ const initTutorial = (global) => {
         }
     });
     // Camera mode drives the bird's-eye legs: entering aerial shows the arrow
-    // hint; returning to walk (from either bird's-eye card) advances to measure.
+    // hint; the measuring leg happens IN the bird's-eye (after paging views).
+    // Leaving aerial advances: after the measuring leg -> home hint; before or
+    // during it -> fall back to the walk-row measure button so the lesson
+    // still happens.
     events.on('cameraMode:changed', (mode) => {
         if (mode === 'aerial') {
             if (phase === 'explore' || phase === 'drone')
                 beginArrows();
         }
-        else if (phase === 'arrows' || phase === 'arrowsBack') {
+        else if (phase === 'arrowsBack') {
+            beginHomeHint();
+        }
+        else if (phase === 'arrows' || phase === 'measure' || phase === 'measuring') {
             beginMeasureHint();
         }
     });
@@ -84650,7 +85461,7 @@ const initTutorial = (global) => {
         if ((name === 'aerialNext' || name === 'aerialPrev') && phase === 'arrows') {
             arrowPresses += 1;
             if (arrowPresses >= ARROW_PRESSES)
-                beginArrowsBack();
+                beginMeasureHint();
         }
         else if (name === 'reset' && phase === 'home') {
             // Home pressed → back at the start: the linear tutorial is done. The
@@ -84682,8 +85493,17 @@ const initTutorial = (global) => {
         }
     });
     events.on('measureComplete', () => {
-        if (phase === 'measuring')
-            beginHomeHint();
+        // Measuring done (in the bird's-eye): point back at the walk figure.
+        // In the walk-mode fallback the same advance applies — the walkBack
+        // card is skipped there by the mode-change handler above.
+        if (phase === 'measuring') {
+            if (state.cameraMode === 'aerial') {
+                beginArrowsBack();
+            }
+            else {
+                beginHomeHint();
+            }
+        }
     });
     // Start once the scene is ready and we are in walk mode (the default
     // first-person mode for walkable interiors).
@@ -84910,8 +85730,14 @@ const initAnnotationNav = (dom, events, state, annotations) => {
     if (annotations.length < 2)
         return;
     let currentIndex = 0;
+    // Until the visitor engages with the navigator, the pill labels ITSELF
+    // ("Highlights") instead of showing an arbitrary first annotation title —
+    // otherwise the bar reads like a caption, not a control.
+    let engaged = false;
     const updateDisplay = () => {
-        dom.annotationNavTitle.textContent = annotations[currentIndex].title || '';
+        dom.annotationNavTitle.textContent = engaged
+            ? (annotations[currentIndex].title || '')
+            : 'Highlights';
     };
     const updateMode = () => {
         if (!state.loaded)
@@ -84930,19 +85756,25 @@ const initAnnotationNav = (dom, events, state, annotations) => {
         updateDisplay();
         events.fire('annotation.navigate', annotations[currentIndex]);
     };
-    // Prev / Next
+    // Prev / Next. The very first tap enters the list at its start (or end),
+    // instead of skipping past the first highlight from the phantom index 0.
     dom.annotationPrev.addEventListener('click', (e) => {
         e.stopPropagation();
-        goTo((currentIndex - 1 + annotations.length) % annotations.length);
+        const target = engaged ? (currentIndex - 1 + annotations.length) % annotations.length : annotations.length - 1;
+        engaged = true;
+        goTo(target);
     });
     dom.annotationNext.addEventListener('click', (e) => {
         e.stopPropagation();
-        goTo((currentIndex + 1) % annotations.length);
+        const target = engaged ? (currentIndex + 1) % annotations.length : 0;
+        engaged = true;
+        goTo(target);
     });
     // Sync when an annotation is activated externally (e.g. hotspot click)
     events.on('annotation.activate', (annotation) => {
         const idx = annotations.indexOf(annotation);
         if (idx !== -1) {
+            engaged = true;
             currentIndex = idx;
             updateDisplay();
         }
@@ -85904,6 +86736,32 @@ class Annotation extends Script {
         }, 200); // Match the transition duration
     }
     /**
+     * Display-only tooltip reveal for the guided tour's fly-by: identical
+     * visuals (same 0.2s opacity fade) to showTooltip, but fires NO events —
+     * the camera manager must never treat it as an annotation pick, which
+     * would hijack the running tour into orbit mode.
+     */
+    showTooltipPassive() {
+        Annotation.activeAnnotation = this;
+        Annotation.tooltipDom.style.visibility = 'visible';
+        Annotation.tooltipDom.style.opacity = '1';
+        Annotation.titleDom.textContent = this.title;
+        Annotation.textDom.textContent = this.text;
+        this._update();
+    }
+    /** Event-free counterpart of hideTooltip (see showTooltipPassive). */
+    hideTooltipPassive() {
+        if (Annotation.activeAnnotation === this) {
+            Annotation.activeAnnotation = null;
+        }
+        Annotation.tooltipDom.style.opacity = '0';
+        setTimeout(() => {
+            if (Annotation.tooltipDom.style.opacity === '0') {
+                Annotation.tooltipDom.style.visibility = 'hidden';
+            }
+        }, 200); // Match the transition duration
+    }
+    /**
      * Hide all elements when annotation is behind camera.
      * @private
      */
@@ -86012,9 +86870,17 @@ class Annotations {
         document.querySelector('#ui').appendChild(parentDom);
         this.annotations = global.settings.annotations;
         this.parentDom = parentDom;
-        Annotation.markersHidden = global.settings.annotationMarkers === 'hidden';
+        const markersMode = global.settings.annotationMarkers;
+        Annotation.markersHidden = markersMode === 'hidden';
         const { state } = global;
         const updateVisibility = () => {
+            // 'overview': the numbered bubbles live only in the bird's-eye view
+            // and the guided tour — the walking view stays clean. Tooltips via
+            // the ‹ › navigator keep working in every mode.
+            if (markersMode === 'overview') {
+                Annotation.markersHidden =
+                    state.cameraMode !== 'aerial' && state.cameraMode !== 'anim';
+            }
             const firstPersonGamingControls = ((state.cameraMode === 'walk' || state.cameraMode === 'fly') &&
                 state.gamingControls);
             const hidden = state.controlsHidden || firstPersonGamingControls;
@@ -86064,6 +86930,107 @@ class Annotations {
             const script = scriptMap.get(ann);
             if (script) {
                 script.showTooltip();
+            }
+        });
+        // --- guided-tour fly-by reveal -----------------------------------
+        // While the tour ("Rundgang") flies the scene, the text bubble of the
+        // annotation the camera passes fades in near the point and fades out
+        // again as the camera leaves (the shared tooltip's 0.2s opacity
+        // transition does the animating). Display-only via the passive
+        // tooltip methods — no events, so the tour keeps flying.
+        //
+        // Three rules keep it calm:
+        //   - hysteresis (NEAR < FAR) prevents flicker at the boundary,
+        //   - a bubble never stays longer than MAX_MS even when the path
+        //     lingers nearby (the demo track circles the parquet for ~18 s),
+        //   - each annotation reveals at most once per tour run (reset on
+        //     'tour:start'), so a winding path can't re-pop old bubbles.
+        // Sight is the primary criterion; distance only rules out reveals from
+        // clear across the flat. Generous on purpose — measured on the demo
+        // track: floor points (parquet) drop below the frame before the
+        // camera gets close, and the Flügeltür is only ever nicely framed
+        // from ~6 m while the path approaches it.
+        const TOUR_REVEAL_NEAR_M = 6.5;
+        const TOUR_REVEAL_FAR_M = 7.5;
+        const TOUR_REVEAL_MAX_MS = 6000;
+        // trigger only when the point is INSIDE the view (6% inset from every
+        // edge) — a bubble for something the visitor can't see is noise.
+        // While showing, a small outset keeps it up until the point actually
+        // leaves the screen. The first moments of the tour are grace time:
+        // the camera is still flying its entry transition there.
+        const TOUR_REVEAL_ENTER_INSET = 0.06;
+        const TOUR_REVEAL_GRACE_S = 1.5;
+        let tourReveal = null;
+        let tourRevealShownAt = 0;
+        const tourRevealDone = new Set();
+        const tmpViewPos = new Vec3();
+        const tmpScreenPos = new Vec3();
+        // In the camera's sight field: in front of the camera and projected
+        // inside the viewport, inset by `margin` (fraction of each dimension;
+        // negative = allow slightly off-screen).
+        const inView = (script, margin) => {
+            const cam = global.camera.camera;
+            if (!cam)
+                return false;
+            const pos = script.entity.getPosition();
+            cam.viewMatrix.transformPoint(pos, tmpViewPos);
+            if (tmpViewPos.z >= 0)
+                return false;
+            const s = cam.worldToScreen(pos, tmpScreenPos);
+            const w = window.innerWidth;
+            const h = window.innerHeight;
+            return s.x > w * margin && s.x < w * (1 - margin) &&
+                s.y > h * margin && s.y < h * (1 - margin);
+        };
+        const hideTourReveal = () => {
+            if (tourReveal) {
+                tourReveal.hideTooltipPassive();
+                tourReveal = null;
+            }
+            // resume normal tour speed (camera-manager eases back up)
+            state.tourRevealActive = false;
+        };
+        global.events.on('tour:start', () => {
+            tourRevealDone.clear();
+        });
+        global.app.on('update', () => {
+            if (state.cameraMode !== 'anim') {
+                hideTourReveal();
+                tourRevealDone.clear();
+                return;
+            }
+            const camPos = global.camera.getPosition();
+            if (tourReveal) {
+                // fade out once the camera clearly moved on, looks away, or
+                // after the time cap when the path lingers around the point
+                const gone = camPos.distance(tourReveal.entity.getPosition()) > TOUR_REVEAL_FAR_M;
+                const outOfSight = !inView(tourReveal, -0.05);
+                const expired = performance.now() - tourRevealShownAt > TOUR_REVEAL_MAX_MS;
+                if (gone || outOfSight || expired) {
+                    hideTourReveal();
+                }
+                return;
+            }
+            let best = null;
+            let bestDist = Infinity;
+            for (const script of scriptMap.values()) {
+                if (tourRevealDone.has(script))
+                    continue;
+                const d = camPos.distance(script.entity.getPosition());
+                if (d < bestDist) {
+                    bestDist = d;
+                    best = script;
+                }
+            }
+            if (state.animationTime < TOUR_REVEAL_GRACE_S)
+                return;
+            if (best && bestDist <= TOUR_REVEAL_NEAR_M && inView(best, TOUR_REVEAL_ENTER_INSET)) {
+                tourReveal = best;
+                tourRevealShownAt = performance.now();
+                tourRevealDone.add(best);
+                best.showTooltipPassive();
+                // slow the tour down while the bubble is read (camera-manager)
+                state.tourRevealActive = true;
             }
         });
     }
@@ -87075,7 +88042,7 @@ class FlyController {
         camera.position.copy(this._position);
         camera.angles.set(this._angles.x, this._angles.y, 0);
         camera.distance = this._distance;
-        camera.fov = this.fov;
+        camera.fov = applySmoothedZoom(this.fov, deltaTime);
     }
     onExit(_camera) {
     }
@@ -87570,7 +88537,7 @@ class WalkController {
         }
         camera.position.copy(this._position);
         camera.distance = this._distance;
-        camera.fov = this.fov;
+        camera.fov = applySmoothedZoom(this.fov, deltaTime);
         // Walking gaze-scan: while moving (and not actively aiming), sweep the
         // view around the travel heading so the gaze isn't a dead locked-forward
         // stare. It is a render-only offset (camera.gazeYaw/Pitch) the navigation
@@ -88039,6 +89006,12 @@ class CameraManager {
         const transitionSpeed = 1.0;
         let transitionTimer = 1;
         let clearOrbitTargetOnTransitionEnd = false;
+        // Set when a guided tour starts from the top ('tour:start'), consumed
+        // by the single 'tour:complete' that started tour may fire. Scrubbing
+        // ('scrubAnim') enters anim mode WITHOUT resetting the cursor, so a
+        // scrub-to-end — or a pointerup parking the cursor at the end again —
+        // must not (re)fire 'tour:complete'.
+        let tourStarted = false;
         // start a new camera transition from the current pose
         const startTransition = () => {
             from.copy(this.camera);
@@ -88050,10 +89023,38 @@ class CameraManager {
             transitionTimer = 1;
             global.app.renderNextFrame = true;
         };
+        // Tour playback pacing. The authored track is deliberately smooth and
+        // slow (trailer heritage) — the in-viewer Rundgang plays it at a
+        // brisker base speed, and eases down into slow-motion while a fly-by
+        // bubble is up (annotations.ts flips state.tourRevealActive) so the
+        // text is comfortably readable, then eases back. Exponentially
+        // smoothed so the speed changes never jerk. Both speeds are relative
+        // to the authored track time and overridable per property via
+        // settings.tour { speed, revealSpeed }.
+        const tourCfg = global.settings.tour;
+        const clampSpeed = (v, lo, hi, dflt) => {
+            return (typeof v === 'number' && v >= lo && v <= hi) ? v : dflt;
+        };
+        const TOUR_SPEED = clampSpeed(tourCfg?.speed, 0.25, 3, 1.5);
+        const TOUR_REVEAL_SPEED = clampSpeed(tourCfg?.revealSpeed, 0.05, 1, 0.35);
+        let tourSlowFactor = TOUR_SPEED;
+        // While an annotation tooltip is up, the camera is a FIXED framed shot:
+        // look/zoom input is discarded so the splat can't be dragged into odd
+        // half-captured perspectives. Any click/tap already closes the tooltip
+        // (and unlocks), so the visitor is never stuck.
+        let annotationLock = false;
+        const lockedFrame = {
+            read: () => ({ move: [0, 0, 0], rotate: [0, 0, 0] })
+        };
         // application update
         this.update = (deltaTime, frame) => {
-            // use dt of 0 if animation is paused
-            const dt = state.cameraMode === 'anim' && state.animationPaused ? 0 : deltaTime;
+            const slowTarget = (state.cameraMode === 'anim' && state.tourRevealActive) ? TOUR_REVEAL_SPEED : TOUR_SPEED;
+            tourSlowFactor += (slowTarget - tourSlowFactor) * Math.min(1, deltaTime * 2.5);
+            // use dt of 0 if animation is paused; slow the track while a
+            // fly-by bubble is being read
+            const dt = state.cameraMode === 'anim' ?
+                (state.animationPaused ? 0 : deltaTime * tourSlowFactor) :
+                deltaTime;
             // update transition timer
             const prevTransitionTimer = transitionTimer;
             transitionTimer = Math.min(1, transitionTimer + deltaTime * transitionSpeed);
@@ -88068,7 +89069,13 @@ class CameraManager {
             // Reset the idle-wander flag each frame; the active controller's
             // idle-look (fly mode only) re-sets it if it's actually wandering.
             IdleLook.wandering = false;
-            controller.update(dt, frame, target);
+            if (annotationLock && state.cameraMode === 'orbit') {
+                frame.read(); // drain this frame's input deltas, discarded
+                controller.update(dt, lockedFrame, target);
+            }
+            else {
+                controller.update(dt, frame, target);
+            }
             if (transitionTimer < 1) {
                 // lerp away from previous camera during transition
                 this.camera.lerp(from, target, easeOut(transitionTimer));
@@ -88085,6 +89092,13 @@ class CameraManager {
                 // the same exit path 'cancel'/'interrupt' use.
                 if (cursor.loopMode === 'none' && cursor.duration > 0 && cursor.value >= cursor.duration) {
                     state.cameraMode = fromMode;
+                    // played through to the end (interrupt/cancel exits don't
+                    // come this way) — signal it, e.g. for analytics; at most
+                    // once per started tour (see tourStarted)
+                    if (tourStarted) {
+                        tourStarted = false;
+                        events.fire('tour:complete');
+                    }
                 }
             }
             if (clearOrbitTargetOnTransitionEnd && prevTransitionTimer < 1 && transitionTimer === 1) {
@@ -88204,6 +89218,10 @@ class CameraManager {
                             controllers.anim.animState.update(0);
                             state.cameraMode = 'anim';
                             state.animationPaused = false;
+                            // the guided tour started from the top — signal it,
+                            // e.g. for analytics
+                            tourStarted = true;
+                            events.fire('tour:start');
                         }
                     }
                     break;
@@ -88345,6 +89363,12 @@ class CameraManager {
         });
         // handle user picking in the scene
         events.on('pick', (position) => {
+            // The tap that closes an annotation tooltip must not refocus the
+            // locked orbit camera onto the picked point (flash-jump before the
+            // deactivate handler restores the previous mode).
+            if (annotationLock) {
+                return;
+            }
             // switch to orbit camera on pick
             state.cameraMode = 'orbit';
             // construct camera
@@ -88354,20 +89378,20 @@ class CameraManager {
             startTransition();
             clearOrbitTargetOnTransitionEnd = true;
         });
-        // Annotation taps frame the hotspot in orbit mode. Remember where the
-        // visitor came from and glide back when the tooltip closes — on touch
-        // there are no mode buttons, so orbit must never become a trap
+        // Annotation taps frame the hotspot in orbit mode. Remember which MODE
+        // the visitor came from and hand back when the tooltip closes — on
+        // touch there are no mode buttons, so orbit must never become a trap
         // (mirrors the aerial enter/exit pattern).
         let preAnnotationMode = null;
-        const preAnnotationCamera = new Camera();
         events.on('annotation.activate', (annotation) => {
             events.fire('orbitTarget:clear');
             if (state.cameraMode !== 'orbit') {
                 preAnnotationMode = state.cameraMode;
-                preAnnotationCamera.copy(this.camera);
                 sourcesByMode[state.cameraMode]?.cancel();
                 events.fire('navTarget:clear');
             }
+            // fixed framed shot while the tooltip is up (see annotationLock)
+            annotationLock = true;
             // switch to orbit camera on pick
             state.cameraMode = 'orbit';
             const { initial } = annotation.camera;
@@ -88377,15 +89401,27 @@ class CameraManager {
             controllers.orbit.goto(tmpCamera);
             startTransition();
         });
-        // tooltip closed: return to the mode (and pose) the visitor came from,
-        // unless they already moved on to another mode themselves
+        // Tooltip closed: hand control back WHERE THE VISITOR IS, not back
+        // across the flat to the pre-tour pose. Setting the mode makes the
+        // controller's onEnter spawn from the CURRENT camera — walk finds the
+        // nearest valid floor spot via findCylinderSpawn and keeps the viewing
+        // direction — so leaving a highlight simply drops you into walking
+        // right there. (The old restore lerped straight-line to a stale spot,
+        // cutting through walls after a multi-highlight browse: felt broken.)
         events.on('annotation.deactivate', () => {
+            annotationLock = false;
             if (preAnnotationMode !== null && state.cameraMode === 'orbit') {
                 state.cameraMode = preAnnotationMode;
-                controllers[preAnnotationMode]?.goto?.(preAnnotationCamera);
                 startTransition();
             }
             preAnnotationMode = null;
+        });
+        // Any other exit from the annotation view (home, bird's-eye, tour,
+        // walk toggle) changes the camera mode — release the lock with it.
+        events.on('cameraMode:changed', (mode) => {
+            if (mode !== 'orbit') {
+                annotationLock = false;
+            }
         });
         // tap-to-navigate: start auto-driving the active mode toward a picked position
         events.on('navigateTo', (position, normal, speedMul = 1) => {
@@ -88811,13 +89847,23 @@ class ModeShortcuts {
         if (state.chatOpen) {
             return;
         }
+        // The free orbit/fly cameras are AUTHORING tools: a visitor escaping
+        // walk mode onto a ground-level free orbit can drag the splat into
+        // half-captured perspectives. All shortcuts that reach those modes
+        // (Escape-out-of-walk, 1/2/3, F) are therefore debug-entry only
+        // (?debug / ?scout / ?record); visitors keep walk / bird's-eye /
+        // highlights as the only cameras.
+        const devtools = global.config.devtools;
         if (event.key === 'Escape') {
             if (this._pointerLock?.recentlyExitedCapture) ;
             else if (isCaptureMode$1(state.cameraMode) && state.gamingControls && state.inputMode === 'desktop') {
                 state.gamingControls = false;
             }
             else if (state.cameraMode === 'walk') {
-                events.fire('inputEvent', 'exitWalk', event);
+                // walking is the visitor's base mode — nothing to escape to
+                if (devtools) {
+                    events.fire('inputEvent', 'exitWalk', event);
+                }
             }
             else {
                 events.fire('inputEvent', 'cancel', event);
@@ -88829,13 +89875,16 @@ class ModeShortcuts {
         }
         switch (event.key) {
             case '1':
-                state.cameraMode = 'orbit';
+                if (devtools)
+                    state.cameraMode = 'orbit';
                 break;
             case '2':
-                state.cameraMode = 'fly';
+                if (devtools)
+                    state.cameraMode = 'fly';
                 break;
             case '3':
-                events.fire('inputEvent', 'toggleWalk');
+                if (devtools)
+                    events.fire('inputEvent', 'toggleWalk');
                 break;
             case 'v':
                 if (state.hasCollisionOverlay) {
@@ -88858,7 +89907,9 @@ class ModeShortcuts {
         if (state.cameraMode !== 'walk') {
             switch (event.key) {
                 case 'f':
-                    events.fire('inputEvent', 'frame', event);
+                    // frames the whole scene in free orbit — authoring only
+                    if (devtools)
+                        events.fire('inputEvent', 'frame', event);
                     break;
                 case ' ':
                     events.fire('inputEvent', 'playPause', event);
@@ -89428,6 +90479,8 @@ class KeyboardMouseDevice {
     moveSpeed = 4;
     orbitSpeed = 18;
     wheelSpeed = 0.06;
+    /** Optical-zoom gain per wheel delta unit in walk mode (~1.2×/notch). */
+    wheelZoomSensitivity = 0.0015;
     mouseRotateSensitivity = 0.5;
     /**
      * Extra drag-look sensitivity multiplier in first-person (walk/fly) modes.
@@ -89547,7 +90600,18 @@ class KeyboardMouseDevice {
         v.add(tmpV2.copy(keyMove).mulScalar((0) * dt));
         screenToWorld(cameraComponent, mouse[0], mouse[1], distance, panMove);
         v.add(panMove.mulScalar(pan));
-        wheelMove.set(0, 0, -wheel[0]);
+        // Walk mode: the wheel is OPTICAL zoom (scroll up = magnify), not
+        // locomotion — moving stays on click-to-walk / WASD. Other modes keep
+        // the classic wheel dolly.
+        if (isWalk) {
+            if (wheel[0] !== 0) {
+                multiplyZoom(Math.exp(-wheel[0] * this.wheelZoomSensitivity));
+            }
+            wheelMove.set(0, 0, 0);
+        }
+        else {
+            wheelMove.set(0, 0, -wheel[0]);
+        }
         v.add(wheelMove.mulScalar(this.wheelSpeed * DISPLACEMENT_SCALE));
         deltas.move.append([v.x, v.y, flipZForOrbit(mode, v.z)]);
         // rotate (mouse-drag, masked when in pan mode)
@@ -89568,6 +90632,8 @@ class TouchDevice {
     orbitSpeed = 18;
     moveSpeed = 4;
     pinchSpeed = 0.4;
+    /** Optical-zoom gain per pixel of pinch spread in first-person modes. */
+    pinchZoomSensitivity = 0.004;
     touchRotateSensitivity = 1.5;
     _source = new MultiTouchSource();
     _global = null;
@@ -89681,12 +90747,17 @@ class TouchDevice {
             flyMoveTmp.set(this._joystick[0], 0, -this._joystick[1]);
             v.add(flyMoveTmp.mulScalar(fly * this.moveSpeed * dt));
         }
-        // Two-finger pinch z: orbit interprets +z as "farther from target"
-        // (close-pinch = +pinch[0] = zoom out). First-person modes interpret
-        // +z as "forward", so spreading (pinch[0] < 0) should move forward —
-        // flip the sign there.
-        pinchMoveTmp.set(0, 0, (orbit - directFirstPerson) * pinch[0]);
+        // Two-finger pinch z in orbit: +z = "farther from target" (close-pinch
+        // = +pinch[0] = zoom out).
+        pinchMoveTmp.set(0, 0, orbit * pinch[0]);
         v.add(pinchMoveTmp.mulScalar(double * this.pinchSpeed * DISPLACEMENT_SCALE));
+        // First-person pinch is OPTICAL zoom (like pinching a photo), not a
+        // dolly: spreading the fingers (pinch[0] < 0) magnifies the view.
+        // Multiplicative mapping so every pixel of spread feels the same at
+        // any zoom level. Walking stays on the joystick / tap-to-walk.
+        if (isFirstPerson && double && pinch[0] !== 0) {
+            multiplyZoom(Math.exp(-pinch[0] * this.pinchZoomSensitivity));
+        }
         // tap-to-jump in walk + gaming controls
         if (isWalk && this._tapJump) {
             v.y = 1;
@@ -90369,6 +91440,376 @@ class MeshDebugOverlay {
         this.camera.camera.layers = this.camera.camera.layers.filter(id => id !== this.layer.id);
     }
 }
+
+// Automatic guided-tour ("Rundgang") generation: the annotations are the
+// waypoints, the flight path is derived from the scan — instead of hand-
+// authoring a track per property.
+//
+// Grammar borrowed from professional real-estate drone videos:
+//   - smooth constant-speed travel with eased start/stop,
+//   - a framing viewpoint per annotation (comfortable distance, clear line
+//     of sight) approached in order,
+//   - the gaze leads along the path and pans onto each highlight during the
+//     approach, then releases forward again (the in-viewer fly-by reveal +
+//     slow-motion pick the moment up from there).
+//
+// The generator runs INSIDE the viewer (debug entry points only): collision,
+// annotations and the start camera are already loaded here, so walkability
+// and sight lines come from the same collision raycasts the walk mode uses.
+// Output is a ready settings.animTracks[0] object — bake it into the
+// property's settings.json at prep time:
+//
+//     viewer.generateTour()          // returns the track object
+//
+// v1 scope: single floor level (the BFS refuses big floor steps).
+const CELL = 0.3; // occupancy grid resolution (m)
+const EYE = 1.45; // camera height above the floor (m)
+const CLEARANCE = 1.85; // required headroom above the floor (m)
+const FLOOR_TOL = 0.4; // max floor-height step between neighbors (m)
+const LATERAL_TOL = 0.28; // corner-sample floor deviation (furniture edge guard)
+const SPEED = 0.5; // cruise speed in authored track seconds (m/s)
+const EASE_S = 1.8; // ease-in/out duration at the ends (s)
+const KEY_DT = 0.35; // seconds between emitted keyframes
+const VIEW_MIN = 1.5; // POI viewpoint distance window (m)
+const VIEW_MAX = 3.6;
+const VIEW_IDEAL = 2.3;
+const LOOKAHEAD_M = 1.8; // forward gaze distance along the path (m)
+const GAZE_DROP = 0.12; // default gaze rests slightly below eye level (m)
+const POI_BLEND_M = 3.2; // arc-length window around a POI where the gaze pans onto it (m)
+const MAX_CELLS = 60000; // BFS safety bound
+const key = (ix, iz) => `${ix},${iz}`;
+const initTourGenerator = (global, collision) => {
+    if (!global.config.devtools)
+        return;
+    const generate = () => {
+        if (!collision) {
+            console.warn('tour-generator: no collision data.');
+            return null;
+        }
+        const annotations = global.settings.annotations ?? [];
+        if (annotations.length === 0) {
+            console.warn('tour-generator: no annotations to route through.');
+            return null;
+        }
+        // ---- occupancy grid via collision raycasts -----------------------
+        const floorAt = (x, z, refY) => {
+            // cast from just above the reference eye height — starting any
+            // higher would begin ABOVE typical ceilings and hit those instead
+            const down = collision.queryRay(x, refY + 0.35, z, 0, -1, 0, 3);
+            if (!down)
+                return null;
+            const floor = down.y;
+            if (Math.abs((floor + EYE) - refY) > 1.0)
+                return null;
+            const up = collision.queryRay(x, floor + 0.25, z, 0, 1, 0, CLEARANCE + 0.25);
+            if (up && (up.y - floor) < CLEARANCE)
+                return null;
+            return floor;
+        };
+        const walkableCell = (x, z, refFloor) => {
+            const c = floorAt(x, z, refFloor + EYE);
+            if (c === null || Math.abs(c - refFloor) > FLOOR_TOL)
+                return null;
+            // corner samples keep the path off furniture edges and walls
+            for (const [ox, oz] of [[0.12, 0.12], [-0.12, 0.12], [0.12, -0.12], [-0.12, -0.12]]) {
+                const f = floorAt(x + ox, z + oz, c + EYE);
+                if (f === null || Math.abs(f - c) > LATERAL_TOL)
+                    return null;
+            }
+            return c;
+        };
+        // seed: the property's start camera, else an annotation's floor spot
+        const cam0 = global.settings.cameras?.[0];
+        const seedCandidates = [];
+        const camPos = cam0?.initial?.position ?? cam0?.position;
+        if (Array.isArray(camPos))
+            seedCandidates.push([camPos[0], camPos[1], camPos[2]]);
+        for (const a of annotations)
+            seedCandidates.push([a.position[0], a.position[1] + 1.2, a.position[2]]);
+        const cells = new Map();
+        let seeded = false;
+        for (const [sx, sy, sz] of seedCandidates) {
+            const down = collision.queryRay(sx, sy + 0.5, sz, 0, -1, 0, 5);
+            if (!down)
+                continue;
+            const ix = Math.round(sx / CELL);
+            const iz = Math.round(sz / CELL);
+            const floor = walkableCell(ix * CELL, iz * CELL, down.y);
+            if (floor === null)
+                continue;
+            // BFS flood fill over walkable space
+            const queue = [{ ix, iz, x: ix * CELL, z: iz * CELL, floor }];
+            cells.set(key(ix, iz), queue[0]);
+            while (queue.length > 0 && cells.size < MAX_CELLS) {
+                const c = queue.shift();
+                for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+                    const nix = c.ix + dx;
+                    const niz = c.iz + dz;
+                    if (cells.has(key(nix, niz)))
+                        continue;
+                    const f = walkableCell(nix * CELL, niz * CELL, c.floor);
+                    if (f === null)
+                        continue;
+                    const n = { ix: nix, iz: niz, x: nix * CELL, z: niz * CELL, floor: f };
+                    cells.set(key(nix, niz), n);
+                    queue.push(n);
+                }
+            }
+            seeded = cells.size > 30;
+            if (seeded)
+                break;
+            cells.clear();
+        }
+        if (!seeded) {
+            console.warn('tour-generator: could not map a walkable area.');
+            return null;
+        }
+        // ---- one framing viewpoint per annotation ------------------------
+        const los = (from, to) => {
+            const dx = to[0] - from.x;
+            const dy = to[1] - from.y;
+            const dz = to[2] - from.z;
+            const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+            if (dist < 0.01)
+                return true;
+            const hit = collision.queryRay(from.x, from.y, from.z, dx / dist, dy / dist, dz / dist, dist);
+            if (!hit)
+                return true;
+            // hits at/behind the annotation surface itself count as visible
+            const hd = Math.sqrt((hit.x - to[0]) ** 2 + (hit.y - to[1]) ** 2 + (hit.z - to[2]) ** 2);
+            return hd < 0.45;
+        };
+        const eyeOf = (c) => new Vec3(c.x, c.floor + EYE, c.z);
+        const viewpointFor = (ann) => {
+            let best = null;
+            let bestScore = Infinity;
+            for (const c of cells.values()) {
+                const dx = c.x - ann.position[0];
+                const dz = c.z - ann.position[2];
+                const d = Math.sqrt(dx * dx + dz * dz);
+                if (d < VIEW_MIN || d > VIEW_MAX)
+                    continue;
+                if (Math.abs((c.floor + EYE) - ann.position[1]) > 2.4)
+                    continue;
+                const score = Math.abs(d - VIEW_IDEAL);
+                if (score >= bestScore)
+                    continue;
+                if (!los(eyeOf(c), ann.position))
+                    continue;
+                best = c;
+                bestScore = score;
+            }
+            if (!best)
+                console.warn('tour-generator: no viewpoint with sight line for', ann.title);
+            return best;
+        };
+        const pois = [];
+        for (const ann of annotations) {
+            const cell = viewpointFor(ann);
+            if (cell)
+                pois.push({ cell, ann });
+        }
+        if (pois.length === 0)
+            return null;
+        // ---- order the POIs (shortest chain from the start) ---------------
+        const startCell = (() => {
+            let best = null;
+            let bd = Infinity;
+            const sx = Array.isArray(camPos) ? camPos[0] : pois[0].cell.x;
+            const sz = Array.isArray(camPos) ? camPos[2] : pois[0].cell.z;
+            for (const c of cells.values()) {
+                const d = (c.x - sx) ** 2 + (c.z - sz) ** 2;
+                if (d < bd) {
+                    bd = d;
+                    best = c;
+                }
+            }
+            return best;
+        })();
+        const d2 = (a, b) => (a.x - b.x) ** 2 + (a.z - b.z) ** 2;
+        const order = [];
+        const remaining = [...pois];
+        let cursor = startCell;
+        while (remaining.length > 0) {
+            remaining.sort((a, b) => d2(a.cell, cursor) - d2(b.cell, cursor));
+            const next = remaining.shift();
+            order.push(next);
+            cursor = next.cell;
+        }
+        // ---- A* between consecutive waypoints ------------------------------
+        const astar = (from, to) => {
+            const open = new Map();
+            const closed = new Map();
+            const h = (c) => Math.sqrt(d2(c, to));
+            const kf = (c) => key(c.ix, c.iz);
+            open.set(kf(from), { c: from, g: 0, f: h(from), prev: null });
+            while (open.size > 0) {
+                let bestK = '';
+                let bestF = Infinity;
+                for (const [k, n] of open) {
+                    if (n.f < bestF) {
+                        bestF = n.f;
+                        bestK = k;
+                    }
+                }
+                const cur = open.get(bestK);
+                open.delete(bestK);
+                closed.set(bestK, { c: cur.c, g: cur.g, prev: cur.prev });
+                if (bestK === kf(to))
+                    break;
+                for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]]) {
+                    const nk = key(cur.c.ix + dx, cur.c.iz + dz);
+                    if (closed.has(nk))
+                        continue;
+                    const n = cells.get(nk);
+                    if (!n || Math.abs(n.floor - cur.c.floor) > FLOOR_TOL)
+                        continue;
+                    // keep some distance from walls: cells with missing
+                    // neighbors cost extra
+                    let openness = 0;
+                    for (const [ox, oz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+                        if (cells.has(key(n.ix + ox, n.iz + oz)))
+                            openness++;
+                    }
+                    const step = (dx !== 0 && dz !== 0 ? Math.SQRT2 : 1) * CELL + (4 - openness) * 0.12;
+                    const g = cur.g + step;
+                    const existing = open.get(nk);
+                    if (!existing || g < existing.g) {
+                        open.set(nk, { c: n, g, f: g + h(n), prev: bestK });
+                    }
+                }
+            }
+            const endK = kf(to);
+            if (!closed.has(endK))
+                return null;
+            const path = [];
+            let k = endK;
+            while (k) {
+                const n = closed.get(k);
+                path.unshift(n.c);
+                k = n.prev;
+            }
+            return path;
+        };
+        let route = [startCell];
+        cursor = startCell;
+        for (const poi of order) {
+            const seg = astar(cursor, poi.cell);
+            if (!seg) {
+                console.warn('tour-generator: no route to a viewpoint, skipping one POI.');
+                continue;
+            }
+            route = route.concat(seg.slice(1));
+            cursor = poi.cell;
+        }
+        if (route.length < 4) {
+            console.warn('tour-generator: route too short.');
+            return null;
+        }
+        // ---- smooth (Chaikin) + constant-speed resample with eased ends ----
+        let pts = route.map(c => new Vec3(c.x, c.floor + EYE, c.z));
+        for (let it = 0; it < 3; it++) {
+            const out = [pts[0]];
+            for (let i = 0; i < pts.length - 1; i++) {
+                const a = pts[i];
+                const b = pts[i + 1];
+                out.push(new Vec3().lerp(a, b, 0.25), new Vec3().lerp(a, b, 0.75));
+            }
+            out.push(pts[pts.length - 1]);
+            pts = out;
+        }
+        // cumulative arc length
+        const arc = [0];
+        for (let i = 1; i < pts.length; i++) {
+            arc.push(arc[i - 1] + pts[i].distance(pts[i - 1]));
+        }
+        const total = arc[arc.length - 1];
+        const at = (s) => {
+            const ss = Math.max(0, Math.min(total, s));
+            let i = 1;
+            while (i < arc.length - 1 && arc[i] < ss)
+                i++;
+            const t = (ss - arc[i - 1]) / Math.max(1e-6, arc[i] - arc[i - 1]);
+            return new Vec3().lerp(pts[i - 1], pts[i], t);
+        };
+        // eased speed profile: distance covered as a function of time
+        const easeDist = total - SPEED * EASE_S; // distance outside the two easing ramps (each ramp covers SPEED*EASE_S/2)
+        const cruiseT = Math.max(0, easeDist / SPEED);
+        const duration = cruiseT + 2 * EASE_S;
+        const distAtTime = (t) => {
+            let d = 0;
+            const tt = Math.max(0, Math.min(duration, t));
+            // ramp up
+            const up = Math.min(tt, EASE_S);
+            d += SPEED * (up * up) / (2 * EASE_S);
+            // cruise
+            if (tt > EASE_S)
+                d += SPEED * (Math.min(tt, duration - EASE_S) - EASE_S);
+            // ramp down
+            if (tt > duration - EASE_S) {
+                const r = tt - (duration - EASE_S);
+                d += SPEED * (r - (r * r) / (2 * EASE_S));
+            }
+            return d;
+        };
+        // arc positions of the POI viewpoints (for gaze scheduling)
+        const poiArcs = order.map((poi) => {
+            let bd = Infinity;
+            let bs = 0;
+            for (let i = 0; i < pts.length; i++) {
+                const dd = (pts[i].x - poi.cell.x) ** 2 + (pts[i].z - (poi.cell.z)) ** 2;
+                if (dd < bd) {
+                    bd = dd;
+                    bs = arc[i];
+                }
+            }
+            return { s: bs, ann: poi.ann };
+        });
+        const smoothstep = (x) => {
+            const c = Math.max(0, Math.min(1, x));
+            return c * c * (3 - 2 * c);
+        };
+        // ---- emit keyframes -------------------------------------------------
+        const times = [];
+        const position = [];
+        const target = [];
+        const fov = []; // schema requires per-key fov; constant walk FOV
+        for (let t = 0; t <= duration + 1e-6; t += KEY_DT) {
+            const s = distAtTime(t);
+            const p = at(s);
+            // default gaze: lead along the path, resting slightly low
+            const ahead = at(s + LOOKAHEAD_M);
+            const def = new Vec3(ahead.x, ahead.y - GAZE_DROP, ahead.z);
+            // pan onto the nearest POI inside its blend window
+            let tgt = def;
+            let bestW = 0;
+            for (const poi of poiArcs) {
+                const w = smoothstep(1 - Math.abs(s - poi.s) / POI_BLEND_M);
+                if (w > bestW) {
+                    bestW = w;
+                    tgt = new Vec3().lerp(def, new Vec3(poi.ann.position[0], poi.ann.position[1], poi.ann.position[2]), w);
+                }
+            }
+            times.push(Number(t.toFixed(3)));
+            position.push(Number(p.x.toFixed(3)), Number(p.y.toFixed(3)), Number(p.z.toFixed(3)));
+            target.push(Number(tgt.x.toFixed(3)), Number(tgt.y.toFixed(3)), Number(tgt.z.toFixed(3)));
+            fov.push(96);
+        }
+        const track = {
+            name: 'Rundgang',
+            duration: Number(times[times.length - 1].toFixed(3)),
+            frameRate: 1,
+            loopMode: 'none',
+            interpolation: 'spline',
+            smoothness: 0.5,
+            keyframes: { times, values: { position, target, fov } }
+        };
+        console.log(`tour-generator: ${order.length} POIs, ${cells.size} cells, ${total.toFixed(1)} m, ${track.duration}s, ${times.length} keys`);
+        return track;
+    };
+    // debug-only API (window.viewer is exposed on the same entry points)
+    window.generateTour = generate;
+};
 
 const SVGNS = 'http://www.w3.org/2000/svg';
 const NUM_SAMPLES = 12;
@@ -92216,6 +93657,10 @@ class Viewer {
             window.addEventListener('touchend', up, { capture: true });
             window.addEventListener('touchcancel', up, { capture: true });
         }
+        // low-tier frame pacing (see the cap below)
+        const FRAME_CAP_MS = 1000 / 30;
+        let lastLowTierRenderMs = 0;
+        const now = () => performance.now();
         // track the camera state and trigger a render when it changes
         app.on('framerender', () => {
             const world = camera.getWorldTransform();
@@ -92255,6 +93700,20 @@ class Viewer {
             }
             if (this.forceRenderNextFrame) {
                 app.renderNextFrame = true;
+            }
+            // Low-tier 30fps cap — THE anti-thermal lever on weak devices:
+            // 60->30fps cuts GPU energy by 40-100% (heat is cumulative, and
+            // these devices throttle into a death spiral otherwise). Skipped
+            // frames merely postpone: prevWorld is only advanced on rendered
+            // frames, so a pending camera change re-triggers next tick.
+            if (platform.mobile && state.deviceTier === 'low' && app.renderNextFrame) {
+                const nowMs = now();
+                if (nowMs - lastLowTierRenderMs < FRAME_CAP_MS - 1) {
+                    app.renderNextFrame = false;
+                }
+                else {
+                    lastLowTierRenderMs = nowMs - ((nowMs - lastLowTierRenderMs) % FRAME_CAP_MS);
+                }
             }
             if (app.renderNextFrame) {
                 prevWorld.copy(world);
@@ -92332,6 +93791,8 @@ class Viewer {
             this.inputController.collision = collision ?? null;
             // distance measurement tool (uses the same picker + collision)
             initMeasure(global, this.picker, collision ?? null);
+            // automatic tour generation (debug entry points only; no-op otherwise)
+            initTourGenerator(global, collision ?? null);
             // hasCollision = collision data exists (drives fly-mode collision
             // detection and the voxel/mesh debug overlay availability).
             // walkAllowed = walk mode is offered to the user; requires both
@@ -92368,32 +93829,66 @@ class Viewer {
                 this.debugPanel = new DebugPanel(global, this.cameraManager);
             }
             const { gsplat } = app.scene;
-            // quality budget
+            // Quality budget. Mobile numbers follow the 2026 industry consensus
+            // (PlayCanvas docs, Spark, WebSplatter measurements): ~1M splats is
+            // the ceiling an iPhone renders fluidly — and thermal throttling
+            // takes 30-50% off peak within minutes, so budget for sustained,
+            // not cold-start performance.
             const budgets = {
-                mobile: {
-                    low: 1,
-                    high: 2
-                },
                 desktop: {
                     low: 2,
                     high: 4
                 }
             };
+            const isWebglMobile = platform.mobile && renderer === 'webgl';
+            // The LOD range knobs live on the COMPONENT in 2.20.5 — the
+            // scene-level lodRangeMin/Max setters are deprecated no-op stubs
+            // (getter returns a constant), so writing them does nothing.
+            const splatComponent = results[0].gsplat;
             const applyPerfSettings = () => {
+                const tier = state.deviceTier;
                 const budget = () => {
                     if (config.budget !== undefined && Number.isFinite(config.budget) && config.budget > 0) {
                         return config.budget;
                     }
-                    const quality = platform.mobile ? budgets.mobile : budgets.desktop;
-                    return state.performanceMode ? quality.low : quality.high;
+                    if (!platform.mobile) {
+                        return state.performanceMode ? budgets.desktop.low : budgets.desktop.high;
+                    }
+                    if (tier === 'low') {
+                        // 12-mini class: sustained-thermal target, not peak.
+                        return 0.35;
+                    }
+                    if (isWebglMobile) {
+                        // CPU-sorted path without per-chunk frustum culling —
+                        // old devices get the hard cap.
+                        return state.performanceMode ? 0.4 : 0.6;
+                    }
+                    if (tier === 'high') {
+                        // 14 Pro/15/16/17 class proved it renders 1M at 1080px
+                        // fluidly — quality IS the product on these devices.
+                        return state.performanceMode ? 1 : 1.5;
+                    }
+                    return state.performanceMode ? 0.6 : 0.8;
                 };
                 gsplat.splatBudget = budget() * 1000000;
-                gsplat.lodRangeMin = 0;
-                gsplat.lodRangeMax = 1000;
-                gsplat.colorUpdateAngle = state.performanceMode ? 4 : 2;
-                gsplat.minContribution = 1;
-                gsplat.alphaClip = 1 / 255;
-                gsplat.antiAlias = config.aa;
+                // Mobile GPUs (TBDR) blend EVERY overlapping splat fragment —
+                // fill rate is the bottleneck, so: never stream the finest LOD
+                // near the camera (halves close-range splats), cull
+                // low-contribution splats GPU-side, clip near-zero alpha
+                // earlier, and thin the periphery slightly (walk mode centres
+                // the gaze anyway). Desktop keeps maximum quality.
+                if (splatComponent) {
+                    splatComponent.lodRangeMin = (tier === 'low' || isWebglMobile) ? 2 : (platform.mobile ? 1 : 0);
+                    splatComponent.lodRangeMax = 1000;
+                }
+                gsplat.colorUpdateAngle = (platform.mobile && tier === 'low') || state.performanceMode ? 4 : 2;
+                // Anti-overdraw ladder: harsh culling reads as thinned-out,
+                // "washed" splats — only the weakest devices get the harsh
+                // values; high-tier phones stay near desktop quality.
+                gsplat.minContribution = !platform.mobile ? 1 : (tier === 'low' ? 8 : (tier === 'mid' ? 3 : 2));
+                gsplat.alphaClip = !platform.mobile ? 1 / 255 : (tier === 'low' ? 8 / 255 : (tier === 'mid' ? 4 / 255 : 2 / 255));
+                gsplat.foveationStrength = !platform.mobile ? 0 : (tier === 'low' ? 0.5 : (tier === 'mid' ? 0.25 : 0));
+                gsplat.antiAlias = config.aa && tier !== 'low';
             };
             if (config.fullload) {
                 // reveal once full quality has finished loading (used for screenshots)
@@ -92403,8 +93898,8 @@ class Viewer {
                 // reveal once low lod has loaded for fastest possible reveal
                 const resource = results[0].gsplat.resource;
                 const lodLevels = resource?.octree?.lodLevels;
-                if (lodLevels) {
-                    gsplat.lodRangeMax = gsplat.lodRangeMin = lodLevels - 1;
+                if (lodLevels && splatComponent) {
+                    splatComponent.lodRangeMax = splatComponent.lodRangeMin = lodLevels - 1;
                 }
             }
             // these two allow LOD behind camera to drop, saves lots of splats
@@ -92425,9 +93920,15 @@ class Viewer {
                     idleTime = 0;
                 }
             });
+            // While LOD chunks stream/decode, frame times spike for reasons
+            // that are NOT the GPU's fault — the tier monitor below must not
+            // count them. Hold measurement during loading + a short tail
+            // (decode/upload lags the download signal).
+            let streamingHoldUntilMs = 0;
             eventHandler.on('frame:ready', (_camera, _layer, ready, loading) => {
                 if (loading > 0 || !ready) {
                     idleTime = 0;
+                    streamingHoldUntilMs = performance.now() + 1500;
                 }
             });
             let current = 0;
@@ -92437,9 +93938,52 @@ class Viewer {
                     // scene is done loading
                     eventHandler.off('frame:ready', readyHandler);
                     state.readyToRender = true;
-                    // handle quality mode changes
+                    // handle quality mode changes + runtime tier demotion
                     events.on('performanceMode:changed', applyPerfSettings);
+                    events.on('deviceTier:changed', applyPerfSettings);
                     applyPerfSettings();
+                    // Runtime tier DEMOTION — the safety net for devices the
+                    // static heuristic can't know (Android wildcards, old
+                    // Pro-Max models, thermal collapse): fps-EMA measured only
+                    // while frames render continuously; if it can't hold the
+                    // tier's floor for 3 consecutive seconds, drop one tier
+                    // (high -> mid -> low). Never promotes: warm-up is slow
+                    // and invisible to the web, oscillation would be worse.
+                    //
+                    // Measurement blackouts (jank that is NOT the GPU's fault
+                    // must never demote): the first seconds after load (shader
+                    // warm-up, initial LOD upgrades), any chunk-streaming
+                    // window (+tail, see streamingHoldUntilMs), the staging
+                    // prewarm flight, and 10s after a demotion (the resize/
+                    // rebuffer it causes would cascade). EMA restarts fresh
+                    // after each demotion.
+                    if (platform.mobile) {
+                        const warmupUntilMs = performance.now() + 5000;
+                        let fpsEma = 60;
+                        let belowFor = 0;
+                        let lastDemote = 0;
+                        app.on('update', (dt) => {
+                            if (!this.forceRenderNextFrame || dt <= 0)
+                                return;
+                            const nowMs = performance.now();
+                            if (nowMs < warmupUntilMs || nowMs < streamingHoldUntilMs || state.prewarming) {
+                                belowFor = 0;
+                                return;
+                            }
+                            fpsEma += (1 / dt - fpsEma) * 0.08;
+                            const floor = state.deviceTier === 'high' ? 30 : (state.deviceTier === 'mid' ? 22 : 0);
+                            belowFor = (floor > 0 && fpsEma < floor) ? belowFor + dt : 0;
+                            if (belowFor > 3 && nowMs / 1000 - lastDemote > 10) {
+                                lastDemote = nowMs / 1000;
+                                belowFor = 0;
+                                fpsEma = 60;
+                                state.deviceTier = state.deviceTier === 'high' ? 'mid' : 'low';
+                                if (config.devtools) {
+                                    console.log('[perf] fps could not hold the profile - demoted tier to', state.deviceTier);
+                                }
+                            }
+                        });
+                    }
                     // debug colorize lods
                     gsplat.debug = config.colorize ? GSPLAT_DEBUG_LOD : GSPLAT_DEBUG_NONE;
                     gsplat.renderer = rendererTable[renderer];
@@ -93520,6 +95064,16 @@ const loadGsplat = async (app, config, progressCallback) => {
                 unified: true,
                 asset
             });
+            if (platform.mobile && entity.gsplat) {
+                // Indoor LOD distances: the engine default (5 m base, 3x per
+                // level) keeps the NEIGHBOURING room at full detail. In a flat
+                // the next room starts 2-3 m away — drop it a level sooner.
+                // High-tier phones get a milder falloff (quality first),
+                // mid/low the tight one. Mobile only; desktop untouched.
+                const high = config.tier === 'high';
+                entity.gsplat.lodBaseDistance = high ? 3.5 : 2.5;
+                entity.gsplat.lodMultiplier = high ? 3 : 2.5;
+            }
             app.root.addChild(entity);
             resolve(entity);
         });
@@ -93627,12 +95181,34 @@ const initCanvas = (global) => {
     // address the resulting softness with a sharpening post-pass instead (see
     // settings.json), which costs no extra render resolution.
     const webgl = global.renderer === 'webgl';
-    const maxPixelDim = platform.mobile ? (webgl ? 768 : 1080) : (webgl ? 1080 : 1536);
+    // Resolution cap per device tier (fill rate is THE mobile bottleneck —
+    // TBDR GPUs blend every overlapping splat fragment):
+    //   high phones keep near-native 1080 (they proved they can, and quality
+    //   is the product), mid drops to 900, low (12-mini class) to 560 —
+    //   heat is cumulative, weak devices must run cool from second one.
+    // Reads state.deviceTier so a runtime DEMOTION resizes too.
+    const maxPixelDim = () => {
+        if (!platform.mobile)
+            return webgl ? 1080 : 1536;
+        if (webgl)
+            return state.deviceTier === 'low' ? 560 : 768;
+        return state.deviceTier === 'low' ? 560 : (state.deviceTier === 'mid' ? 900 : 1080);
+    };
+    // Optical-zoom sharpness: while zoomed in, raise the cap in step with the
+    // zoom factor (quantized to half steps so the swap chain doesn't
+    // reallocate on every pinch frame). devicePixelRatio stays the hard
+    // ceiling, so this converges on the display's NATIVE resolution — the
+    // zoomed-in view is exactly where the capped soft splat rendering would
+    // otherwise read as blur.
+    const zoomBoost = () => 1 + Math.min(1.5, Math.round((getZoom() - 1) * 2) / 2);
     // cap pixel ratio to limit resolution on high-DPI devices
-    const calcPixelRatio = () => Math.min(maxPixelDim / Math.min(screen.width, screen.height), window.devicePixelRatio);
-    // last known device pixel size (full resolution, before any quality scaling)
+    const calcPixelRatio = () => Math.min((maxPixelDim() * zoomBoost()) / Math.min(screen.width, screen.height), window.devicePixelRatio);
+    // last known client size + device pixel size (before any quality scaling)
+    const clientSize = { width: 0, height: 0 };
     const deviceSize = { width: 0, height: 0 };
     const set = (width, height) => {
+        clientSize.width = width;
+        clientSize.height = height;
         const ratio = calcPixelRatio();
         deviceSize.width = width * ratio;
         deviceSize.height = height * ratio;
@@ -93667,6 +95243,16 @@ const initCanvas = (global) => {
     });
     resizeObserver.observe(canvas);
     events.on('performanceMode:changed', () => {
+        app.renderNextFrame = true;
+    });
+    // re-derive the resolution cap when the optical zoom changes
+    events.on('zoom:changed', () => {
+        set(clientSize.width, clientSize.height);
+        app.renderNextFrame = true;
+    });
+    // ...and when the runtime demotes the device tier
+    events.on('deviceTier:changed', () => {
+        set(clientSize.width, clientSize.height);
         app.renderNextFrame = true;
     });
     // Resize canvas before render() so the swap chain texture is acquired at the correct size.
@@ -93710,7 +95296,9 @@ const main = async (canvas, settingsJson, config) => {
         gamingControls: localStorage.getItem('gamingControls') === 'true',
         moveLocked: false,
         chatOpen: false,
-        prewarming: false
+        prewarming: false,
+        tourRevealActive: false,
+        deviceTier: config.tier ?? 'high'
     });
     const global = {
         app,
@@ -93722,6 +95310,13 @@ const main = async (canvas, settingsJson, config) => {
         renderer,
         cameraMoving: false
     };
+    // optical zoom (walk/fly): forward target changes onto the event bus for
+    // the resolution cap + badge, and ease back to 1× on every mode switch
+    registerZoomNotifier((zoom) => {
+        events.fire('zoom:changed', zoom);
+        app.renderNextFrame = true;
+    });
+    events.on('cameraMode:changed', () => resetZoom());
     initCanvas(global);
     // DEV: expose globals for camera tuning — only for the authoring/tooling
     // entry points (?debug / ?scout / ?record), never in the visitor path
@@ -93750,6 +95345,13 @@ const main = async (canvas, settingsJson, config) => {
     initConcierge(global);
     initStaging(global);
     initInquiry(global);
+    initZoomIndicator(global);
+    // anonymous usage analytics (inert no-op without settings.analytics); must
+    // init before the Viewer so its 'inputEvent' listener registers ahead of
+    // the camera manager's (it reads the pre-transition camera mode)
+    initAnalytics(global);
+    // engagement survey + lead CTA card (rides on analytics; inert without it)
+    initSurvey(global);
     // Load model
     const gsplatLoad = loadGsplat(app, config, (progress) => {
         state.progress = progress;

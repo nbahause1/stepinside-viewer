@@ -90,8 +90,19 @@ type ExperienceSettings = {
     annotations: Annotation[],
 
     // 'hidden' keeps tooltips + the ‹ › navigator fully functional but never
-    // renders the in-scene number bubbles. Absent/'visible' = today's look.
-    annotationMarkers?: 'visible' | 'hidden',
+    // renders the in-scene number bubbles. 'overview' shows the bubbles ONLY
+    // in the bird's-eye view and during the guided tour — the walking view
+    // stays clean. Absent/'visible' = today's look.
+    annotationMarkers?: 'visible' | 'hidden' | 'overview',
+
+    // Guided-tour ("Rundgang") pacing, relative to the authored track time.
+    // `speed` is the normal playback rate (default 1.5 — the authored tracks
+    // are deliberately slow), `revealSpeed` the slow-motion rate while a
+    // fly-by annotation bubble is being read (default 0.35).
+    tour?: {
+        speed?: number,
+        revealSpeed?: number
+    },
 
     startMode: 'default' | 'animTrack' | 'annotation',
 
@@ -174,6 +185,36 @@ type ExperienceSettings = {
         email?: string,
         url?: string,
         subject?: string
+    },
+
+    // Anonymous usage analytics (optional; cast-through like `inquiry`). With
+    // both `endpoint` and `propertyId` set, the viewer batches anonymous
+    // interaction events (opens, dwell heartbeats, feature usage) to the
+    // endpoint for the owner's report. Absent or incomplete, the whole module
+    // is an inert no-op. Privacy by design: no cookies, no localStorage, no
+    // fingerprinting — the session id is crypto-random and in-memory only, so
+    // two visits by the same person are two unrelated sessions.
+    analytics?: {
+        endpoint?: string,
+        propertyId?: string
+    },
+
+    // Engagement survey + lead CTA card (optional; cast-through like
+    // `analytics`, on which it rides). With analytics configured the card is
+    // ON by default — `enabled: false` switches it off. After genuine
+    // engagement (tour complete / `afterSeconds` of visible time, default
+    // 40 s / a long fullscreen stint) it asks one 1-5 question and, on a
+    // positive answer, offers "Besichtigung anfragen" / "Exposé erhalten"
+    // CTAs with a mini lead form.
+    // `leadEndpoint` overrides where the form POSTs; it defaults to the
+    // analytics endpoint with /events swapped for /lead. Privacy: the only
+    // thing persisted is a one-word "already asked" flag per property
+    // (localStorage `sse:survey:{propertyId}`) so nobody is asked twice — no
+    // identifiers, nothing linking sessions or properties.
+    survey?: {
+        enabled?: boolean,
+        leadEndpoint?: string,
+        afterSeconds?: number
     }
 };
 

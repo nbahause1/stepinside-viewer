@@ -26,13 +26,24 @@ class ModeShortcuts {
             return;
         }
 
+        // The free orbit/fly cameras are AUTHORING tools: a visitor escaping
+        // walk mode onto a ground-level free orbit can drag the splat into
+        // half-captured perspectives. All shortcuts that reach those modes
+        // (Escape-out-of-walk, 1/2/3, F) are therefore debug-entry only
+        // (?debug / ?scout / ?record); visitors keep walk / bird's-eye /
+        // highlights as the only cameras.
+        const devtools = global.config.devtools;
+
         if (event.key === 'Escape') {
             if (this._pointerLock?.recentlyExitedCapture) {
                 // already handled by pointerlockchange
             } else if (isCaptureMode(state.cameraMode) && state.gamingControls && state.inputMode === 'desktop') {
                 state.gamingControls = false;
             } else if (state.cameraMode === 'walk') {
-                events.fire('inputEvent', 'exitWalk', event);
+                // walking is the visitor's base mode — nothing to escape to
+                if (devtools) {
+                    events.fire('inputEvent', 'exitWalk', event);
+                }
             } else {
                 events.fire('inputEvent', 'cancel', event);
             }
@@ -45,13 +56,13 @@ class ModeShortcuts {
 
         switch (event.key) {
             case '1':
-                state.cameraMode = 'orbit';
+                if (devtools) state.cameraMode = 'orbit';
                 break;
             case '2':
-                state.cameraMode = 'fly';
+                if (devtools) state.cameraMode = 'fly';
                 break;
             case '3':
-                events.fire('inputEvent', 'toggleWalk');
+                if (devtools) events.fire('inputEvent', 'toggleWalk');
                 break;
             case 'v':
                 if (state.hasCollisionOverlay) {
@@ -75,7 +86,8 @@ class ModeShortcuts {
         if (state.cameraMode !== 'walk') {
             switch (event.key) {
                 case 'f':
-                    events.fire('inputEvent', 'frame', event);
+                    // frames the whole scene in free orbit — authoring only
+                    if (devtools) events.fire('inputEvent', 'frame', event);
                     break;
                 case ' ':
                     events.fire('inputEvent', 'playPause', event);

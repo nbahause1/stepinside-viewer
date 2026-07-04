@@ -1,6 +1,7 @@
 import { MultiTouchSource, Vec3 } from 'playcanvas';
 
 import type { Global } from '../../types';
+import { multiplyZoom } from '../../cameras/zoom';
 import {
     DISPLACEMENT_SCALE,
     TAP_EPSILON,
@@ -21,6 +22,9 @@ class TouchDevice implements InputDevice {
     moveSpeed: number = 4;
 
     pinchSpeed: number = 0.4;
+
+    /** Optical-zoom gain per pixel of pinch spread in first-person modes. */
+    pinchZoomSensitivity: number = 0.004;
 
     touchRotateSensitivity: number = 1.5;
 
@@ -153,12 +157,17 @@ class TouchDevice implements InputDevice {
             flyMoveTmp.set(this._joystick[0], 0, -this._joystick[1]);
             v.add(flyMoveTmp.mulScalar(fly * this.moveSpeed * dt));
         }
-        // Two-finger pinch z: orbit interprets +z as "farther from target"
-        // (close-pinch = +pinch[0] = zoom out). First-person modes interpret
-        // +z as "forward", so spreading (pinch[0] < 0) should move forward —
-        // flip the sign there.
-        pinchMoveTmp.set(0, 0, (orbit - directFirstPerson) * pinch[0]);
+        // Two-finger pinch z in orbit: +z = "farther from target" (close-pinch
+        // = +pinch[0] = zoom out).
+        pinchMoveTmp.set(0, 0, orbit * pinch[0]);
         v.add(pinchMoveTmp.mulScalar(double * this.pinchSpeed * DISPLACEMENT_SCALE));
+        // First-person pinch is OPTICAL zoom (like pinching a photo), not a
+        // dolly: spreading the fingers (pinch[0] < 0) magnifies the view.
+        // Multiplicative mapping so every pixel of spread feels the same at
+        // any zoom level. Walking stays on the joystick / tap-to-walk.
+        if (isFirstPerson && double && pinch[0] !== 0) {
+            multiplyZoom(Math.exp(-pinch[0] * this.pinchZoomSensitivity));
+        }
         // tap-to-jump in walk + gaming controls
         if (isWalk && this._tapJump) {
             v.y = 1;

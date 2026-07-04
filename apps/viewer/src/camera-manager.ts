@@ -186,6 +186,13 @@ class CameraManager {
         let transitionTimer = 1;
         let clearOrbitTargetOnTransitionEnd = false;
 
+        // Set when a guided tour starts from the top ('tour:start'), consumed
+        // by the single 'tour:complete' that started tour may fire. Scrubbing
+        // ('scrubAnim') enters anim mode WITHOUT resetting the cursor, so a
+        // scrub-to-end — or a pointerup parking the cursor at the end again —
+        // must not (re)fire 'tour:complete'.
+        let tourStarted = false;
+
         // start a new camera transition from the current pose
         const startTransition = () => {
             from.copy(this.camera);
@@ -199,11 +206,42 @@ class CameraManager {
             global.app.renderNextFrame = true;
         };
 
+        // Tour playback pacing. The authored track is deliberately smooth and
+        // slow (trailer heritage) — the in-viewer Rundgang plays it at a
+        // brisker base speed, and eases down into slow-motion while a fly-by
+        // bubble is up (annotations.ts flips state.tourRevealActive) so the
+        // text is comfortably readable, then eases back. Exponentially
+        // smoothed so the speed changes never jerk. Both speeds are relative
+        // to the authored track time and overridable per property via
+        // settings.tour { speed, revealSpeed }.
+        const tourCfg = global.settings.tour;
+        const clampSpeed = (v: unknown, lo: number, hi: number, dflt: number) => {
+            return (typeof v === 'number' && v >= lo && v <= hi) ? v : dflt;
+        };
+        const TOUR_SPEED = clampSpeed(tourCfg?.speed, 0.25, 3, 1.5);
+        const TOUR_REVEAL_SPEED = clampSpeed(tourCfg?.revealSpeed, 0.05, 1, 0.35);
+        let tourSlowFactor = TOUR_SPEED;
+
+        // While an annotation tooltip is up, the camera is a FIXED framed shot:
+        // look/zoom input is discarded so the splat can't be dragged into odd
+        // half-captured perspectives. Any click/tap already closes the tooltip
+        // (and unlocks), so the visitor is never stuck.
+        let annotationLock = false;
+        const lockedFrame = {
+            read: () => ({ move: [0, 0, 0], rotate: [0, 0, 0] })
+        } as unknown as CameraFrame;
+
         // application update
         this.update = (deltaTime: number, frame: CameraFrame) => {
 
-            // use dt of 0 if animation is paused
-            const dt = state.cameraMode === 'anim' && state.animationPaused ? 0 : deltaTime;
+            const slowTarget = (state.cameraMode === 'anim' && state.tourRevealActive) ? TOUR_REVEAL_SPEED : TOUR_SPEED;
+            tourSlowFactor += (slowTarget - tourSlowFactor) * Math.min(1, deltaTime * 2.5);
+
+            // use dt of 0 if animation is paused; slow the track while a
+            // fly-by bubble is being read
+            const dt = state.cameraMode === 'anim' ?
+                (state.animationPaused ? 0 : deltaTime * tourSlowFactor) :
+                deltaTime;
 
             // update transition timer
             const prevTransitionTimer = transitionTimer;
@@ -224,7 +262,12 @@ class CameraManager {
             // idle-look (fly mode only) re-sets it if it's actually wandering.
             IdleLook.wandering = false;
 
-            controller.update(dt, frame, target);
+            if (annotationLock && state.cameraMode === 'orbit') {
+                frame.read();   // drain this frame's input deltas, discarded
+                controller.update(dt, lockedFrame, target);
+            } else {
+                controller.update(dt, frame, target);
+            }
 
             if (transitionTimer < 1) {
                 // lerp away from previous camera during transition
@@ -243,6 +286,13 @@ class CameraManager {
                 // the same exit path 'cancel'/'interrupt' use.
                 if (cursor.loopMode === 'none' && cursor.duration > 0 && cursor.value >= cursor.duration) {
                     state.cameraMode = fromMode;
+                    // played through to the end (interrupt/cancel exits don't
+                    // come this way) — signal it, e.g. for analytics; at most
+                    // once per started tour (see tourStarted)
+                    if (tourStarted) {
+                        tourStarted = false;
+                        events.fire('tour:complete');
+                    }
                 }
             }
 
@@ -359,6 +409,10 @@ class CameraManager {
                             controllers.anim.animState.update(0);
                             state.cameraMode = 'anim';
                             state.animationPaused = false;
+                            // the guided tour started from the top — signal it,
+                            // e.g. for analytics
+                            tourStarted = true;
+                            events.fire('tour:start');
                         }
                     }
                     break;
@@ -509,6 +563,13 @@ class CameraManager {
 
         // handle user picking in the scene
         events.on('pick', (position: Vec3) => {
+            // The tap that closes an annotation tooltip must not refocus the
+            // locked orbit camera onto the picked point (flash-jump before the
+            // deactivate handler restores the previous mode).
+            if (annotationLock) {
+                return;
+            }
+
             // switch to orbit camera on pick
             state.cameraMode = 'orbit';
 
@@ -521,22 +582,23 @@ class CameraManager {
             clearOrbitTargetOnTransitionEnd = true;
         });
 
-        // Annotation taps frame the hotspot in orbit mode. Remember where the
-        // visitor came from and glide back when the tooltip closes — on touch
-        // there are no mode buttons, so orbit must never become a trap
+        // Annotation taps frame the hotspot in orbit mode. Remember which MODE
+        // the visitor came from and hand back when the tooltip closes — on
+        // touch there are no mode buttons, so orbit must never become a trap
         // (mirrors the aerial enter/exit pattern).
         let preAnnotationMode: CameraMode | null = null;
-        const preAnnotationCamera = new Camera();
 
         events.on('annotation.activate', (annotation: Annotation) => {
             events.fire('orbitTarget:clear');
 
             if (state.cameraMode !== 'orbit') {
                 preAnnotationMode = state.cameraMode;
-                preAnnotationCamera.copy(this.camera);
                 sourcesByMode[state.cameraMode]?.cancel();
                 events.fire('navTarget:clear');
             }
+
+            // fixed framed shot while the tooltip is up (see annotationLock)
+            annotationLock = true;
 
             // switch to orbit camera on pick
             state.cameraMode = 'orbit';
@@ -554,15 +616,28 @@ class CameraManager {
             startTransition();
         });
 
-        // tooltip closed: return to the mode (and pose) the visitor came from,
-        // unless they already moved on to another mode themselves
+        // Tooltip closed: hand control back WHERE THE VISITOR IS, not back
+        // across the flat to the pre-tour pose. Setting the mode makes the
+        // controller's onEnter spawn from the CURRENT camera — walk finds the
+        // nearest valid floor spot via findCylinderSpawn and keeps the viewing
+        // direction — so leaving a highlight simply drops you into walking
+        // right there. (The old restore lerped straight-line to a stale spot,
+        // cutting through walls after a multi-highlight browse: felt broken.)
         events.on('annotation.deactivate', () => {
+            annotationLock = false;
             if (preAnnotationMode !== null && state.cameraMode === 'orbit') {
                 state.cameraMode = preAnnotationMode;
-                (controllers[preAnnotationMode] as { goto?: (c: Camera) => void } | null)?.goto?.(preAnnotationCamera);
                 startTransition();
             }
             preAnnotationMode = null;
+        });
+
+        // Any other exit from the annotation view (home, bird's-eye, tour,
+        // walk toggle) changes the camera mode — release the lock with it.
+        events.on('cameraMode:changed', (mode: CameraMode) => {
+            if (mode !== 'orbit') {
+                annotationLock = false;
+            }
         });
 
         // tap-to-navigate: start auto-driving the active mode toward a picked position

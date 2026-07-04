@@ -65,7 +65,7 @@ const initTutorial = (global: Global) => {
     const chatAvailable = () => !!chatPill && !chatPill.classList.contains('hidden');
 
     // Control-dome buttons the onboarding can point at.
-    const domeIds = ['domeReset', 'domeMeasure', 'domeAerial', 'domePrev', 'domeNext', 'domeAerialExit'];
+    const domeIds = ['domeReset', 'domeMeasure', 'domeMeasureAerial', 'domeAerial', 'domePrev', 'domeNext', 'domeAerialExit'];
 
     type Phase =
         'idle' | 'look' | 'walk' | 'explore' | 'drone' |
@@ -153,17 +153,20 @@ const initTutorial = (global: Global) => {
         showCard(cardEls.arrows!);
     };
 
-    // After paging a couple of views: point at the walk-figure return button.
+    // After the measuring leg: point at the walk-figure return button.
     const beginArrowsBack = () => {
         phase = 'arrowsBack';
         hintButtons('domeAerialExit');
         showCard(cardEls.walkBack!);
     };
 
-    // Back in walk mode: point at the measure button.
+    // Point at the measure button — the AERIAL one while in the bird's-eye
+    // (the measuring leg now lives there: the floor-plan view is where
+    // measuring shines), the walk-row one as fallback when the visitor left
+    // the bird's-eye before measuring.
     const beginMeasureHint = () => {
         phase = 'measure';
-        hintButtons('domeMeasure');
+        hintButtons(state.cameraMode === 'aerial' ? 'domeMeasureAerial' : 'domeMeasure');
         showCard(cardEls.measure!);
     };
 
@@ -251,11 +254,16 @@ const initTutorial = (global: Global) => {
     });
 
     // Camera mode drives the bird's-eye legs: entering aerial shows the arrow
-    // hint; returning to walk (from either bird's-eye card) advances to measure.
+    // hint; the measuring leg happens IN the bird's-eye (after paging views).
+    // Leaving aerial advances: after the measuring leg -> home hint; before or
+    // during it -> fall back to the walk-row measure button so the lesson
+    // still happens.
     events.on('cameraMode:changed', (mode: string) => {
         if (mode === 'aerial') {
             if (phase === 'explore' || phase === 'drone') beginArrows();
-        } else if (phase === 'arrows' || phase === 'arrowsBack') {
+        } else if (phase === 'arrowsBack') {
+            beginHomeHint();
+        } else if (phase === 'arrows' || phase === 'measure' || phase === 'measuring') {
             beginMeasureHint();
         }
     });
@@ -264,7 +272,7 @@ const initTutorial = (global: Global) => {
     events.on('inputEvent', (name: string) => {
         if ((name === 'aerialNext' || name === 'aerialPrev') && phase === 'arrows') {
             arrowPresses += 1;
-            if (arrowPresses >= ARROW_PRESSES) beginArrowsBack();
+            if (arrowPresses >= ARROW_PRESSES) beginMeasureHint();
         } else if (name === 'reset' && phase === 'home') {
             // Home pressed → back at the start: the linear tutorial is done. The
             // feature hints (sofa, then concierge) take over from here.
@@ -296,7 +304,16 @@ const initTutorial = (global: Global) => {
         }
     });
     events.on('measureComplete', () => {
-        if (phase === 'measuring') beginHomeHint();
+        // Measuring done (in the bird's-eye): point back at the walk figure.
+        // In the walk-mode fallback the same advance applies — the walkBack
+        // card is skipped there by the mode-change handler above.
+        if (phase === 'measuring') {
+            if (state.cameraMode === 'aerial') {
+                beginArrowsBack();
+            } else {
+                beginHomeHint();
+            }
+        }
     });
 
     // Start once the scene is ready and we are in walk mode (the default

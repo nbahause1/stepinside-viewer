@@ -6,6 +6,7 @@ import { DEFAULT_CONTROLLER_DAMPING, applyFrameRotation, dampAngles, setBasisOff
 import { IdleLook } from './idle-look';
 import { SpawnState } from './spawn-state';
 import { SphereMover } from './sphere-mover';
+import { applySmoothedZoom } from './zoom';
 import { findSphereSpawn } from '../collision/find-spawn';
 
 /** Radius of the camera collision sphere (meters) */
@@ -73,7 +74,7 @@ class FlyController implements CameraController {
         camera.position.copy(this._position);
         camera.angles.set(this._angles.x, this._angles.y, 0);
         camera.distance = this._distance;
-        camera.fov = this.fov;
+        camera.fov = applySmoothedZoom(this.fov, deltaTime);
     }
 
     onExit(_camera: Camera): void {

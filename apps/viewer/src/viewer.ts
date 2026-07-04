@@ -38,6 +38,7 @@ import { DebugPanel } from './debug';
 import { InputController } from './input-controller';
 import { initMeasure } from './measure';
 import { MeshDebugOverlay } from './mesh-debug-overlay';
+import { initTourGenerator } from './tour-generator';
 import { NavCursor } from './nav-cursor';
 import { Picker } from './picker';
 import type { ExperienceSettings, PostEffectSettings } from './settings';
@@ -261,6 +262,11 @@ class Viewer {
             window.addEventListener('touchcancel', up, { capture: true });
         }
 
+        // low-tier frame pacing (see the cap below)
+        const FRAME_CAP_MS = 1000 / 30;
+        let lastLowTierRenderMs = 0;
+        const now = () => performance.now();
+
         // track the camera state and trigger a render when it changes
         app.on('framerender', () => {
             const world = camera.getWorldTransform();
@@ -305,6 +311,20 @@ class Viewer {
 
             if (this.forceRenderNextFrame) {
                 app.renderNextFrame = true;
+            }
+
+            // Low-tier 30fps cap — THE anti-thermal lever on weak devices:
+            // 60->30fps cuts GPU energy by 40-100% (heat is cumulative, and
+            // these devices throttle into a death spiral otherwise). Skipped
+            // frames merely postpone: prevWorld is only advanced on rendered
+            // frames, so a pending camera change re-triggers next tick.
+            if (platform.mobile && state.deviceTier === 'low' && app.renderNextFrame) {
+                const nowMs = now();
+                if (nowMs - lastLowTierRenderMs < FRAME_CAP_MS - 1) {
+                    app.renderNextFrame = false;
+                } else {
+                    lastLowTierRenderMs = nowMs - ((nowMs - lastLowTierRenderMs) % FRAME_CAP_MS);
+                }
             }
 
             if (app.renderNextFrame) {
@@ -410,6 +430,9 @@ class Viewer {
             // distance measurement tool (uses the same picker + collision)
             initMeasure(global, this.picker, collision ?? null);
 
+            // automatic tour generation (debug entry points only; no-op otherwise)
+            initTourGenerator(global, collision ?? null);
+
             // hasCollision = collision data exists (drives fly-mode collision
             // detection and the voxel/mesh debug overlay availability).
             // walkAllowed = walk mode is offered to the user; requires both
@@ -453,34 +476,73 @@ class Viewer {
 
             const { gsplat } = app.scene;
 
-            // quality budget
+            // Quality budget. Mobile numbers follow the 2026 industry consensus
+            // (PlayCanvas docs, Spark, WebSplatter measurements): ~1M splats is
+            // the ceiling an iPhone renders fluidly — and thermal throttling
+            // takes 30-50% off peak within minutes, so budget for sustained,
+            // not cold-start performance.
             const budgets = {
                 mobile: {
-                    low: 1,
-                    high: 2
+                    low: 0.6,
+                    high: 1
                 },
                 desktop: {
                     low: 2,
                     high: 4
                 }
             };
+            const isWebglMobile = platform.mobile && renderer === 'webgl';
+
+            // The LOD range knobs live on the COMPONENT in 2.20.5 — the
+            // scene-level lodRangeMin/Max setters are deprecated no-op stubs
+            // (getter returns a constant), so writing them does nothing.
+            const splatComponent = results[0].gsplat;
 
             const applyPerfSettings = () => {
+                const tier = state.deviceTier;
                 const budget = () => {
                     if (config.budget !== undefined && Number.isFinite(config.budget) && config.budget > 0) {
                         return config.budget;
                     }
-                    const quality = platform.mobile ? budgets.mobile : budgets.desktop;
-                    return state.performanceMode ? quality.low : quality.high;
+                    if (!platform.mobile) {
+                        return state.performanceMode ? budgets.desktop.low : budgets.desktop.high;
+                    }
+                    if (tier === 'low') {
+                        // 12-mini class: sustained-thermal target, not peak.
+                        return 0.35;
+                    }
+                    if (isWebglMobile) {
+                        // CPU-sorted path without per-chunk frustum culling —
+                        // old devices get the hard cap.
+                        return state.performanceMode ? 0.4 : 0.6;
+                    }
+                    if (tier === 'high') {
+                        // 14 Pro/15/16/17 class proved it renders 1M at 1080px
+                        // fluidly — quality IS the product on these devices.
+                        return state.performanceMode ? 1 : 1.5;
+                    }
+                    return state.performanceMode ? 0.6 : 0.8;
                 };
 
                 gsplat.splatBudget = budget() * 1000000;
-                gsplat.lodRangeMin = 0;
-                gsplat.lodRangeMax = 1000;
-                gsplat.colorUpdateAngle = state.performanceMode ? 4 : 2;
-                gsplat.minContribution = 1;
-                gsplat.alphaClip = 1 / 255;
-                gsplat.antiAlias = config.aa;
+                // Mobile GPUs (TBDR) blend EVERY overlapping splat fragment —
+                // fill rate is the bottleneck, so: never stream the finest LOD
+                // near the camera (halves close-range splats), cull
+                // low-contribution splats GPU-side, clip near-zero alpha
+                // earlier, and thin the periphery slightly (walk mode centres
+                // the gaze anyway). Desktop keeps maximum quality.
+                if (splatComponent) {
+                    splatComponent.lodRangeMin = (tier === 'low' || isWebglMobile) ? 2 : (platform.mobile ? 1 : 0);
+                    splatComponent.lodRangeMax = 1000;
+                }
+                gsplat.colorUpdateAngle = (platform.mobile && tier === 'low') || state.performanceMode ? 4 : 2;
+                // Anti-overdraw ladder: harsh culling reads as thinned-out,
+                // "washed" splats — only the weakest devices get the harsh
+                // values; high-tier phones stay near desktop quality.
+                gsplat.minContribution = !platform.mobile ? 1 : (tier === 'low' ? 8 : (tier === 'mid' ? 3 : 2));
+                gsplat.alphaClip = !platform.mobile ? 1 / 255 : (tier === 'low' ? 8 / 255 : (tier === 'mid' ? 4 / 255 : 2 / 255));
+                gsplat.foveationStrength = !platform.mobile ? 0 : (tier === 'low' ? 0.5 : (tier === 'mid' ? 0.25 : 0));
+                gsplat.antiAlias = config.aa && tier !== 'low';
             };
 
             if (config.fullload) {
@@ -490,8 +552,8 @@ class Viewer {
                 // reveal once low lod has loaded for fastest possible reveal
                 const resource = results[0].gsplat.resource as GSplatOctreeResourceLike | null;
                 const lodLevels = resource?.octree?.lodLevels;
-                if (lodLevels) {
-                    gsplat.lodRangeMax = gsplat.lodRangeMin = lodLevels - 1;
+                if (lodLevels && splatComponent) {
+                    splatComponent.lodRangeMax = splatComponent.lodRangeMin = lodLevels - 1;
                 }
             }
 
@@ -519,9 +581,16 @@ class Viewer {
                 }
             });
 
+            // While LOD chunks stream/decode, frame times spike for reasons
+            // that are NOT the GPU's fault — the tier monitor below must not
+            // count them. Hold measurement during loading + a short tail
+            // (decode/upload lags the download signal).
+            let streamingHoldUntilMs = 0;
+
             eventHandler.on('frame:ready', (_camera: CameraComponent, _layer: Layer, ready: boolean, loading: number) => {
                 if (loading > 0 || !ready) {
                     idleTime = 0;
+                    streamingHoldUntilMs = performance.now() + 1500;
                 }
             });
 
@@ -534,9 +603,52 @@ class Viewer {
 
                     state.readyToRender = true;
 
-                    // handle quality mode changes
+                    // handle quality mode changes + runtime tier demotion
                     events.on('performanceMode:changed', applyPerfSettings);
+                    events.on('deviceTier:changed', applyPerfSettings);
                     applyPerfSettings();
+
+                    // Runtime tier DEMOTION — the safety net for devices the
+                    // static heuristic can't know (Android wildcards, old
+                    // Pro-Max models, thermal collapse): fps-EMA measured only
+                    // while frames render continuously; if it can't hold the
+                    // tier's floor for 3 consecutive seconds, drop one tier
+                    // (high -> mid -> low). Never promotes: warm-up is slow
+                    // and invisible to the web, oscillation would be worse.
+                    //
+                    // Measurement blackouts (jank that is NOT the GPU's fault
+                    // must never demote): the first seconds after load (shader
+                    // warm-up, initial LOD upgrades), any chunk-streaming
+                    // window (+tail, see streamingHoldUntilMs), the staging
+                    // prewarm flight, and 10s after a demotion (the resize/
+                    // rebuffer it causes would cascade). EMA restarts fresh
+                    // after each demotion.
+                    if (platform.mobile) {
+                        const warmupUntilMs = performance.now() + 5000;
+                        let fpsEma = 60;
+                        let belowFor = 0;
+                        let lastDemote = 0;
+                        app.on('update', (dt: number) => {
+                            if (!this.forceRenderNextFrame || dt <= 0) return;
+                            const nowMs = performance.now();
+                            if (nowMs < warmupUntilMs || nowMs < streamingHoldUntilMs || state.prewarming) {
+                                belowFor = 0;
+                                return;
+                            }
+                            fpsEma += (1 / dt - fpsEma) * 0.08;
+                            const floor = state.deviceTier === 'high' ? 30 : (state.deviceTier === 'mid' ? 22 : 0);
+                            belowFor = (floor > 0 && fpsEma < floor) ? belowFor + dt : 0;
+                            if (belowFor > 3 && nowMs / 1000 - lastDemote > 10) {
+                                lastDemote = nowMs / 1000;
+                                belowFor = 0;
+                                fpsEma = 60;
+                                state.deviceTier = state.deviceTier === 'high' ? 'mid' : 'low';
+                                if (config.devtools) {
+                                    console.log('[perf] fps could not hold the profile - demoted tier to', state.deviceTier);
+                                }
+                            }
+                        });
+                    }
 
                     // debug colorize lods
                     gsplat.debug = config.colorize ? GSPLAT_DEBUG_LOD : GSPLAT_DEBUG_NONE;
