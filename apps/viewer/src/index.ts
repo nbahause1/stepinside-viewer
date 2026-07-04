@@ -195,7 +195,10 @@ const initCanvas = (global: Global) => {
     // Mobile WebGPU: 900 instead of 1080 — 1080 was ~native Retina on a phone
     // (2.5M pixels of alpha-blended splat fill per frame); TBDR GPUs are fill-
     // rate bound on splats and throttle 30-50% when warm, so leave headroom.
-    const maxPixelDim = platform.mobile ? (webgl ? 768 : 900) : (webgl ? 1080 : 1536);
+    // Low-tier devices (12-mini class) drop to 560 (~DPR 1.5 on a 375pt
+    // screen): heat is cumulative, so they must run cool from second one.
+    const maxPixelDim = global.config.lowTier ? 560 :
+        platform.mobile ? (webgl ? 768 : 900) : (webgl ? 1080 : 1536);
 
     // Optical-zoom sharpness: while zoomed in, raise the cap in step with the
     // zoom factor (quantized to half steps so the swap chain doesn't

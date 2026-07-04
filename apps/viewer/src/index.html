@@ -48,6 +48,22 @@
             const budgetParam = url.searchParams.get('budget');
             const budget = budgetParam !== null ? Number(budgetParam) : undefined;
 
+            // Device tier. Old/small iPhones (12-mini class: A14 in the worst
+            // thermal chassis Apple ever shipped) overheat within minutes on the
+            // standard mobile load — they get a LOW-TIER profile (30fps cap,
+            // reduced resolution/budget, see viewer.ts/index.ts). Cascade:
+            //   ?tier=low|high forces; mobile without WebGPU = old iOS = low;
+            //   small-Retina-iPhone heuristic (shortest side <= 376 CSS px at
+            //   DPR 3 = X/XS/11 Pro/12 mini/13 mini class) = low.
+            const isMobileUA = /iPhone|iPad|Android|Mobile/i.test(navigator.userAgent);
+            const tierParam = url.searchParams.get('tier');
+            const lowTier = tierParam === 'low' ? true :
+                tierParam === 'high' ? false :
+                isMobileUA && (
+                    renderer === 'webgl' ||
+                    (Math.min(screen.width, screen.height) <= 376 && window.devicePixelRatio >= 3)
+                );
+
             const sseConfig = {
                 poster: posterUrl && createImage(posterUrl),
                 skyboxUrl,
@@ -63,6 +79,7 @@
                 renderer,
                 aa: url.searchParams.has('aa'),
                 budget,
+                lowTier,
                 heatmap: url.searchParams.has('heatmap'),
                 fullload: url.searchParams.has('fullload'),
                 debug: url.searchParams.has('debug'),

@@ -262,6 +262,11 @@ class Viewer {
             window.addEventListener('touchcancel', up, { capture: true });
         }
 
+        // low-tier frame pacing (see the cap below)
+        const FRAME_CAP_MS = 1000 / 30;
+        let lastLowTierRenderMs = 0;
+        const now = () => performance.now();
+
         // track the camera state and trigger a render when it changes
         app.on('framerender', () => {
             const world = camera.getWorldTransform();
@@ -306,6 +311,20 @@ class Viewer {
 
             if (this.forceRenderNextFrame) {
                 app.renderNextFrame = true;
+            }
+
+            // Low-tier 30fps cap — THE anti-thermal lever on weak devices:
+            // 60->30fps cuts GPU energy by 40-100% (heat is cumulative, and
+            // these devices throttle into a death spiral otherwise). Skipped
+            // frames merely postpone: prevWorld is only advanced on rendered
+            // frames, so a pending camera change re-triggers next tick.
+            if (config.lowTier && app.renderNextFrame) {
+                const nowMs = now();
+                if (nowMs - lastLowTierRenderMs < FRAME_CAP_MS - 1) {
+                    app.renderNextFrame = false;
+                } else {
+                    lastLowTierRenderMs = nowMs - ((nowMs - lastLowTierRenderMs) % FRAME_CAP_MS);
+                }
             }
 
             if (app.renderNextFrame) {
@@ -484,6 +503,10 @@ class Viewer {
                     if (config.budget !== undefined && Number.isFinite(config.budget) && config.budget > 0) {
                         return config.budget;
                     }
+                    if (config.lowTier) {
+                        // 12-mini class: sustained-thermal target, not peak.
+                        return 0.35;
+                    }
                     if (isWebglMobile) {
                         // CPU-sorted path without per-chunk frustum culling —
                         // the weakest devices get the hardest cap.
@@ -501,14 +524,14 @@ class Viewer {
                 // earlier, and thin the periphery slightly (walk mode centres
                 // the gaze anyway). Desktop keeps maximum quality.
                 if (splatComponent) {
-                    splatComponent.lodRangeMin = isWebglMobile ? 2 : (platform.mobile ? 1 : 0);
+                    splatComponent.lodRangeMin = (config.lowTier || isWebglMobile) ? 2 : (platform.mobile ? 1 : 0);
                     splatComponent.lodRangeMax = 1000;
                 }
-                gsplat.colorUpdateAngle = state.performanceMode ? 4 : 2;
-                gsplat.minContribution = platform.mobile ? (state.performanceMode ? 8 : 4) : 1;
+                gsplat.colorUpdateAngle = (config.lowTier || state.performanceMode) ? 4 : 2;
+                gsplat.minContribution = config.lowTier ? 8 : (platform.mobile ? (state.performanceMode ? 8 : 4) : 1);
                 gsplat.alphaClip = platform.mobile ? 8 / 255 : 1 / 255;
-                gsplat.foveationStrength = platform.mobile ? 0.35 : 0;
-                gsplat.antiAlias = config.aa;
+                gsplat.foveationStrength = config.lowTier ? 0.5 : (platform.mobile ? 0.35 : 0);
+                gsplat.antiAlias = config.aa && !config.lowTier;
             };
 
             if (config.fullload) {
