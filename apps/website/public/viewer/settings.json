@@ -145,8 +145,8 @@
   "staging": {
     "enabled": true,
     "mode": "demo",
-    "endpoint": "http://localhost:8787/stage",
-    "propertyId": "example-fewo",
+    "endpoint": "https://concierge-api.stepinside.workers.dev/stage",
+    "propertyId": "demo-altbau",
     "styles": [
       {
         "id": "classic",
