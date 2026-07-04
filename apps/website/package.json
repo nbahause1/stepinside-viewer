@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "sync:viewer": "cd ../viewer && npm run build && cd ../website && mkdir -p public/viewer && cp ../viewer/public/index.html ../viewer/public/index.js ../viewer/public/index.css public/viewer/ && if [ -f ../viewer/public/settings.json ]; then cp ../viewer/public/settings.json public/viewer/; fi"
+    "sync:viewer": "cd ../viewer && npm run build && cd ../website && mkdir -p public/viewer/fonts && rm -f public/viewer/index-*.js public/viewer/tour-generator-*.js && cp ../viewer/public/index.html ../viewer/public/index.css ../viewer/public/index.js public/viewer/ && cp ../viewer/public/index-*.js ../viewer/public/tour-generator-*.js public/viewer/ && cp ../viewer/public/fonts/*.woff2 public/viewer/fonts/ && if [ -f ../viewer/public/settings.json ]; then cp ../viewer/public/settings.json public/viewer/; fi"
   },
   "dependencies": {
     "@phosphor-icons/react": "^2.1.10",
