@@ -151,20 +151,20 @@
       {
         "id": "classic",
         "label": "Designklassiker",
-        "image": "staged/classic.jpg",
-        "imagePortrait": "staged/classic-portrait.jpg"
+        "image": "staged/classic.jpg?v=2",
+        "imagePortrait": "staged/classic-portrait.jpg?v=2"
       },
       {
         "id": "warm",
         "label": "Colour-Pop",
-        "image": "staged/warm.jpg",
-        "imagePortrait": "staged/warm-portrait.jpg"
+        "image": "staged/warm.jpg?v=2",
+        "imagePortrait": "staged/warm-portrait.jpg?v=2"
       },
       {
         "id": "scandi",
         "label": "Minimal",
-        "image": "staged/scandi.jpg",
-        "imagePortrait": "staged/scandi-portrait.jpg"
+        "image": "staged/scandi.jpg?v=2",
+        "imagePortrait": "staged/scandi-portrait.jpg?v=2"
       }
     ]
   },
