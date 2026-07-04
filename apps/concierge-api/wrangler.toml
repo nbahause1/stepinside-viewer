@@ -3,6 +3,13 @@ main = "src/worker.ts"
 compatibility_date = "2026-06-01"
 compatibility_flags = ["nodejs_compat"]
 
+# Reference furniture photos for /stage are bundled as raw bytes (Workers has
+# no filesystem). Scoped to staging-refs so no other asset type is affected.
+[[rules]]
+type = "Data"
+globs = ["**/*.jpg", "**/*.png"]
+fallthrough = true
+
 # ANTHROPIC_API_KEY (concierge) and GEMINI_API_KEY (/stage virtual staging,
 # "Nano Banana" = Gemini 2.5 Flash Image) are provided as secrets, never committed:
 #   wrangler secret put ANTHROPIC_API_KEY

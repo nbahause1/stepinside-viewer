@@ -24,6 +24,8 @@ import { buildStagingPrompt, resolveStyle } from './staging-prompt.js';
 import type { StagingStyle } from './staging-prompt.js';
 import type { RateLimiter, RateLimitResult } from './ratelimit.js';
 import { generateWithFalKontext, FalError } from './staging-fal.js';
+import { planLayout } from './staging-planner.js';
+import type { LayoutPlan } from './staging-planner.js';
 
 /** A reference furniture photo used to condition the generation. */
 export interface ReferenceImage {
@@ -43,6 +45,20 @@ export interface StagingDeps {
   geminiApiKey?: string;
   /** fal.ai API key (server-side only). Required when engine === 'fal'. */
   falApiKey?: string;
+  /**
+   * Room-aware layout planning (staging-planner.ts): a fast Gemini vision
+   * model reads the frame and plans WHERE each piece goes before the image
+   * model renders. On by default with a Gemini key; fail-soft — a planner
+   * failure degrades to the un-planned prompt, never breaks staging.
+   */
+  enablePlanner?: boolean;
+  /** Override for the plan model (default gemini-2.5-flash). */
+  planModel?: string;
+  /**
+   * Optional ground-truth room geometry for a property (from the 3D scan's
+   * room analysis) to sharpen the planner's scale reasoning.
+   */
+  loadRoomFacts?: (propertyId: string) => Promise<Record<string, unknown> | null>;
   rateLimiter: RateLimiter;
   /** Best-effort client IP for rate limiting; '' if unknown. */
   clientIp: string;
@@ -190,7 +206,6 @@ export async function handleStaging(
   // 3. Resolve the style id to a server-owned prompt (client never sends text)
   //    and load that style's reference furniture photos (image-conditioning).
   const style = resolveStyle(request.style);
-  const prompt = buildStagingPrompt(style);
   let references: ReferenceImage[] = [];
   try {
     references = (await deps.loadStyleReferences?.(style)) ?? [];
@@ -199,10 +214,33 @@ export async function handleStaging(
     console.warn('[staging] reference load failed:', String(err));
   }
 
+  // 3b. Room-aware layout plan ("the brain"): a fast vision model reads the
+  //     frame, detects windows/doors itself and decides WHERE each piece goes.
+  //     Strictly fail-soft: null just means the render runs un-planned.
+  let plan: LayoutPlan | null = null;
+  const engine = deps.engine ?? 'gemini';
+  if ((deps.enablePlanner ?? true) && engine === 'gemini' && deps.geminiApiKey) {
+    let roomFacts: Record<string, unknown> | null = null;
+    try {
+      roomFacts = (await deps.loadRoomFacts?.(request.propertyId)) ?? null;
+    } catch {
+      roomFacts = null;
+    }
+    plan = await planLayout(
+      deps.geminiApiKey,
+      { mimeType: request.mimeType, base64: request.imageBase64 },
+      style.planPieces,
+      { model: deps.planModel, roomFacts },
+    );
+    if (!plan) {
+      console.warn('[staging] planner unavailable - rendering without a layout plan');
+    }
+  }
+  const prompt = buildStagingPrompt(style, plan);
+
   try {
     // 4/5. Generate + extract the inline image, on the configured engine.
     const aspectRatio = pickAspectRatio(request.width, request.height);
-    const engine = deps.engine ?? 'gemini';
     let image: string | null;
     if (engine === 'fal') {
       if (!deps.falApiKey) {

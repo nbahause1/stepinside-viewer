@@ -25,8 +25,24 @@
  *     (frictionless demo), protected only by CORS + rate limits.
  */
 import exampleFewo from '../knowledge/example-fewo.json';
+// Reference furniture photos, bundled as raw bytes via the wrangler.toml Data
+// rule (Workers has no filesystem). Keyed as `${style.dir}/${file}` below.
+import set1Sofa from '../staging-refs/set1-vitra-klassiker/anagram-sofa.jpg';
+import set1Eames from '../staging-refs/set1-vitra-klassiker/eames-lounge-chair.jpg';
+import set1Noguchi from '../staging-refs/set1-vitra-klassiker/noguchi-coffee-table.jpg';
+import set1Akari from '../staging-refs/set1-vitra-klassiker/vitra-akari-lamp.png';
+import set2Usm from '../staging-refs/set2-usm-vitra-minimal/usm-haller-sideboard.jpg';
+import set2Sofa from '../staging-refs/set2-usm-vitra-minimal/soft-modular-sofa.jpg';
+import set2Dsw from '../staging-refs/set2-usm-vitra-minimal/eames-dsw-chair.jpg';
+import set3Usm from '../staging-refs/set3-colour-pop/usm-haller-sideboard.jpg';
+import set3Panton from '../staging-refs/set3-colour-pop/panton-chair.jpg';
+import set3Dsw from '../staging-refs/set3-colour-pop/eames-dsw-chair.jpg';
+import set3Sofa from '../staging-refs/set3-colour-pop/soft-modular-sofa.jpg';
+import { Buffer } from 'node:buffer';
 import { validateKnowledge } from './knowledge.js';
 import type { KnowledgeBase } from './knowledge.js';
+import type { StagingStyle } from './staging-prompt.js';
+import type { ReferenceImage } from './staging.js';
 import {
   MemoryRateLimiter,
   KvRateLimiter,
@@ -46,6 +62,10 @@ interface Env {
   GEMINI_API_KEY?: string;
   FAL_KEY?: string;
   STAGING_ENGINE?: string;
+  /** 'off' disables the room-aware layout planner (staging-planner.ts). */
+  STAGING_PLANNER?: string;
+  /** Override for the layout plan model (default gemini-2.5-flash). */
+  GEMINI_PLAN_MODEL?: string;
   ALLOWED_ORIGINS?: string;
   /** KV namespace for shared rate limiting + the daily spend cap (wrangler.toml). */
   RATE_LIMIT_KV?: KvLike;
@@ -74,6 +94,46 @@ const KNOWLEDGE: Record<string, KnowledgeBase> = {
 
 function loadKnowledge(propertyId: string): KnowledgeBase | null {
   return KNOWLEDGE[propertyId] ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// Bundled reference furniture (image-conditioning for /stage). Keyed by
+// `${style.dir}/${file}` to mirror the on-disk layout the dev server reads.
+// ---------------------------------------------------------------------------
+const STAGING_REF_BYTES: Record<string, ArrayBuffer> = {
+  'set1-vitra-klassiker/anagram-sofa.jpg': set1Sofa,
+  'set1-vitra-klassiker/eames-lounge-chair.jpg': set1Eames,
+  'set1-vitra-klassiker/noguchi-coffee-table.jpg': set1Noguchi,
+  'set1-vitra-klassiker/vitra-akari-lamp.png': set1Akari,
+  'set2-usm-vitra-minimal/usm-haller-sideboard.jpg': set2Usm,
+  'set2-usm-vitra-minimal/soft-modular-sofa.jpg': set2Sofa,
+  'set2-usm-vitra-minimal/eames-dsw-chair.jpg': set2Dsw,
+  'set3-colour-pop/usm-haller-sideboard.jpg': set3Usm,
+  'set3-colour-pop/panton-chair.jpg': set3Panton,
+  'set3-colour-pop/eames-dsw-chair.jpg': set3Dsw,
+  'set3-colour-pop/soft-modular-sofa.jpg': set3Sofa,
+};
+
+// Base64 is what the Gemini/fal payloads need; encode lazily once per isolate.
+const refBase64Cache = new Map<string, string>();
+
+async function loadStyleReferences(style: StagingStyle): Promise<ReferenceImage[]> {
+  const out: ReferenceImage[] = [];
+  for (const file of style.refs) {
+    const key = `${style.dir}/${file}`;
+    const bytes = STAGING_REF_BYTES[key];
+    if (!bytes) continue;   // skip a missing ref; the prompt still names the piece
+    let base64 = refBase64Cache.get(key);
+    if (!base64) {
+      base64 = Buffer.from(bytes).toString('base64');
+      refBase64Cache.set(key, base64);
+    }
+    out.push({
+      mimeType: file.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg',
+      base64,
+    });
+  }
+  return out;
 }
 
 // Rate-limit configuration, shared by the KV-backed and in-memory variants.
@@ -340,6 +400,9 @@ export default {
         engine,
         geminiApiKey: env.GEMINI_API_KEY,
         falApiKey: env.FAL_KEY,
+        enablePlanner: env.STAGING_PLANNER !== 'off',
+        planModel: env.GEMINI_PLAN_MODEL,
+        loadStyleReferences,
         rateLimiter: checkedLimiter,
         clientIp,
         // Kill-switch against cost abuse: hard daily generation budget, shared
