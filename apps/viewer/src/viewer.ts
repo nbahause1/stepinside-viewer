@@ -38,6 +38,7 @@ import { DebugPanel } from './debug';
 import { InputController } from './input-controller';
 import { initMeasure } from './measure';
 import { MeshDebugOverlay } from './mesh-debug-overlay';
+import { initTourGenerator } from './tour-generator';
 import { NavCursor } from './nav-cursor';
 import { Picker } from './picker';
 import type { ExperienceSettings, PostEffectSettings } from './settings';
@@ -409,6 +410,9 @@ class Viewer {
 
             // distance measurement tool (uses the same picker + collision)
             initMeasure(global, this.picker, collision ?? null);
+
+            // automatic tour generation (debug entry points only; no-op otherwise)
+            initTourGenerator(global, collision ?? null);
 
             // hasCollision = collision data exists (drives fly-mode collision
             // detection and the voxel/mesh debug overlay availability).
