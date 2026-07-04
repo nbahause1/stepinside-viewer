@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "sync:viewer": "node scripts/sync-viewer.mjs --pre && cd ../viewer && npm run build && cd ../website && node scripts/sync-viewer.mjs"
+    "sync:viewer": "node scripts/sync-viewer.mjs --pre && cd ../viewer && npm run build && cd ../website && node scripts/sync-viewer.mjs",
+    "prebuild": "node scripts/sync-viewer.mjs --pre && npm --prefix ../viewer ci && npm --prefix ../viewer run build && node scripts/sync-viewer.mjs"
   },
   "dependencies": {
     "@phosphor-icons/react": "^2.1.10",
