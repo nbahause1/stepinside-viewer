@@ -93920,9 +93920,15 @@ class Viewer {
                     idleTime = 0;
                 }
             });
+            // While LOD chunks stream/decode, frame times spike for reasons
+            // that are NOT the GPU's fault — the tier monitor below must not
+            // count them. Hold measurement during loading + a short tail
+            // (decode/upload lags the download signal).
+            let streamingHoldUntilMs = 0;
             eventHandler.on('frame:ready', (_camera, _layer, ready, loading) => {
                 if (loading > 0 || !ready) {
                     idleTime = 0;
+                    streamingHoldUntilMs = performance.now() + 1500;
                 }
             });
             let current = 0;
@@ -93943,20 +93949,34 @@ class Viewer {
                     // tier's floor for 3 consecutive seconds, drop one tier
                     // (high -> mid -> low). Never promotes: warm-up is slow
                     // and invisible to the web, oscillation would be worse.
+                    //
+                    // Measurement blackouts (jank that is NOT the GPU's fault
+                    // must never demote): the first seconds after load (shader
+                    // warm-up, initial LOD upgrades), any chunk-streaming
+                    // window (+tail, see streamingHoldUntilMs), the staging
+                    // prewarm flight, and 10s after a demotion (the resize/
+                    // rebuffer it causes would cascade). EMA restarts fresh
+                    // after each demotion.
                     if (platform.mobile) {
+                        const warmupUntilMs = performance.now() + 5000;
                         let fpsEma = 60;
                         let belowFor = 0;
                         let lastDemote = 0;
                         app.on('update', (dt) => {
                             if (!this.forceRenderNextFrame || dt <= 0)
                                 return;
+                            const nowMs = performance.now();
+                            if (nowMs < warmupUntilMs || nowMs < streamingHoldUntilMs || state.prewarming) {
+                                belowFor = 0;
+                                return;
+                            }
                             fpsEma += (1 / dt - fpsEma) * 0.08;
                             const floor = state.deviceTier === 'high' ? 30 : (state.deviceTier === 'mid' ? 22 : 0);
                             belowFor = (floor > 0 && fpsEma < floor) ? belowFor + dt : 0;
-                            const nowS = performance.now() / 1000;
-                            if (belowFor > 3 && nowS - lastDemote > 10) {
-                                lastDemote = nowS;
+                            if (belowFor > 3 && nowMs / 1000 - lastDemote > 10) {
+                                lastDemote = nowMs / 1000;
                                 belowFor = 0;
+                                fpsEma = 60;
                                 state.deviceTier = state.deviceTier === 'high' ? 'mid' : 'low';
                                 if (config.devtools) {
                                     console.log('[perf] fps could not hold the profile - demoted tier to', state.deviceTier);
