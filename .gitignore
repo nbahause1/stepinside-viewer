@@ -16,3 +16,10 @@ next-env.d.ts
 
 # vercel
 .vercel
+
+# Render/experiment outputs must never enter git (multi-GB frame dumps, videos)
+apps/trailer-render/frames/
+apps/trailer-render/node_modules/
+*.mp4
+apps/trailer-render/*.png
+apps/trailer-render/frames-list.txt
