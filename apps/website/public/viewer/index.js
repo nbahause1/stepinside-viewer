@@ -89340,17 +89340,15 @@ class CameraManager {
             startTransition();
             clearOrbitTargetOnTransitionEnd = true;
         });
-        // Annotation taps frame the hotspot in orbit mode. Remember where the
-        // visitor came from and glide back when the tooltip closes — on touch
-        // there are no mode buttons, so orbit must never become a trap
+        // Annotation taps frame the hotspot in orbit mode. Remember which MODE
+        // the visitor came from and hand back when the tooltip closes — on
+        // touch there are no mode buttons, so orbit must never become a trap
         // (mirrors the aerial enter/exit pattern).
         let preAnnotationMode = null;
-        const preAnnotationCamera = new Camera();
         events.on('annotation.activate', (annotation) => {
             events.fire('orbitTarget:clear');
             if (state.cameraMode !== 'orbit') {
                 preAnnotationMode = state.cameraMode;
-                preAnnotationCamera.copy(this.camera);
                 sourcesByMode[state.cameraMode]?.cancel();
                 events.fire('navTarget:clear');
             }
@@ -89363,12 +89361,16 @@ class CameraManager {
             controllers.orbit.goto(tmpCamera);
             startTransition();
         });
-        // tooltip closed: return to the mode (and pose) the visitor came from,
-        // unless they already moved on to another mode themselves
+        // Tooltip closed: hand control back WHERE THE VISITOR IS, not back
+        // across the flat to the pre-tour pose. Setting the mode makes the
+        // controller's onEnter spawn from the CURRENT camera — walk finds the
+        // nearest valid floor spot via findCylinderSpawn and keeps the viewing
+        // direction — so leaving a highlight simply drops you into walking
+        // right there. (The old restore lerped straight-line to a stale spot,
+        // cutting through walls after a multi-highlight browse: felt broken.)
         events.on('annotation.deactivate', () => {
             if (preAnnotationMode !== null && state.cameraMode === 'orbit') {
                 state.cameraMode = preAnnotationMode;
-                controllers[preAnnotationMode]?.goto?.(preAnnotationCamera);
                 startTransition();
             }
             preAnnotationMode = null;
