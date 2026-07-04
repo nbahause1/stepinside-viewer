@@ -222,6 +222,15 @@ class CameraManager {
         const TOUR_REVEAL_SPEED = clampSpeed(tourCfg?.revealSpeed, 0.05, 1, 0.35);
         let tourSlowFactor = TOUR_SPEED;
 
+        // While an annotation tooltip is up, the camera is a FIXED framed shot:
+        // look/zoom input is discarded so the splat can't be dragged into odd
+        // half-captured perspectives. Any click/tap already closes the tooltip
+        // (and unlocks), so the visitor is never stuck.
+        let annotationLock = false;
+        const lockedFrame = {
+            read: () => ({ move: [0, 0, 0], rotate: [0, 0, 0] })
+        } as unknown as CameraFrame;
+
         // application update
         this.update = (deltaTime: number, frame: CameraFrame) => {
 
@@ -253,7 +262,12 @@ class CameraManager {
             // idle-look (fly mode only) re-sets it if it's actually wandering.
             IdleLook.wandering = false;
 
-            controller.update(dt, frame, target);
+            if (annotationLock && state.cameraMode === 'orbit') {
+                frame.read();   // drain this frame's input deltas, discarded
+                controller.update(dt, lockedFrame, target);
+            } else {
+                controller.update(dt, frame, target);
+            }
 
             if (transitionTimer < 1) {
                 // lerp away from previous camera during transition
@@ -549,6 +563,13 @@ class CameraManager {
 
         // handle user picking in the scene
         events.on('pick', (position: Vec3) => {
+            // The tap that closes an annotation tooltip must not refocus the
+            // locked orbit camera onto the picked point (flash-jump before the
+            // deactivate handler restores the previous mode).
+            if (annotationLock) {
+                return;
+            }
+
             // switch to orbit camera on pick
             state.cameraMode = 'orbit';
 
@@ -576,6 +597,9 @@ class CameraManager {
                 events.fire('navTarget:clear');
             }
 
+            // fixed framed shot while the tooltip is up (see annotationLock)
+            annotationLock = true;
+
             // switch to orbit camera on pick
             state.cameraMode = 'orbit';
 
@@ -600,11 +624,20 @@ class CameraManager {
         // right there. (The old restore lerped straight-line to a stale spot,
         // cutting through walls after a multi-highlight browse: felt broken.)
         events.on('annotation.deactivate', () => {
+            annotationLock = false;
             if (preAnnotationMode !== null && state.cameraMode === 'orbit') {
                 state.cameraMode = preAnnotationMode;
                 startTransition();
             }
             preAnnotationMode = null;
+        });
+
+        // Any other exit from the annotation view (home, bird's-eye, tour,
+        // walk toggle) changes the camera mode — release the lock with it.
+        events.on('cameraMode:changed', (mode: CameraMode) => {
+            if (mode !== 'orbit') {
+                annotationLock = false;
+            }
         });
 
         // tap-to-navigate: start auto-driving the active mode toward a picked position
