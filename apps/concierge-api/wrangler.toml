@@ -62,7 +62,7 @@ migrations_dir = "migrations"
 [vars]
 # Exact-match origin allowlist (see src/cors.ts). Production site + local dev
 # (Next.js on 3000, incl. the LAN IP used for on-device iPhone testing).
-ALLOWED_ORIGINS = "https://stepinside.eu,https://www.stepinside.eu,http://localhost:3000,http://127.0.0.1:3000,http://192.168.0.146:3000,http://localhost:4500,http://127.0.0.1:4500"
+ALLOWED_ORIGINS = "https://stepinside.eu,https://www.stepinside.eu,https://stepinside-viewer-git-analytics-leads-nbahauses-projects.vercel.app,http://localhost:3000,http://127.0.0.1:3000,http://192.168.0.146:3000,http://localhost:4500,http://127.0.0.1:4500"
 STAGE_DAILY_LIMIT = "200"
 CONCIERGE_DAILY_LIMIT = "1000"
 EVENTS_DAILY_LIMIT = "50000"
