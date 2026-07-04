@@ -567,8 +567,15 @@ const initUI = (global: Global) => {
         showUI();
     });
 
-    // Animation controls
-    events.on('hasAnimation:changed', (value, prev) => {
+    // Animation controls. Wire the play/pause/timeline UI exactly ONCE on the
+    // first hasAnimation:changed — this block registers click/scrub/pointer
+    // listeners, so a second firing (e.g. a future settings reload) would
+    // duplicate every handler and double-fire scrubs.
+    let animationUiWired = false;
+    events.on('hasAnimation:changed', () => {
+        if (animationUiWired) return;
+        animationUiWired = true;
+
         // Start and Stop animation
         dom.play.addEventListener('click', () => {
             state.cameraMode = 'anim';
