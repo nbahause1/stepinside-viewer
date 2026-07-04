@@ -85712,8 +85712,14 @@ const initAnnotationNav = (dom, events, state, annotations) => {
     if (annotations.length < 2)
         return;
     let currentIndex = 0;
+    // Until the visitor engages with the navigator, the pill labels ITSELF
+    // ("Highlights") instead of showing an arbitrary first annotation title —
+    // otherwise the bar reads like a caption, not a control.
+    let engaged = false;
     const updateDisplay = () => {
-        dom.annotationNavTitle.textContent = annotations[currentIndex].title || '';
+        dom.annotationNavTitle.textContent = engaged
+            ? (annotations[currentIndex].title || '')
+            : 'Highlights';
     };
     const updateMode = () => {
         if (!state.loaded)
@@ -85732,19 +85738,25 @@ const initAnnotationNav = (dom, events, state, annotations) => {
         updateDisplay();
         events.fire('annotation.navigate', annotations[currentIndex]);
     };
-    // Prev / Next
+    // Prev / Next. The very first tap enters the list at its start (or end),
+    // instead of skipping past the first highlight from the phantom index 0.
     dom.annotationPrev.addEventListener('click', (e) => {
         e.stopPropagation();
-        goTo((currentIndex - 1 + annotations.length) % annotations.length);
+        const target = engaged ? (currentIndex - 1 + annotations.length) % annotations.length : annotations.length - 1;
+        engaged = true;
+        goTo(target);
     });
     dom.annotationNext.addEventListener('click', (e) => {
         e.stopPropagation();
-        goTo((currentIndex + 1) % annotations.length);
+        const target = engaged ? (currentIndex + 1) % annotations.length : 0;
+        engaged = true;
+        goTo(target);
     });
     // Sync when an annotation is activated externally (e.g. hotspot click)
     events.on('annotation.activate', (annotation) => {
         const idx = annotations.indexOf(annotation);
         if (idx !== -1) {
+            engaged = true;
             currentIndex = idx;
             updateDisplay();
         }
