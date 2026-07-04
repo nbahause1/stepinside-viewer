@@ -95,6 +95,15 @@ type ExperienceSettings = {
     // stays clean. Absent/'visible' = today's look.
     annotationMarkers?: 'visible' | 'hidden' | 'overview',
 
+    // Guided-tour ("Rundgang") pacing, relative to the authored track time.
+    // `speed` is the normal playback rate (default 1.5 — the authored tracks
+    // are deliberately slow), `revealSpeed` the slow-motion rate while a
+    // fly-by annotation bubble is being read (default 0.35).
+    tour?: {
+        speed?: number,
+        revealSpeed?: number
+    },
+
     startMode: 'default' | 'animTrack' | 'annotation',
 
     // Concierge config (optional; ignored by validateV2 which only casts, so

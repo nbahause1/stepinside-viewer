@@ -88993,15 +88993,24 @@ class CameraManager {
             transitionTimer = 1;
             global.app.renderNextFrame = true;
         };
-        // Slow-motion while a tour fly-by bubble is up (annotations.ts flips
-        // state.tourRevealActive): the track eases down to a third of its
-        // speed so the text is comfortably readable, then eases back to
-        // normal. Exponentially smoothed so the speed change never jerks.
-        const TOUR_REVEAL_SPEED = 0.3;
-        let tourSlowFactor = 1;
+        // Tour playback pacing. The authored track is deliberately smooth and
+        // slow (trailer heritage) — the in-viewer Rundgang plays it at a
+        // brisker base speed, and eases down into slow-motion while a fly-by
+        // bubble is up (annotations.ts flips state.tourRevealActive) so the
+        // text is comfortably readable, then eases back. Exponentially
+        // smoothed so the speed changes never jerk. Both speeds are relative
+        // to the authored track time and overridable per property via
+        // settings.tour { speed, revealSpeed }.
+        const tourCfg = global.settings.tour;
+        const clampSpeed = (v, lo, hi, dflt) => {
+            return (typeof v === 'number' && v >= lo && v <= hi) ? v : dflt;
+        };
+        const TOUR_SPEED = clampSpeed(tourCfg?.speed, 0.25, 3, 1.5);
+        const TOUR_REVEAL_SPEED = clampSpeed(tourCfg?.revealSpeed, 0.05, 1, 0.35);
+        let tourSlowFactor = TOUR_SPEED;
         // application update
         this.update = (deltaTime, frame) => {
-            const slowTarget = (state.cameraMode === 'anim' && state.tourRevealActive) ? TOUR_REVEAL_SPEED : 1;
+            const slowTarget = (state.cameraMode === 'anim' && state.tourRevealActive) ? TOUR_REVEAL_SPEED : TOUR_SPEED;
             tourSlowFactor += (slowTarget - tourSlowFactor) * Math.min(1, deltaTime * 2.5);
             // use dt of 0 if animation is paused; slow the track while a
             // fly-by bubble is being read
