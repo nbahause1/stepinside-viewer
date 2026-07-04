@@ -382,8 +382,12 @@ const initStaging = (global: Global) => {
         generate(selectedStyle);
     };
     if (styles.length > 1) {
-        prevBtn.addEventListener('click', (event) => { event.stopPropagation(); step(-1); });
-        nextBtn.addEventListener('click', (event) => { event.stopPropagation(); step(1); });
+        prevBtn.addEventListener('click', (event) => {
+            event.stopPropagation(); step(-1);
+        });
+        nextBtn.addEventListener('click', (event) => {
+            event.stopPropagation(); step(1);
+        });
         prevBtn.classList.remove('hidden');
         nextBtn.classList.remove('hidden');
         // the style name stays hidden: the bottom bar shows only "Original zeigen"
@@ -457,7 +461,9 @@ const initStaging = (global: Global) => {
         const prewarmDefault = async () => {
             const styleId = styles[0]?.id;
             const key = styleId ? `${styleId}:${isPortrait() ? 'p' : 'l'}` : undefined;
-            if (!styleId || !key) { state.prewarming = false; revealPill(); return; }
+            if (!styleId || !key) {
+                state.prewarming = false; revealPill(); return;
+            }
 
             cover.classList.remove('hidden');   // hide the camera detour from the visitor
 
@@ -474,11 +480,15 @@ const initStaging = (global: Global) => {
                 await wait(1200);               // no 'arrived' signal on exit; ~match the glide
                 app.renderNextFrame = true;
                 cover.classList.add('is-fading');
-                window.setTimeout(() => { cover.classList.add('hidden'); cover.classList.remove('is-fading'); }, 450);
+                window.setTimeout(() => {
+                    cover.classList.add('hidden'); cover.classList.remove('is-fading');
+                }, 450);
                 state.prewarming = false;       // re-runs the tutorial's start check
             }
 
-            if (!dataUrl) { revealPill(); return; }   // capture failed: degrade to on-click live gen
+            if (!dataUrl) {
+                revealPill(); return;
+            }   // capture failed: degrade to on-click live gen
 
             const canvas = app.graphicsDevice.canvas as HTMLCanvasElement;
             try {

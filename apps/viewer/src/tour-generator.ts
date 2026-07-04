@@ -174,7 +174,9 @@ const initTourGenerator = (global: Global, collision: Collision | null) => {
             const sz = Array.isArray(camPos) ? camPos[2] : pois[0].cell.z;
             for (const c of cells.values()) {
                 const d = (c.x - sx) ** 2 + (c.z - sz) ** 2;
-                if (d < bd) { bd = d; best = c; }
+                if (d < bd) {
+                    bd = d; best = c;
+                }
             }
             return best!;
         })();
@@ -201,7 +203,9 @@ const initTourGenerator = (global: Global, collision: Collision | null) => {
                 let bestK = '';
                 let bestF = Infinity;
                 for (const [k, n] of open) {
-                    if (n.f < bestF) { bestF = n.f; bestK = k; }
+                    if (n.f < bestF) {
+                        bestF = n.f; bestK = k;
+                    }
                 }
                 const cur = open.get(bestK)!;
                 open.delete(bestK);
@@ -307,7 +311,9 @@ const initTourGenerator = (global: Global, collision: Collision | null) => {
             let bs = 0;
             for (let i = 0; i < pts.length; i++) {
                 const dd = (pts[i].x - poi.cell.x) ** 2 + (pts[i].z - (poi.cell.z)) ** 2;
-                if (dd < bd) { bd = dd; bs = arc[i]; }
+                if (dd < bd) {
+                    bd = dd; bs = arc[i];
+                }
             }
             return { s: bs, ann: poi.ann };
         });

@@ -83,20 +83,24 @@ class CameraManager {
             createCamera(new Vec3(camera0.position), new Vec3(camera0.target), camera0.fov) :
             frameCamera;
 
-        // Curated "Raum von oben" bird's-eye viewpoints (Option A) the visitor can
-        // page through with the on-screen arrows. Centred on the scene; the
-        // heights/angles are tuned for this scan and are the per-scene values we'd
-        // later move into settings.json for other scenes.
+        // Curated "Raum von oben" bird's-eye viewpoints the visitor pages
+        // through with the on-screen arrows. PER-PROPERTY data: authored in
+        // settings.aerialViews (position/target/fov per view — the demo flat's
+        // values live in its settings.json). The bbox-derived fallback below
+        // only exists so a scene WITHOUT authored views still gets a usable
+        // top-down look — it was tuned for the demo scan and is no substitute
+        // for authoring real views per property.
+        const authoredAerial = (settings.aerialViews ?? [])
+        .filter(v => Array.isArray(v?.position) && v.position.length === 3 &&
+                         Array.isArray(v?.target) && v.target.length === 3)
+        .map(v => createCamera(new Vec3(v.position), new Vec3(v.target), v.fov ?? 92));
+
         const cx = bbox.center.x;
         const cz = bbox.center.z;
-        // Height 3.6 sits just under the ceiling (the scan fogs out above ~3.7),
-        // so the drone is at the highest the room allows without clipping into it.
-        const aerialViews = [
+        const aerialViews = authoredAerial.length > 0 ? authoredAerial : [
             createCamera(new Vec3(cx, 3.6, cz - 3.9), new Vec3(cx, 0.2, cz + 1.6), 95),  // wide, from the front
             createCamera(new Vec3(cx, 3.6, cz + 3.9), new Vec3(cx, 0.2, cz - 1.6), 95),  // wide, from the back
-            // middle: dead-centre of the ceiling, angled down to face the LONG
-            // wall (look across +x) so the long side reads broad/wide, not deep.
-            createCamera(new Vec3(cx, 3.6, cz), new Vec3(cx + 1.6, 0.1, cz), 92)
+            createCamera(new Vec3(cx, 3.6, cz), new Vec3(cx + 1.6, 0.1, cz), 92)          // centre, facing the long wall
         ];
         let aerialIndex = 0;
 

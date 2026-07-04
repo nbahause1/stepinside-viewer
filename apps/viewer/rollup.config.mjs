@@ -2,6 +2,7 @@ import { readFileSync } from 'fs';
 
 import json from '@rollup/plugin-json';
 import resolve from '@rollup/plugin-node-resolve';
+import terser from '@rollup/plugin-terser';
 import typescript from '@rollup/plugin-typescript';
 import autoprefixer from 'autoprefixer';
 import postcss from 'postcss';
@@ -69,7 +70,17 @@ const buildPublic = {
         resolve(),
         typescript(),
         json(),
-        htmlPlugin()
+        htmlPlugin(),
+        // Self-hosted Montserrat (latin subset): no render-blocking Google
+        // request, no GDPR exposure (fonts.googleapis.com leaks visitor IPs —
+        // LG München territory for a German real-estate product).
+        copy({
+            targets: [{ src: 'src/fonts/*.woff2', dest: 'public/fonts' }]
+        }),
+        // The visitor bundle ships the full PlayCanvas engine — unminified it
+        // was 3.0 MB (~680 KB gzip). Terser roughly halves the gzip size and,
+        // more importantly on mobile, the parse time.
+        terser()
     ]
 };
 

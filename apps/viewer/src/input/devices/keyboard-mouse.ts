@@ -1,7 +1,7 @@
 import { KeyboardMouseSource, Vec3 } from 'playcanvas';
 
-import { damp } from '../../core/math';
 import { multiplyZoom } from '../../cameras/zoom';
+import { damp } from '../../core/math';
 import type { Global } from '../../types';
 import {
     DISPLACEMENT_SCALE,

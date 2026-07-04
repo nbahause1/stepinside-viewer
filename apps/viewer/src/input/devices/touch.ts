@@ -1,7 +1,7 @@
 import { MultiTouchSource, Vec3 } from 'playcanvas';
 
-import type { Global } from '../../types';
 import { multiplyZoom } from '../../cameras/zoom';
+import type { Global } from '../../types';
 import {
     DISPLACEMENT_SCALE,
     TAP_EPSILON,

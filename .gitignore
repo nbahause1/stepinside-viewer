@@ -23,3 +23,14 @@ apps/trailer-render/node_modules/
 *.mp4
 apps/trailer-render/*.png
 apps/trailer-render/frames-list.txt
+
+# Viewer build artifacts in the website are produced by the prebuild hook
+# (apps/website/scripts/sync-viewer.mjs) — never committed. settings.json's
+# source of truth is apps/viewer/public/settings.json (tracked there).
+apps/website/public/viewer/index.html
+apps/website/public/viewer/index.css
+apps/website/public/viewer/index.js
+apps/website/public/viewer/index-*.js
+apps/website/public/viewer/tour-generator-*.js
+apps/website/public/viewer/fonts/
+apps/website/public/viewer/settings.json

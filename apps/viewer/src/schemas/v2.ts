@@ -95,6 +95,16 @@ type ExperienceSettings = {
     // stays clean. Absent/'visible' = today's look.
     annotationMarkers?: 'visible' | 'hidden' | 'overview',
 
+    // Curated bird's-eye ("Drohnen") viewpoints, PER PROPERTY. Cast-through
+    // like analytics/survey: absent = a bbox-derived fallback tuned for the
+    // demo scan. Authoring these is part of onboarding every new property
+    // (the staging capture uses view 0 as its fixed frame).
+    aerialViews?: {
+        position: number[],
+        target: number[],
+        fov?: number
+    }[],
+
     // Guided-tour ("Rundgang") pacing, relative to the authored track time.
     // `speed` is the normal playback rate (default 1.5 — the authored tracks
     // are deliberately slow), `revealSpeed` the slow-motion rate while a

@@ -18,24 +18,24 @@ import {
 import { initAnalytics } from './analytics';
 import { App } from './app';
 import { initBranding } from './branding';
-import { MeshCollision, loadVoxelCollision } from './collision';
+import { getZoom, registerZoomNotifier, resetZoom } from './cameras/zoom';
 import type { Collision } from './collision';
+import { MeshCollision, loadVoxelCollision } from './collision';
+import { initConcierge } from './concierge';
+import { initControls } from './controls';
 import { observe } from './core/observe';
+import { initInquiry } from './inquiry';
 import { initLocalization } from './localization';
 import { importSettings } from './settings';
-import type { Config, Global } from './types';
-import { initControls } from './controls';
-import { initConcierge } from './concierge';
-import { initInquiry } from './inquiry';
-import { getZoom, registerZoomNotifier, resetZoom } from './cameras/zoom';
-import { initZoomIndicator } from './zoom-indicator';
 import { initShare } from './share';
 import { initStaging } from './staging';
 import { initSurvey } from './survey';
 import { initTutorial } from './tutorial';
+import type { Config, Global } from './types';
 import { initPoster, initUI } from './ui';
 import { Viewer } from './viewer';
 import { initXr } from './xr';
+import { initZoomIndicator } from './zoom-indicator';
 import { version as appVersion } from '../package.json';
 
 const loadGsplat = async (app: AppBase, config: Config, progressCallback: (progress: number) => void) => {
@@ -240,9 +240,9 @@ const initCanvas = (global: Global) => {
         // image). This is independent of performanceMode, which controls the splat
         // budget — so smoothness while moving is preserved. Desktop keeps the
         // static performanceMode scale.
-        const s = platform.mobile
-            ? (global.cameraMoving ? 0.5 : 1.0)
-            : (state.performanceMode ? 0.5 : 1.0);
+        const s = platform.mobile ?
+            (global.cameraMoving ? 0.5 : 1.0) :
+            (state.performanceMode ? 0.5 : 1.0);
         const w = Math.ceil(deviceSize.width * s);
         const h = Math.ceil(deviceSize.height * s);
         if (w !== canvas.width || h !== canvas.height) {

@@ -156,9 +156,9 @@ const initAnnotationNav = (
     let engaged = false;
 
     const updateDisplay = () => {
-        dom.annotationNavTitle.textContent = engaged
-            ? (annotations[currentIndex].title || '')
-            : 'Highlights';
+        dom.annotationNavTitle.textContent = engaged ?
+            (annotations[currentIndex].title || '') :
+            'Highlights';
     };
 
     const updateMode = () => {
@@ -763,18 +763,10 @@ const initUI = (global: Global) => {
     tooltip.register(dom.enterFullscreen, localize('tooltip.fullscreen'), 'top');
     tooltip.register(dom.exitFullscreen, localize('tooltip.fullscreen'), 'top');
 
-    const isThirdPartyEmbedded = () => {
-        try {
-            return window.location.hostname !== window.parent.location.hostname;
-        } catch (e) {
-            // cross-origin iframe — parent location is inaccessible
-            return true;
-        }
-    };
-
     // White-label: this is our own fork, so we never reveal the upstream
     // SuperSplat attribution badge — not even when embedded cross-origin.
-    // (Stock SuperSplat un-hides #viewerBranding for third-party embeds here.)
+    // (Stock SuperSplat un-hides #viewerBranding for third-party embeds here;
+    // its isThirdPartyEmbedded helper was removed with that behavior.)
 };
 
 export { initPoster, initUI };

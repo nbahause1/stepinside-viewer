@@ -34,11 +34,10 @@ import { IdleLook } from './cameras/idle-look';
 import type { Collision } from './collision';
 import { MeshCollision, VoxelCollision } from './collision';
 import { nearlyEquals } from './core/math';
-import { DebugPanel } from './debug';
+import type { DebugPanel } from './debug';
 import { InputController } from './input-controller';
 import { initMeasure } from './measure';
 import { MeshDebugOverlay } from './mesh-debug-overlay';
-import { initTourGenerator } from './tour-generator';
 import { NavCursor } from './nav-cursor';
 import { Picker } from './picker';
 import type { ExperienceSettings, PostEffectSettings } from './settings';
@@ -251,8 +250,12 @@ class Viewer {
         // if the input controller stops propagation or the finger lifts off-canvas.
         let pointerActive = false;
         if (platform.mobile) {
-            const down = () => { pointerActive = true; };
-            const up = () => { pointerActive = false; };
+            const down = () => {
+                pointerActive = true;
+            };
+            const up = () => {
+                pointerActive = false;
+            };
             const canvasEl = app.graphicsDevice.canvas;
             canvasEl.addEventListener('pointerdown', down, { capture: true });
             window.addEventListener('pointerup', up, { capture: true });
@@ -430,8 +433,13 @@ class Viewer {
             // distance measurement tool (uses the same picker + collision)
             initMeasure(global, this.picker, collision ?? null);
 
-            // automatic tour generation (debug entry points only; no-op otherwise)
-            initTourGenerator(global, collision ?? null);
+            // Automatic tour generation — authoring tool, dynamically imported
+            // so its ~360 lines never reach the visitor bundle.
+            if (config.devtools) {
+                import('./tour-generator').then(({ initTourGenerator }) => {
+                    initTourGenerator(global, collision ?? null);
+                }).catch(() => { /* authoring-only, never break the viewer */ });
+            }
 
             // hasCollision = collision data exists (drives fly-mode collision
             // detection and the voxel/mesh debug overlay availability).
@@ -469,9 +477,12 @@ class Viewer {
             }
 
             // developer panel (exposes window.getCameraState/setCameraState) —
-            // authoring/tooling entry points only, never for visitors
+            // authoring/tooling entry points only; dynamically imported so the
+            // whole debug/ folder stays out of the visitor bundle
             if (config.devtools) {
-                this.debugPanel = new DebugPanel(global, this.cameraManager);
+                import('./debug').then(({ DebugPanel }) => {
+                    this.debugPanel = new DebugPanel(global, this.cameraManager);
+                }).catch(() => { /* authoring-only, never break the viewer */ });
             }
 
             const { gsplat } = app.scene;

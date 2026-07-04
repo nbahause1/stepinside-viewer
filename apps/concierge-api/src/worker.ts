@@ -269,6 +269,16 @@ export default {
     // Referrer-Policy matters: the secret token travels in the URL and must
     // never leak via the Referer header of a link click.
     if (request.method === 'GET') {
+      // Uptime probe: cheap, unauthenticated, touches no paid upstream.
+      // Reports whether the optional bindings are actually attached.
+      if (path === '/healthz') {
+        return jsonResponse(200, {
+          ok: true,
+          d1: !!env.ANALYTICS_DB,
+          kv: !!env.RATE_LIMIT_KV,
+        }, cors);
+      }
+
       const reportMatch = path.match(/^\/report\/([a-z0-9-]{1,64})$/);
       if (reportMatch) {
         const report = await handleReport(
