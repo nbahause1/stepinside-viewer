@@ -23,7 +23,7 @@ type Config = {
     fullload: boolean;                          // load all streaming LOD data before first frame
     aa: boolean;                                // render with antialiasing
     budget?: number;                            // override splat budget in millions (overrides platform + performanceMode table)
-    lowTier?: boolean;                          // weak-device profile (12-mini class): 30fps cap, reduced resolution/budget/LOD (?tier=low|high overrides detection)
+    tier?: 'low' | 'mid' | 'high';              // device tier (mobile ladder; desktop = high). ?tier= overrides detection; runtime can DEMOTE via state.deviceTier
     renderer: 'webgl' | 'webgpu';               // requested renderer; the actual one (after engine fallback) is exposed as Global.renderer
     heatmap: boolean;                           // render heatmap debug overlay (WebGPU only)
     debug: boolean;                             // auto-open the developer debug panel; can also be toggled with Ctrl+Shift+D
@@ -55,6 +55,7 @@ type State = {
     chatOpen: boolean;                          // true while the AI concierge chat panel is expanded
     prewarming: boolean;                        // true while staging silently flies to the drone view at load to pre-capture (gates onboarding so it can't fight the camera)
     tourRevealActive: boolean;                  // true while a tour fly-by annotation bubble is up (camera-manager slows the track so the text is readable)
+    deviceTier: 'low' | 'mid' | 'high';         // current tier (starts at config.tier; runtime demotes when measured FPS can't hold the profile — never promotes)
 };
 
 type Global = {

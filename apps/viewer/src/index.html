@@ -48,21 +48,26 @@
             const budgetParam = url.searchParams.get('budget');
             const budget = budgetParam !== null ? Number(budgetParam) : undefined;
 
-            // Device tier. Old/small iPhones (12-mini class: A14 in the worst
-            // thermal chassis Apple ever shipped) overheat within minutes on the
-            // standard mobile load — they get a LOW-TIER profile (30fps cap,
-            // reduced resolution/budget, see viewer.ts/index.ts). Cascade:
-            //   ?tier=low|high forces; mobile without WebGPU = old iOS = low;
-            //   small-Retina-iPhone heuristic (shortest side <= 376 CSS px at
-            //   DPR 3 = X/XS/11 Pro/12 mini/13 mini class) = low.
+            // Device tier ladder (mobile only; desktop is untouched):
+            //   low  — 12-mini class (A14 in the worst thermal chassis Apple
+            //          ever shipped) + anything without WebGPU (old iOS = old
+            //          device): 30fps cap, hard resolution/budget caps.
+            //   mid  — 12/13/14-class iPhones and Android: balanced profile.
+            //   high — 14 Pro/15/16/17 class (shortest side >= 393 CSS px at
+            //          DPR 3 with WebGPU): near-desktop quality; these chips
+            //          have the fill rate to spare.
+            // ?tier=low|mid|high forces a profile for A/B. The viewer also
+            // DEMOTES itself one tier at runtime if measured FPS can't hold
+            // the profile (see viewer.ts) — the safety net for devices this
+            // heuristic can't know.
             const isMobileUA = /iPhone|iPad|Android|Mobile/i.test(navigator.userAgent);
+            const shortSide = Math.min(screen.width, screen.height);
             const tierParam = url.searchParams.get('tier');
-            const lowTier = tierParam === 'low' ? true :
-                tierParam === 'high' ? false :
-                isMobileUA && (
-                    renderer === 'webgl' ||
-                    (Math.min(screen.width, screen.height) <= 376 && window.devicePixelRatio >= 3)
-                );
+            const tier = ['low', 'mid', 'high'].includes(tierParam) ? tierParam :
+                !isMobileUA ? 'high' :
+                (renderer === 'webgl' || (shortSide <= 376 && window.devicePixelRatio >= 3)) ? 'low' :
+                (shortSide >= 393 && window.devicePixelRatio >= 3 && renderer === 'webgpu') ? 'high' :
+                'mid';
 
             const sseConfig = {
                 poster: posterUrl && createImage(posterUrl),
@@ -79,7 +84,7 @@
                 renderer,
                 aa: url.searchParams.has('aa'),
                 budget,
-                lowTier,
+                tier,
                 heatmap: url.searchParams.has('heatmap'),
                 fullload: url.searchParams.has('fullload'),
                 debug: url.searchParams.has('debug'),

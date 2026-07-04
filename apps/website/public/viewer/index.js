@@ -93706,7 +93706,7 @@ class Viewer {
             // these devices throttle into a death spiral otherwise). Skipped
             // frames merely postpone: prevWorld is only advanced on rendered
             // frames, so a pending camera change re-triggers next tick.
-            if (config.lowTier && app.renderNextFrame) {
+            if (platform.mobile && state.deviceTier === 'low' && app.renderNextFrame) {
                 const nowMs = now();
                 if (nowMs - lastLowTierRenderMs < FRAME_CAP_MS - 1) {
                     app.renderNextFrame = false;
@@ -93835,10 +93835,6 @@ class Viewer {
             // takes 30-50% off peak within minutes, so budget for sustained,
             // not cold-start performance.
             const budgets = {
-                mobile: {
-                    low: 0.6,
-                    high: 1
-                },
                 desktop: {
                     low: 2,
                     high: 4
@@ -93850,21 +93846,29 @@ class Viewer {
             // (getter returns a constant), so writing them does nothing.
             const splatComponent = results[0].gsplat;
             const applyPerfSettings = () => {
+                const tier = state.deviceTier;
                 const budget = () => {
                     if (config.budget !== undefined && Number.isFinite(config.budget) && config.budget > 0) {
                         return config.budget;
                     }
-                    if (config.lowTier) {
+                    if (!platform.mobile) {
+                        return state.performanceMode ? budgets.desktop.low : budgets.desktop.high;
+                    }
+                    if (tier === 'low') {
                         // 12-mini class: sustained-thermal target, not peak.
                         return 0.35;
                     }
                     if (isWebglMobile) {
                         // CPU-sorted path without per-chunk frustum culling —
-                        // the weakest devices get the hardest cap.
+                        // old devices get the hard cap.
                         return state.performanceMode ? 0.4 : 0.6;
                     }
-                    const quality = platform.mobile ? budgets.mobile : budgets.desktop;
-                    return state.performanceMode ? quality.low : quality.high;
+                    if (tier === 'high') {
+                        // 14 Pro/15/16/17 class proved it renders 1M at 1080px
+                        // fluidly — quality IS the product on these devices.
+                        return state.performanceMode ? 1 : 1.5;
+                    }
+                    return state.performanceMode ? 0.6 : 0.8;
                 };
                 gsplat.splatBudget = budget() * 1000000;
                 // Mobile GPUs (TBDR) blend EVERY overlapping splat fragment —
@@ -93874,14 +93878,17 @@ class Viewer {
                 // earlier, and thin the periphery slightly (walk mode centres
                 // the gaze anyway). Desktop keeps maximum quality.
                 if (splatComponent) {
-                    splatComponent.lodRangeMin = (config.lowTier || isWebglMobile) ? 2 : (platform.mobile ? 1 : 0);
+                    splatComponent.lodRangeMin = (tier === 'low' || isWebglMobile) ? 2 : (platform.mobile ? 1 : 0);
                     splatComponent.lodRangeMax = 1000;
                 }
-                gsplat.colorUpdateAngle = (config.lowTier || state.performanceMode) ? 4 : 2;
-                gsplat.minContribution = config.lowTier ? 8 : (platform.mobile ? (state.performanceMode ? 8 : 4) : 1);
-                gsplat.alphaClip = platform.mobile ? 8 / 255 : 1 / 255;
-                gsplat.foveationStrength = config.lowTier ? 0.5 : (platform.mobile ? 0.35 : 0);
-                gsplat.antiAlias = config.aa && !config.lowTier;
+                gsplat.colorUpdateAngle = (platform.mobile && tier === 'low') || state.performanceMode ? 4 : 2;
+                // Anti-overdraw ladder: harsh culling reads as thinned-out,
+                // "washed" splats — only the weakest devices get the harsh
+                // values; high-tier phones stay near desktop quality.
+                gsplat.minContribution = !platform.mobile ? 1 : (tier === 'low' ? 8 : (tier === 'mid' ? 3 : 2));
+                gsplat.alphaClip = !platform.mobile ? 1 / 255 : (tier === 'low' ? 8 / 255 : (tier === 'mid' ? 4 / 255 : 2 / 255));
+                gsplat.foveationStrength = !platform.mobile ? 0 : (tier === 'low' ? 0.5 : (tier === 'mid' ? 0.25 : 0));
+                gsplat.antiAlias = config.aa && tier !== 'low';
             };
             if (config.fullload) {
                 // reveal once full quality has finished loading (used for screenshots)
@@ -93925,9 +93932,38 @@ class Viewer {
                     // scene is done loading
                     eventHandler.off('frame:ready', readyHandler);
                     state.readyToRender = true;
-                    // handle quality mode changes
+                    // handle quality mode changes + runtime tier demotion
                     events.on('performanceMode:changed', applyPerfSettings);
+                    events.on('deviceTier:changed', applyPerfSettings);
                     applyPerfSettings();
+                    // Runtime tier DEMOTION — the safety net for devices the
+                    // static heuristic can't know (Android wildcards, old
+                    // Pro-Max models, thermal collapse): fps-EMA measured only
+                    // while frames render continuously; if it can't hold the
+                    // tier's floor for 3 consecutive seconds, drop one tier
+                    // (high -> mid -> low). Never promotes: warm-up is slow
+                    // and invisible to the web, oscillation would be worse.
+                    if (platform.mobile) {
+                        let fpsEma = 60;
+                        let belowFor = 0;
+                        let lastDemote = 0;
+                        app.on('update', (dt) => {
+                            if (!this.forceRenderNextFrame || dt <= 0)
+                                return;
+                            fpsEma += (1 / dt - fpsEma) * 0.08;
+                            const floor = state.deviceTier === 'high' ? 30 : (state.deviceTier === 'mid' ? 22 : 0);
+                            belowFor = (floor > 0 && fpsEma < floor) ? belowFor + dt : 0;
+                            const nowS = performance.now() / 1000;
+                            if (belowFor > 3 && nowS - lastDemote > 10) {
+                                lastDemote = nowS;
+                                belowFor = 0;
+                                state.deviceTier = state.deviceTier === 'high' ? 'mid' : 'low';
+                                if (config.devtools) {
+                                    console.log('[perf] fps could not hold the profile - demoted tier to', state.deviceTier);
+                                }
+                            }
+                        });
+                    }
                     // debug colorize lods
                     gsplat.debug = config.colorize ? GSPLAT_DEBUG_LOD : GSPLAT_DEBUG_NONE;
                     gsplat.renderer = rendererTable[renderer];
@@ -95012,9 +95048,11 @@ const loadGsplat = async (app, config, progressCallback) => {
                 // Indoor LOD distances: the engine default (5 m base, 3x per
                 // level) keeps the NEIGHBOURING room at full detail. In a flat
                 // the next room starts 2-3 m away — drop it a level sooner.
-                // Mobile only; desktop has fill rate to spare.
-                entity.gsplat.lodBaseDistance = 2.5;
-                entity.gsplat.lodMultiplier = 2.5;
+                // High-tier phones get a milder falloff (quality first),
+                // mid/low the tight one. Mobile only; desktop untouched.
+                const high = config.tier === 'high';
+                entity.gsplat.lodBaseDistance = high ? 3.5 : 2.5;
+                entity.gsplat.lodMultiplier = high ? 3 : 2.5;
             }
             app.root.addChild(entity);
             resolve(entity);
@@ -95123,13 +95161,19 @@ const initCanvas = (global) => {
     // address the resulting softness with a sharpening post-pass instead (see
     // settings.json), which costs no extra render resolution.
     const webgl = global.renderer === 'webgl';
-    // Mobile WebGPU: 900 instead of 1080 — 1080 was ~native Retina on a phone
-    // (2.5M pixels of alpha-blended splat fill per frame); TBDR GPUs are fill-
-    // rate bound on splats and throttle 30-50% when warm, so leave headroom.
-    // Low-tier devices (12-mini class) drop to 560 (~DPR 1.5 on a 375pt
-    // screen): heat is cumulative, so they must run cool from second one.
-    const maxPixelDim = global.config.lowTier ? 560 :
-        platform.mobile ? (webgl ? 768 : 900) : (webgl ? 1080 : 1536);
+    // Resolution cap per device tier (fill rate is THE mobile bottleneck —
+    // TBDR GPUs blend every overlapping splat fragment):
+    //   high phones keep near-native 1080 (they proved they can, and quality
+    //   is the product), mid drops to 900, low (12-mini class) to 560 —
+    //   heat is cumulative, weak devices must run cool from second one.
+    // Reads state.deviceTier so a runtime DEMOTION resizes too.
+    const maxPixelDim = () => {
+        if (!platform.mobile)
+            return webgl ? 1080 : 1536;
+        if (webgl)
+            return state.deviceTier === 'low' ? 560 : 768;
+        return state.deviceTier === 'low' ? 560 : (state.deviceTier === 'mid' ? 900 : 1080);
+    };
     // Optical-zoom sharpness: while zoomed in, raise the cap in step with the
     // zoom factor (quantized to half steps so the swap chain doesn't
     // reallocate on every pinch frame). devicePixelRatio stays the hard
@@ -95138,7 +95182,7 @@ const initCanvas = (global) => {
     // otherwise read as blur.
     const zoomBoost = () => 1 + Math.min(1.5, Math.round((getZoom() - 1) * 2) / 2);
     // cap pixel ratio to limit resolution on high-DPI devices
-    const calcPixelRatio = () => Math.min((maxPixelDim * zoomBoost()) / Math.min(screen.width, screen.height), window.devicePixelRatio);
+    const calcPixelRatio = () => Math.min((maxPixelDim() * zoomBoost()) / Math.min(screen.width, screen.height), window.devicePixelRatio);
     // last known client size + device pixel size (before any quality scaling)
     const clientSize = { width: 0, height: 0 };
     const deviceSize = { width: 0, height: 0 };
@@ -95186,6 +95230,11 @@ const initCanvas = (global) => {
         set(clientSize.width, clientSize.height);
         app.renderNextFrame = true;
     });
+    // ...and when the runtime demotes the device tier
+    events.on('deviceTier:changed', () => {
+        set(clientSize.width, clientSize.height);
+        app.renderNextFrame = true;
+    });
     // Resize canvas before render() so the swap chain texture is acquired at the correct size.
     app.on('framerender', apply);
     // Disable the engine's built-in canvas resize — we handle it via ResizeObserver
@@ -95228,7 +95277,8 @@ const main = async (canvas, settingsJson, config) => {
         moveLocked: false,
         chatOpen: false,
         prewarming: false,
-        tourRevealActive: false
+        tourRevealActive: false,
+        deviceTier: config.tier ?? 'high'
     });
     const global = {
         app,

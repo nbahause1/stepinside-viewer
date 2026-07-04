@@ -318,7 +318,7 @@ class Viewer {
             // these devices throttle into a death spiral otherwise). Skipped
             // frames merely postpone: prevWorld is only advanced on rendered
             // frames, so a pending camera change re-triggers next tick.
-            if (config.lowTier && app.renderNextFrame) {
+            if (platform.mobile && state.deviceTier === 'low' && app.renderNextFrame) {
                 const nowMs = now();
                 if (nowMs - lastLowTierRenderMs < FRAME_CAP_MS - 1) {
                     app.renderNextFrame = false;
@@ -499,21 +499,29 @@ class Viewer {
             const splatComponent = results[0].gsplat;
 
             const applyPerfSettings = () => {
+                const tier = state.deviceTier;
                 const budget = () => {
                     if (config.budget !== undefined && Number.isFinite(config.budget) && config.budget > 0) {
                         return config.budget;
                     }
-                    if (config.lowTier) {
+                    if (!platform.mobile) {
+                        return state.performanceMode ? budgets.desktop.low : budgets.desktop.high;
+                    }
+                    if (tier === 'low') {
                         // 12-mini class: sustained-thermal target, not peak.
                         return 0.35;
                     }
                     if (isWebglMobile) {
                         // CPU-sorted path without per-chunk frustum culling —
-                        // the weakest devices get the hardest cap.
+                        // old devices get the hard cap.
                         return state.performanceMode ? 0.4 : 0.6;
                     }
-                    const quality = platform.mobile ? budgets.mobile : budgets.desktop;
-                    return state.performanceMode ? quality.low : quality.high;
+                    if (tier === 'high') {
+                        // 14 Pro/15/16/17 class proved it renders 1M at 1080px
+                        // fluidly — quality IS the product on these devices.
+                        return state.performanceMode ? 1 : 1.5;
+                    }
+                    return state.performanceMode ? 0.6 : 0.8;
                 };
 
                 gsplat.splatBudget = budget() * 1000000;
@@ -524,14 +532,17 @@ class Viewer {
                 // earlier, and thin the periphery slightly (walk mode centres
                 // the gaze anyway). Desktop keeps maximum quality.
                 if (splatComponent) {
-                    splatComponent.lodRangeMin = (config.lowTier || isWebglMobile) ? 2 : (platform.mobile ? 1 : 0);
+                    splatComponent.lodRangeMin = (tier === 'low' || isWebglMobile) ? 2 : (platform.mobile ? 1 : 0);
                     splatComponent.lodRangeMax = 1000;
                 }
-                gsplat.colorUpdateAngle = (config.lowTier || state.performanceMode) ? 4 : 2;
-                gsplat.minContribution = config.lowTier ? 8 : (platform.mobile ? (state.performanceMode ? 8 : 4) : 1);
-                gsplat.alphaClip = platform.mobile ? 8 / 255 : 1 / 255;
-                gsplat.foveationStrength = config.lowTier ? 0.5 : (platform.mobile ? 0.35 : 0);
-                gsplat.antiAlias = config.aa && !config.lowTier;
+                gsplat.colorUpdateAngle = (platform.mobile && tier === 'low') || state.performanceMode ? 4 : 2;
+                // Anti-overdraw ladder: harsh culling reads as thinned-out,
+                // "washed" splats — only the weakest devices get the harsh
+                // values; high-tier phones stay near desktop quality.
+                gsplat.minContribution = !platform.mobile ? 1 : (tier === 'low' ? 8 : (tier === 'mid' ? 3 : 2));
+                gsplat.alphaClip = !platform.mobile ? 1 / 255 : (tier === 'low' ? 8 / 255 : (tier === 'mid' ? 4 / 255 : 2 / 255));
+                gsplat.foveationStrength = !platform.mobile ? 0 : (tier === 'low' ? 0.5 : (tier === 'mid' ? 0.25 : 0));
+                gsplat.antiAlias = config.aa && tier !== 'low';
             };
 
             if (config.fullload) {
@@ -585,9 +596,38 @@ class Viewer {
 
                     state.readyToRender = true;
 
-                    // handle quality mode changes
+                    // handle quality mode changes + runtime tier demotion
                     events.on('performanceMode:changed', applyPerfSettings);
+                    events.on('deviceTier:changed', applyPerfSettings);
                     applyPerfSettings();
+
+                    // Runtime tier DEMOTION — the safety net for devices the
+                    // static heuristic can't know (Android wildcards, old
+                    // Pro-Max models, thermal collapse): fps-EMA measured only
+                    // while frames render continuously; if it can't hold the
+                    // tier's floor for 3 consecutive seconds, drop one tier
+                    // (high -> mid -> low). Never promotes: warm-up is slow
+                    // and invisible to the web, oscillation would be worse.
+                    if (platform.mobile) {
+                        let fpsEma = 60;
+                        let belowFor = 0;
+                        let lastDemote = 0;
+                        app.on('update', (dt: number) => {
+                            if (!this.forceRenderNextFrame || dt <= 0) return;
+                            fpsEma += (1 / dt - fpsEma) * 0.08;
+                            const floor = state.deviceTier === 'high' ? 30 : (state.deviceTier === 'mid' ? 22 : 0);
+                            belowFor = (floor > 0 && fpsEma < floor) ? belowFor + dt : 0;
+                            const nowS = performance.now() / 1000;
+                            if (belowFor > 3 && nowS - lastDemote > 10) {
+                                lastDemote = nowS;
+                                belowFor = 0;
+                                state.deviceTier = state.deviceTier === 'high' ? 'mid' : 'low';
+                                if (config.devtools) {
+                                    console.log('[perf] fps could not hold the profile - demoted tier to', state.deviceTier);
+                                }
+                            }
+                        });
+                    }
 
                     // debug colorize lods
                     gsplat.debug = config.colorize ? GSPLAT_DEBUG_LOD : GSPLAT_DEBUG_NONE;

@@ -60,9 +60,11 @@ const loadGsplat = async (app: AppBase, config: Config, progressCallback: (progr
                 // Indoor LOD distances: the engine default (5 m base, 3x per
                 // level) keeps the NEIGHBOURING room at full detail. In a flat
                 // the next room starts 2-3 m away — drop it a level sooner.
-                // Mobile only; desktop has fill rate to spare.
-                entity.gsplat.lodBaseDistance = 2.5;
-                entity.gsplat.lodMultiplier = 2.5;
+                // High-tier phones get a milder falloff (quality first),
+                // mid/low the tight one. Mobile only; desktop untouched.
+                const high = config.tier === 'high';
+                entity.gsplat.lodBaseDistance = high ? 3.5 : 2.5;
+                entity.gsplat.lodMultiplier = high ? 3 : 2.5;
             }
             app.root.addChild(entity);
             resolve(entity);
@@ -192,13 +194,17 @@ const initCanvas = (global: Global) => {
     // address the resulting softness with a sharpening post-pass instead (see
     // settings.json), which costs no extra render resolution.
     const webgl = global.renderer === 'webgl';
-    // Mobile WebGPU: 900 instead of 1080 — 1080 was ~native Retina on a phone
-    // (2.5M pixels of alpha-blended splat fill per frame); TBDR GPUs are fill-
-    // rate bound on splats and throttle 30-50% when warm, so leave headroom.
-    // Low-tier devices (12-mini class) drop to 560 (~DPR 1.5 on a 375pt
-    // screen): heat is cumulative, so they must run cool from second one.
-    const maxPixelDim = global.config.lowTier ? 560 :
-        platform.mobile ? (webgl ? 768 : 900) : (webgl ? 1080 : 1536);
+    // Resolution cap per device tier (fill rate is THE mobile bottleneck —
+    // TBDR GPUs blend every overlapping splat fragment):
+    //   high phones keep near-native 1080 (they proved they can, and quality
+    //   is the product), mid drops to 900, low (12-mini class) to 560 —
+    //   heat is cumulative, weak devices must run cool from second one.
+    // Reads state.deviceTier so a runtime DEMOTION resizes too.
+    const maxPixelDim = () => {
+        if (!platform.mobile) return webgl ? 1080 : 1536;
+        if (webgl) return state.deviceTier === 'low' ? 560 : 768;
+        return state.deviceTier === 'low' ? 560 : (state.deviceTier === 'mid' ? 900 : 1080);
+    };
 
     // Optical-zoom sharpness: while zoomed in, raise the cap in step with the
     // zoom factor (quantized to half steps so the swap chain doesn't
@@ -209,7 +215,7 @@ const initCanvas = (global: Global) => {
     const zoomBoost = () => 1 + Math.min(1.5, Math.round((getZoom() - 1) * 2) / 2);
 
     // cap pixel ratio to limit resolution on high-DPI devices
-    const calcPixelRatio = () => Math.min((maxPixelDim * zoomBoost()) / Math.min(screen.width, screen.height), window.devicePixelRatio);
+    const calcPixelRatio = () => Math.min((maxPixelDim() * zoomBoost()) / Math.min(screen.width, screen.height), window.devicePixelRatio);
 
     // last known client size + device pixel size (before any quality scaling)
     const clientSize = { width: 0, height: 0 };
@@ -264,6 +270,12 @@ const initCanvas = (global: Global) => {
         app.renderNextFrame = true;
     });
 
+    // ...and when the runtime demotes the device tier
+    events.on('deviceTier:changed', () => {
+        set(clientSize.width, clientSize.height);
+        app.renderNextFrame = true;
+    });
+
     // Resize canvas before render() so the swap chain texture is acquired at the correct size.
     app.on('framerender', apply);
 
@@ -311,7 +323,8 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
         moveLocked: false,
         chatOpen: false,
         prewarming: false,
-        tourRevealActive: false
+        tourRevealActive: false,
+        deviceTier: config.tier ?? 'high'
     });
 
     const global: Global = {
