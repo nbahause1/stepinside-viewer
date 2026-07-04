@@ -484,7 +484,7 @@ async function collectReportData(
   };
 }
 
-/** Parse `{ "rating": 1..4 }` (canonical), a bare number, or numeric string. */
+/** Parse `{ "rating": 1..5 }` (canonical), a bare number, or numeric string. */
 function extractSurveyRating(data: unknown): number | null {
   if (typeof data !== 'string') return null;
   try {
@@ -493,7 +493,10 @@ function extractSurveyRating(data: unknown): number | null {
       ? (parsed['rating'] ?? parsed['value'])
       : parsed;
     const n = typeof candidate === 'number' ? candidate : Number.parseInt(String(candidate), 10);
-    return Number.isInteger(n) && n >= 1 && n <= 4 ? n : null;
+    // The viewer's survey card is a 1-5 helpfulness scale (survey.ts) and the
+    // report buckets/renderer model 1-5 — this parser capping at 4 silently
+    // dropped every TOP rating from the owner report.
+    return Number.isInteger(n) && n >= 1 && n <= 5 ? n : null;
   } catch {
     return null;
   }
