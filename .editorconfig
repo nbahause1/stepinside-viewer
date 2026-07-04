@@ -1,0 +1,20 @@
+# Editor baseline for the monorepo (Windows + macOS collaboration):
+# consistent LF endings and indentation prevent CRLF-noise in diffs.
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+[*.{json,yml,yaml,toml,md}]
+indent_size = 2
+
+[apps/concierge-api/**.{ts,mjs}]
+indent_size = 2
+
+[apps/website/**.{ts,tsx,mjs}]
+indent_size = 2

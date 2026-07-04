@@ -263,7 +263,28 @@ function jsonResponse(
   return new Response(JSON.stringify(body), { status, headers });
 }
 
+// Anonymous events older than this are deleted by the nightly cron — they
+// only feed the owner report's aggregates, and unbounded growth would make
+// every report query a full-table scan (50k events/day cap x years).
+// Leads are business records and are NOT auto-deleted.
+const EVENTS_RETENTION_DAYS = 90;
+
 export default {
+  // Nightly maintenance (wrangler.toml [triggers]): prune old events.
+  async scheduled(_event: unknown, env: Env): Promise<void> {
+    if (!env.ANALYTICS_DB) return;
+    const cutoff = Date.now() - EVENTS_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+    try {
+      const result = (await env.ANALYTICS_DB
+        .prepare('DELETE FROM events WHERE ts < ?1')
+        .bind(cutoff)
+        .run()) as { meta?: unknown };
+      console.log(`RETENTION events pruned older than ${EVENTS_RETENTION_DAYS}d`, JSON.stringify(result?.meta ?? {}));
+    } catch (err) {
+      console.error('RETENTION_FAILED', String(err).slice(0, 300));
+    }
+  },
+
   async fetch(request: Request, env: Env): Promise<Response> {
     const allowedOrigins = parseAllowedOrigins(env.ALLOWED_ORIGINS);
     const origin = request.headers.get('origin');
@@ -368,9 +389,34 @@ export default {
     }
     const checkedLimiter = new PassThroughRateLimiter();
 
+    // Read the body as a byte-counted stream: the Content-Length check above
+    // is advisory only (a chunked request carries no Content-Length), so the
+    // cap must also be enforced while actually reading.
     let rawBody: unknown;
     try {
-      rawBody = await request.json();
+      const reader = request.body?.getReader();
+      if (!reader) {
+        return jsonResponse(400, { error: 'Request body must be valid JSON.' }, cors);
+      }
+      const chunks: Uint8Array[] = [];
+      let received = 0;
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        received += value.byteLength;
+        if (received > maxBodyBytes) {
+          await reader.cancel();
+          return jsonResponse(413, { error: 'Request body too large.' }, cors);
+        }
+        chunks.push(value);
+      }
+      const buf = new Uint8Array(received);
+      let off = 0;
+      for (const c of chunks) {
+        buf.set(c, off);
+        off += c.byteLength;
+      }
+      rawBody = JSON.parse(new TextDecoder().decode(buf));
     } catch {
       return jsonResponse(400, { error: 'Request body must be valid JSON.' }, cors);
     }

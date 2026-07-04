@@ -487,16 +487,14 @@ class Viewer {
 
             const { gsplat } = app.scene;
 
-            // Quality budget. Mobile numbers follow the 2026 industry consensus
-            // (PlayCanvas docs, Spark, WebSplatter measurements): ~1M splats is
-            // the ceiling an iPhone renders fluidly — and thermal throttling
-            // takes 30-50% off peak within minutes, so budget for sustained,
-            // not cold-start performance.
+            // Desktop quality budget (millions of splats, by performance
+            // mode). Mobile budgets live in budget() below, keyed by the
+            // device tier — numbers follow the 2026 industry consensus
+            // (PlayCanvas docs, Spark, WebSplatter measurements): ~1M splats
+            // is the ceiling an iPhone renders fluidly, and thermal
+            // throttling takes 30-50% off peak within minutes, so they
+            // target sustained, not cold-start performance.
             const budgets = {
-                mobile: {
-                    low: 0.6,
-                    high: 1
-                },
                 desktop: {
                     low: 2,
                     high: 4

@@ -9,6 +9,11 @@ compatibility_flags = ["nodejs_compat"]
 [observability]
 enabled = true
 
+# Nightly maintenance (04:15 UTC): prune anonymous events older than 90 days
+# (see EVENTS_RETENTION_DAYS in worker.ts). Leads are never auto-deleted.
+[triggers]
+crons = ["15 4 * * *"]
+
 # Reference furniture photos for /stage are bundled as raw bytes (Workers has
 # no filesystem). Scoped to staging-refs so no other asset type is affected.
 [[rules]]
