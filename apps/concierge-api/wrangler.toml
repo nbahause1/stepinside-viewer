@@ -3,6 +3,12 @@ main = "src/worker.ts"
 compatibility_date = "2026-06-01"
 compatibility_flags = ["nodejs_compat"]
 
+# Workers Logs: without this block every console.warn/error vanishes unless
+# someone happens to be running `wrangler tail`. Persisted logs enable the
+# dashboard + alerts (e.g. on BUDGET_EXHAUSTED, see ratelimit.ts).
+[observability]
+enabled = true
+
 # Reference furniture photos for /stage are bundled as raw bytes (Workers has
 # no filesystem). Scoped to staging-refs so no other asset type is affected.
 [[rules]]

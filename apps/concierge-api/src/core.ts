@@ -185,13 +185,18 @@ export async function handleConcierge(
       },
     };
   } catch (err) {
-    // 6. Typed error mapping.
+    // 6. Typed error mapping. Log BEFORE mapping — a broken API key, a model
+    //    deprecation and a network timeout must be distinguishable in the
+    //    worker logs (the visitor always just sees "temporarily unavailable").
     if (err instanceof Anthropic.RateLimitError) {
+      console.warn('[concierge] upstream 429 rate limit');
       return { status: 429, body: { error: 'Upstream rate limit. Please retry shortly.' } };
     }
     if (err instanceof Anthropic.APIError) {
+      console.warn(`[concierge] Anthropic ${err.status} ${err.name}:`, String(err.message).slice(0, 300));
       return { status: 502, body: { error: 'The concierge is temporarily unavailable.' } };
     }
+    console.warn('[concierge] request failed:', String(err).slice(0, 300));
     return { status: 502, body: { error: 'The concierge is temporarily unavailable.' } };
   }
 }

@@ -245,6 +245,11 @@ export class KvDailyBudget {
     }
 
     if (used >= this.limit) {
+      // LOUD marker: from here on every visitor silently gets 429 for the
+      // rest of the UTC day — this line is what a Workers-Logs alert hooks
+      // onto so somebody actually finds out. (At most once per request past
+      // the cap; cheap, and exactness doesn't matter for alerting.)
+      console.error(`BUDGET_EXHAUSTED ${this.prefix} used=${used} limit=${this.limit} day=${day}`);
       const nextMidnightUtc = Date.UTC(
         now.getUTCFullYear(),
         now.getUTCMonth(),
