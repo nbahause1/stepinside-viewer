@@ -136,12 +136,6 @@
     }
   ],
   "startMode": "default",
-  "concierge": {
-    "mode": "scripted",
-    "greeting": "Frag mich etwas zur Wohnung.",
-    "endpoint": "http://localhost:8787/concierge",
-    "propertyId": "example-fewo"
-  },
   "staging": {
     "enabled": true,
     "mode": "demo",
