@@ -60,28 +60,54 @@
             const budgetParam = url.searchParams.get('budget');
             const budget = budgetParam !== null ? Number(budgetParam) : undefined;
 
-            // Device tier ladder (mobile only; desktop is untouched):
+            // Device tier ladder (now spans desktop AND mobile — the tier
+            // drives splat budget + resolution + culling, and the viewer
+            // DEMOTES one tier at runtime (high -> mid -> low) whenever the
+            // measured fps can't hold the profile; it never promotes):
             //   low  — 12-mini class (A14 in the worst thermal chassis Apple
-            //          ever shipped) + anything without WebGPU (old iOS = old
-            //          device): 30fps cap, hard resolution/budget caps.
-            //   mid  — 12/13/14-class iPhones and Android: balanced profile.
+            //          ever shipped) + anything mobile without WebGPU (old iOS
+            //          = old device): 30fps cap, hard resolution/budget caps.
+            //   mid  — 12/13/14-class iPhones, Android, iPad-on-WebGL, and
+            //          weak desktops (WebGL fallback / few cores / little RAM):
+            //          balanced profile.
             //   high — 14 Pro/15/16/17 class (shortest side >= 393 CSS px at
-            //          DPR 3 with WebGPU): near-desktop quality; these chips
-            //          have the fill rate to spare.
-            // ?tier=low|mid|high forces a profile for A/B. The viewer also
-            // DEMOTES itself one tier at runtime if measured FPS can't hold
-            // the profile (see viewer.ts) — the safety net for devices this
-            // heuristic can't know.
-            const isMobileUA = /iPhone|iPad|Android|Mobile/i.test(navigator.userAgent);
+            //          DPR 3 with WebGPU), WebGPU iPads, and normal desktops:
+            //          near-native quality.
+            // ?tier=low|mid|high forces a profile for A/B.
+            // iPadOS 13+ Safari reports the DESKTOP UA ("Macintosh"), so an
+            // iPad is not caught by the mobile regex — it would get the full
+            // desktop splat budget (up to 4M) and run out of memory / fail to
+            // load. Macs have no touch, so maxTouchPoints > 1 + "Macintosh"
+            // uniquely identifies an iPad. Treat it as a (mid/high) mobile.
+            const isIPadOS = navigator.maxTouchPoints > 1 && /Macintosh/i.test(navigator.userAgent);
+            const isMobileUA = /iPhone|iPad|Android|Mobile/i.test(navigator.userAgent) || isIPadOS;
             const shortSide = Math.min(screen.width, screen.height);
+            // Desktop has no touch/thermal signal to read up front, so start
+            // optimistic (high) and let the runtime demote a struggling GPU. A
+            // couple of cheap static signals still catch obviously weak
+            // machines so they never have to visibly demote: the WebGL
+            // fallback (no WebGPU = old browser/GPU) and very low core/RAM
+            // counts (deviceMemory is Chromium-only; hardwareConcurrency is
+            // everywhere incl. Safari).
+            const lowEndDesktop = renderer === 'webgl' ||
+                (navigator.hardwareConcurrency > 0 && navigator.hardwareConcurrency <= 4) ||
+                (navigator.deviceMemory > 0 && navigator.deviceMemory <= 4);
             const tierParam = url.searchParams.get('tier');
             const tier = ['low', 'mid', 'high'].includes(tierParam) ? tierParam :
-                !isMobileUA ? 'high' :
+                !isMobileUA ? (lowEndDesktop ? 'mid' : 'high') :
+                // Any WebGL mobile (incl. an old iPad without WebGPU) is the
+                // CPU-sorted path with no per-chunk culling on the weakest
+                // hardware -> the safe 'low' rung (this is checked before the
+                // iPad branch, so a WebGL iPad lands here, which is intended:
+                // "runs at all" beats "looks nicer but crashes").
                 (renderer === 'webgl' || (shortSide <= 376 && window.devicePixelRatio >= 3)) ? 'low' :
-                (shortSide >= 393 && window.devicePixelRatio >= 3 && renderer === 'webgpu') ? 'high' :
-                'mid';
+                // WebGPU iPad + phones from the 14 Pro class up have the fill
+                // rate for high; other WebGPU phones get the balanced mid.
+                (isIPadOS ? 'high' :
+                    (shortSide >= 393 && window.devicePixelRatio >= 3 && renderer === 'webgpu') ? 'high' : 'mid');
 
             const sseConfig = {
+                mobile: isMobileUA,
                 poster: posterUrl && createImage(posterUrl),
                 skyboxUrl,
                 collisionUrl,
@@ -124,6 +150,98 @@
         </svg>
 
         <canvas id="application-canvas"></canvas>
+
+        <!-- Boot splash: an OPAQUE branded cover shown from the very first
+             paint so the visitor never stares at the black canvas during the
+             unavoidable startup gap (graphics-device init + first network
+             fetch + WebGPU shader compile can take a few seconds). Styles are
+             inlined so it renders before index.css and any JS. Faded out on
+             the first rendered frame (window.firstFrame, wired below) with a
+             hard safety timeout; replaced by the error card on fatal errors. -->
+        <style>
+            #bootSplash {
+                position: fixed;
+                inset: 0;
+                z-index: 400;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                gap: 22px;
+                background:
+                    radial-gradient(120% 90% at 50% 38%, #1b1e27 0%, #101218 55%, #0b0c11 100%);
+                font-family: 'Montserrat', 'Arial', sans-serif;
+                opacity: 1;
+                transition: opacity 0.6s ease;
+                -webkit-tap-highlight-color: transparent;
+            }
+            #bootSplash.is-hidden {
+                opacity: 0;
+                pointer-events: none;
+            }
+            #bootSplash .bootMark {
+                display: flex;
+                align-items: center;
+                gap: 12px;
+                opacity: 0;
+                animation: bootMarkIn 0.7s ease 0.05s forwards;
+            }
+            #bootSplash .bootMark__diamond {
+                width: 18px;
+                height: 18px;
+                border-radius: 5px;
+                background: linear-gradient(135deg, #ff8a3d 0%, #f60 55%, #d84e00 100%);
+                transform: rotate(45deg);
+                box-shadow: 0 0 22px rgba(255, 122, 40, 0.55);
+            }
+            #bootSplash .bootMark__word {
+                font-size: 27px;
+                font-weight: 600;
+                letter-spacing: 0.2px;
+                color: #f5f6f8;
+            }
+            #bootSplash .bootBar {
+                position: relative;
+                width: 168px;
+                height: 3px;
+                border-radius: 3px;
+                background: rgba(255, 255, 255, 0.1);
+                overflow: hidden;
+                opacity: 0;
+                animation: bootMarkIn 0.7s ease 0.2s forwards;
+            }
+            #bootSplash .bootBar::after {
+                content: '';
+                position: absolute;
+                top: 0;
+                left: 0;
+                height: 100%;
+                width: 40%;
+                border-radius: 3px;
+                background: linear-gradient(90deg, transparent, #f60, transparent);
+                animation: bootShimmer 1.25s ease-in-out infinite;
+            }
+            @keyframes bootMarkIn {
+                from { opacity: 0; transform: translateY(6px); }
+                to   { opacity: 1; transform: translateY(0); }
+            }
+            @keyframes bootShimmer {
+                0%   { left: -40%; }
+                100% { left: 100%; }
+            }
+            @media (prefers-reduced-motion: reduce) {
+                #bootSplash .bootMark,
+                #bootSplash .bootBar { opacity: 1; animation: none; }
+                #bootSplash .bootBar::after { animation-duration: 2s; }
+            }
+        </style>
+        <div id="bootSplash" aria-hidden="true">
+            <div class="bootMark">
+                <span class="bootMark__diamond"></span>
+                <span class="bootMark__word">StepInside</span>
+            </div>
+            <div class="bootBar"></div>
+        </div>
 
         <!-- Peripheral-vision overlay for walk mode: soft, darkened, slightly
              blurred edges with a sharp centre. Sibling of #ui so it is not
@@ -988,7 +1106,32 @@
             // Covers (a) scene/content load failures (signalled via the
             // 'sse:error' window event from the viewer) and (b) graphics-device
             // or startup failures (main() throwing below).
+            // Boot splash (opaque branded cover over the black canvas): fade it
+            // out on the first rendered frame, immediately on a fatal error
+            // (the error card takes over), and via a hard safety timeout so a
+            // stalled load can never leave it stuck on screen.
+            const bootSplash = document.getElementById('bootSplash');
+            let bootHidden = false;
+            const hideBootSplash = () => {
+                if (bootHidden || !bootSplash) return;
+                bootHidden = true;
+                bootSplash.classList.add('is-hidden');
+                setTimeout(() => bootSplash.remove(), 700);
+            };
+            const bootSafetyTimer = setTimeout(hideBootSplash, 20000);
+
+            // viewer.ts calls window.firstFrame?.() once the first frame has
+            // rendered — chain onto any existing hook (screenshot tooling).
+            const prevFirstFrame = window.firstFrame;
+            window.firstFrame = () => {
+                clearTimeout(bootSafetyTimer);
+                hideBootSplash();
+                prevFirstFrame?.();
+            };
+
             const showFatalError = () => {
+                clearTimeout(bootSafetyTimer);
+                hideBootSplash();
                 document.getElementById('loadingWrap')?.classList.add('hidden');
                 document.getElementById('errorCard').style.display = 'flex';
             };

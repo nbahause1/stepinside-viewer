@@ -200,7 +200,13 @@ const initCanvas = (global: Global) => {
     //   heat is cumulative, weak devices must run cool from second one.
     // Reads state.deviceTier so a runtime DEMOTION resizes too.
     const maxPixelDim = () => {
-        if (!platform.mobile) return webgl ? 1080 : 1536;
+        if (!platform.mobile) {
+            // Desktop is tier-aware too now: a runtime DEMOTION on a weak /
+            // throttled Mac drops the resolution cap alongside the splat
+            // budget (high = near-native, mid/low progressively lighter).
+            if (webgl) return state.deviceTier === 'low' ? 900 : 1080;
+            return state.deviceTier === 'low' ? 1080 : (state.deviceTier === 'mid' ? 1280 : 1536);
+        }
         if (webgl) return state.deviceTier === 'low' ? 560 : 768;
         return state.deviceTier === 'low' ? 560 : (state.deviceTier === 'mid' ? 900 : 1080);
     };

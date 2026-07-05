@@ -24,6 +24,7 @@ type Config = {
     aa: boolean;                                // render with antialiasing
     budget?: number;                            // override splat budget in millions (overrides platform + performanceMode table)
     tier?: 'low' | 'mid' | 'high';              // device tier (mobile ladder; desktop = high). ?tier= overrides detection; runtime can DEMOTE via state.deviceTier
+    mobile?: boolean;                           // treat as touch/constrained for the perf profile — from the UA incl. iPadOS (which reports a desktop UA, so platform.mobile misses it)
     renderer: 'webgl' | 'webgpu';               // requested renderer; the actual one (after engine fallback) is exposed as Global.renderer
     heatmap: boolean;                           // render heatmap debug overlay (WebGPU only)
     debug: boolean;                             // auto-open the developer debug panel; can also be toggled with Ctrl+Shift+D
