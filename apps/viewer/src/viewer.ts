@@ -253,14 +253,17 @@ class Viewer {
         // has been fully still for HERO_DELAY_MS we ramp to full detail (see the
         // heroStill handling in applyPerfSettings + index.ts's resolution cap).
         let lastMoveMs = 0;
-        const HERO_DELAY_MS = 300;
+        const HERO_DELAY_MS = 200;
         // Position-stable: the finest LOD (the "mushy close-up" fix) is tied to
         // the camera POSITION, not its orientation — so looking around on the
         // spot stays sharp while only the (cheaper) budget/resolution wait for a
         // full stop. Tracks the last real translation.
         const prevPos = new Vec3();
         let lastTranslateMs = 0;
-        const POS_STABLE_MS = 150;
+        // Short so the finest LOD starts streaming the instant you stop walking
+        // (the click-to-walk glide decelerates below POS_EPS just before the
+        // full stop, so this often fires mid-deceleration → sharp on arrival).
+        const POS_STABLE_MS = 60;
         const POS_EPS = 0.03; // world units (~3 cm) — ignores sub-pixel jitter
 
         // Track whether a finger/pointer is down so mobile dynamic resolution can
