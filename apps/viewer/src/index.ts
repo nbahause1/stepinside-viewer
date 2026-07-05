@@ -301,7 +301,10 @@ const initCanvas = (global: Global) => {
 };
 
 const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config) => {
+    const d = (window as any).__diag as ((m: string) => void) | undefined;
+    d?.(`main: creating app + graphics device (${config.renderer})…`);
     const { app, camera, renderer } = await createApp(canvas, config);
+    d?.(`main: device ready (${renderer})`);
 
     // create events
     const events = new EventHandler();
@@ -397,11 +400,13 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
     initSurvey(global);
 
     // Load model
+    d?.('main: UI ready → loading scene…');
     const gsplatLoad = loadGsplat(
         app,
         config,
         (progress: number) => {
             state.progress = progress;
+            d?.(`scene ${progress}%`);
         }
     );
 
