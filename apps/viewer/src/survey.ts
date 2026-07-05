@@ -1,3 +1,4 @@
+import { shieldFromViewer } from './dom-shield';
 import type { Global } from './types';
 
 // Engagement survey + lead CTA card. Once a visit shows real engagement —
@@ -202,23 +203,9 @@ const init = (global: Global) => {
             window.setTimeout(close, closeAfterMs);
         };
 
-        // Interactions on the card must never reach the canvas/camera, and keys
-        // typed into the form must not fire the viewer's global shortcuts
-        // (same rationale as the concierge input; see concierge.ts).
-        root.addEventListener('pointerdown', e => e.stopPropagation());
-        root.addEventListener('wheel', e => e.stopPropagation());
-        root.addEventListener('keydown', e => e.stopPropagation());
-        root.addEventListener('keyup', e => e.stopPropagation());
-        root.addEventListener('keypress', e => e.stopPropagation());
-        // click must not bubble to #ui either: its global handler blurs the
-        // active element after every click ("free the keyboard for hotkeys"),
-        // which would instantly steal focus from the form fields — typing
-        // becomes impossible. We keep that behavior for our BUTTONS ourselves
-        // so hotkeys never stick to them, but never for inputs.
-        root.addEventListener('click', (e) => {
-            e.stopPropagation();
-            if (e.target instanceof HTMLButtonElement) e.target.blur();
-        });
+        // Shield the card (it has a lead form) from the viewer: no canvas
+        // interaction, no hotkeys from typed keys, no focus theft on click.
+        shieldFromViewer(root, { hasInput: true });
 
         q('.survey__close').addEventListener('click', dismiss);
         q('.survey__decline').addEventListener('click', dismiss);
