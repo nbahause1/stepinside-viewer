@@ -209,6 +209,12 @@ const initCanvas = (global: Global) => {
     //   heat is cumulative, weak devices must run cool from second one.
     // Reads state.deviceTier so a runtime DEMOTION resizes too.
     const maxPixelDim = () => {
+        // Hero still: once the camera has settled, a desktop renders the static
+        // frame near-native (it's cheap when nothing moves and this is exactly
+        // when detail is judged). Mobile keeps its tier cap — there the detail
+        // win comes from finer LOD + budget (see viewer.ts), not resolution,
+        // to stay within fill-rate/memory limits.
+        if (state.heroStill && !mobile) return webgl ? 1536 : 2048;
         if (!mobile) {
             // Desktop is tier-aware too now: a runtime DEMOTION on a weak /
             // throttled Mac drops the resolution cap alongside the splat
@@ -290,6 +296,12 @@ const initCanvas = (global: Global) => {
         app.renderNextFrame = true;
     });
 
+    // ...and when the hero-still state flips (desktop resolution boost on settle)
+    events.on('heroStill:changed', () => {
+        set(clientSize.width, clientSize.height);
+        app.renderNextFrame = true;
+    });
+
     // Resize canvas before render() so the swap chain texture is acquired at the correct size.
     app.on('framerender', apply);
 
@@ -339,7 +351,8 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
         chatOpen: false,
         prewarming: false,
         tourRevealActive: false,
-        deviceTier: config.tier ?? 'high'
+        deviceTier: config.tier ?? 'high',
+        heroStill: false
     });
 
     const global: Global = {

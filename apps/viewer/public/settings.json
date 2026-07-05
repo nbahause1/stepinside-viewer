@@ -12,7 +12,7 @@
   "postEffectSettings": {
     "sharpness": {
       "enabled": true,
-      "amount": 0.5
+      "amount": 0.7
     },
     "bloom": {
       "enabled": false,

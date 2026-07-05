@@ -249,6 +249,11 @@ class Viewer {
         const prevWorld = new Mat4();
         const sceneBound = new BoundingBox();
         let settleFrames = 0; // consecutive still frames, for mobile dynamic resolution
+        // Hero-still: timestamp of the last real camera movement; once the camera
+        // has been still for HERO_DELAY_MS we ramp to full detail (see the
+        // heroStill handling in applyPerfSettings + index.ts's resolution cap).
+        let lastMoveMs = 0;
+        const HERO_DELAY_MS = 450;
 
         // Track whether a finger/pointer is down so mobile dynamic resolution can
         // hold low res for the whole gesture: during a slow drag the per-frame
@@ -313,6 +318,22 @@ class Viewer {
                     global.cameraMoving = false;
                     app.renderNextFrame = true;
                 }
+            }
+
+            // Hero-still refinement (all devices): once the camera has been still
+            // briefly, ramp to full detail (finest LOD + higher budget + sharper
+            // desktop resolution) for a crisp "hero" frame — this is exactly when
+            // a viewer studies a room. ANY real camera movement reverts instantly
+            // so motion stays on the cheap, smooth profile. Gated to the live
+            // scene (not during load / the staging prewarm flight).
+            if (cameraChanged && !IdleLook.wandering) {
+                lastMoveMs = now();
+                if (state.heroStill) {
+                    state.heroStill = false;
+                }
+            } else if (!state.heroStill && state.readyToRender && !state.prewarming &&
+                now() - lastMoveMs > HERO_DELAY_MS) {
+                state.heroStill = true;
             }
 
             // suppress rendering till we're ready
@@ -528,6 +549,15 @@ class Viewer {
                     if (config.budget !== undefined && Number.isFinite(config.budget) && config.budget > 0) {
                         return config.budget;
                     }
+                    if (state.heroStill) {
+                        // Camera settled → render the "hero" still at full detail.
+                        // Bounded per tier so a static frame never blows memory on
+                        // weak devices (the full asset is ~5.4M splats). This is a
+                        // still frame, so it need not sustain 60fps.
+                        if (!mobile) return tier === 'high' ? 5.4 : (tier === 'mid' ? 3.5 : 2.0);
+                        if (isWebglMobile) return 0.9;
+                        return tier === 'low' ? 0.6 : (tier === 'mid' ? 1.6 : 2.8);
+                    }
                     if (!mobile) {
                         const base = budgets.desktop[tier] ?? budgets.desktop.high;
                         // performanceMode = manual "run lighter": one notch down.
@@ -558,7 +588,13 @@ class Viewer {
                 // earlier, and thin the periphery slightly (walk mode centres
                 // the gaze anyway). Desktop keeps maximum quality.
                 if (splatComponent) {
-                    splatComponent.lodRangeMin = (tier === 'low' || isWebglMobile) ? 2 : (mobile ? 1 : 0);
+                    // Hero still: drop lodRangeMin so the FINEST LOD renders right
+                    // up to the camera (the "mushy close-up" fix) — except mobile
+                    // low, which stays a level up for memory. Motion keeps the
+                    // cheaper floor.
+                    splatComponent.lodRangeMin = state.heroStill ?
+                        ((mobile && tier === 'low') ? 1 : 0) :
+                        ((tier === 'low' || isWebglMobile) ? 2 : (mobile ? 1 : 0));
                     splatComponent.lodRangeMax = 1000;
                 }
                 gsplat.colorUpdateAngle = (mobile && tier === 'low') || state.performanceMode ? 4 : 2;
@@ -629,9 +665,11 @@ class Viewer {
 
                     state.readyToRender = true;
 
-                    // handle quality mode changes + runtime tier demotion
+                    // handle quality mode changes + runtime tier demotion +
+                    // hero-still refinement (ramp detail up on settle, down on move)
                     events.on('performanceMode:changed', applyPerfSettings);
                     events.on('deviceTier:changed', applyPerfSettings);
+                    events.on('heroStill:changed', applyPerfSettings);
                     applyPerfSettings();
 
                     // Runtime tier DEMOTION — the safety net for devices the
@@ -674,7 +712,11 @@ class Viewer {
                         app.on('update', (dt: number) => {
                             if (!this.forceRenderNextFrame || dt <= 0) return;
                             const nowMs = performance.now();
-                            if (nowMs < warmupUntilMs || nowMs < streamingHoldUntilMs || state.prewarming) {
+                            // Never demote on a hero still: a heavier STATIC frame
+                            // doesn't stutter, and the extra load is intentional
+                            // and momentary — measuring it would wrongly downgrade
+                            // the moving profile.
+                            if (nowMs < warmupUntilMs || nowMs < streamingHoldUntilMs || state.prewarming || state.heroStill) {
                                 belowFor = 0;
                                 return;
                             }
