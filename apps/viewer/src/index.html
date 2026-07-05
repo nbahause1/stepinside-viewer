@@ -40,9 +40,17 @@
             // was fixed with engine 2.20 (upstream supersplat-viewer ships
             // WebGPU-default too; verified on a real iPhone 2026-07-02).
             // `?webgl` forces WebGL everywhere; `?webgpu` forces WebGPU.
+            // iPadOS reports a desktop ("Macintosh") UA; a real Mac has no
+            // touch, so maxTouchPoints > 1 + "Macintosh" uniquely marks an iPad.
+            const isIPadOS = navigator.maxTouchPoints > 1 && /Macintosh/i.test(navigator.userAgent);
             const hasWebGPU = !!navigator.gpu;
+            // iPad defaults to WebGL: WebGPU on iPadOS Safari is where the scan
+            // fails to open at all (device init / memory), and the CPU-sorted
+            // WebGL path is the most compatible, lowest-memory route — "gets in"
+            // beats "prettier but won't load". ?webgpu forces it back on for
+            // testing a capable iPad.
             const renderer = url.searchParams.has('webgpu') ? 'webgpu' :
-                (url.searchParams.has('webgl') || !hasWebGPU) ? 'webgl' : 'webgpu';
+                (url.searchParams.has('webgl') || !hasWebGPU || isIPadOS) ? 'webgl' : 'webgpu';
 
             // BOTH renderers stream the multi-LOD SOG (`lod-meta.json`): lowest
             // LOD paints almost instantly, higher detail streams on demand. The
@@ -79,7 +87,6 @@
             // desktop splat budget (up to 4M) and run out of memory / fail to
             // load. Macs have no touch, so maxTouchPoints > 1 + "Macintosh"
             // uniquely identifies an iPad. Treat it as a (mid/high) mobile.
-            const isIPadOS = navigator.maxTouchPoints > 1 && /Macintosh/i.test(navigator.userAgent);
             const isMobileUA = /iPhone|iPad|Android|Mobile/i.test(navigator.userAgent) || isIPadOS;
             const shortSide = Math.min(screen.width, screen.height);
             // Desktop has no touch/thermal signal to read up front, so start
@@ -173,26 +180,23 @@
                 display: flex;
                 align-items: center;
                 justify-content: center;
-                /* Opaque premium background (the staging loader normally sits on
-                   a see-through scrim over the live scene; at boot there is no
-                   scene yet, so it gets its own real backdrop): deep charcoal
-                   with a soft warm centre glow that ties into the brand mark. */
-                background:
-                    radial-gradient(115% 85% at 50% 34%, rgba(255, 132, 64, 0.10) 0%, rgba(255, 132, 64, 0) 46%),
-                    radial-gradient(130% 100% at 50% 32%, #23252f 0%, #15161c 46%, #0b0b0f 100%);
+                /* Plain black — no scene yet, and the wordmark should read as
+                   the only thing on screen. */
+                background: #000;
                 font-family: 'Montserrat', 'Arial', sans-serif;
                 opacity: 1;
-                transition: opacity 0.55s ease;
+                transition: opacity 0.5s ease;
                 -webkit-tap-highlight-color: transparent;
             }
             #bootSplash.is-hidden {
                 opacity: 0;
                 pointer-events: none;
             }
-            /* The StepInside filling-logo loader, identical in spirit to the
-               "Möbliert sehen" (staging) loader: a dim base wordmark with a
-               bright copy revealed left-to-right, looping as an indeterminate
-               progress cue. */
+            /* The StepInside filling-logo loader (same as the "Möbliert sehen"
+               staging loader): a dim base wordmark with a bright copy revealed
+               left-to-right. It fills ONCE and eases toward full; when the scan
+               is ready (.is-complete) it snaps to 100% and the scan is revealed
+               — i.e. the logo finishing == the tour opening. */
             #bootSplash .bootLoader {
                 position: relative;
                 animation: bootLoaderIn 560ms cubic-bezier(0.16, 1, 0.3, 1) both;
@@ -207,7 +211,6 @@
                 font-size: 30px;
                 letter-spacing: 0.01em;
                 line-height: 1;
-                text-shadow: 0 2px 22px rgba(0, 0, 0, 0.45);
             }
             #bootSplash .bootMark__diamond {
                 width: 16px;
@@ -222,24 +225,29 @@
                 inset: 0;
                 color: #fff;
                 clip-path: inset(0 100% 0 0);
-                animation: bootLoaderFill 1.9s cubic-bezier(0.16, 1, 0.3, 1) infinite;
+                /* eases toward ~90% over the expected load, then HOLDS (forwards)
+                   until the scan is ready — never loops back to empty. */
+                animation: bootLoaderFill 2.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+            }
+            /* scan ready: complete the fill, then #bootSplash fades out */
+            #bootSplash.is-complete .bootMark--fill {
+                animation: none;
+                clip-path: inset(0 0 0 0);
+                transition: clip-path 0.28s ease-out;
             }
             @keyframes bootLoaderIn {
                 from { transform: translateY(-16vh) scale(0.55); opacity: 0; }
                 55%  { opacity: 1; }
                 to   { transform: translateY(0) scale(1); opacity: 1; }
             }
-            /* fills bright left-to-right, then the fill fades out so the reset to
-               empty is never visible (a seamless indeterminate loop). */
             @keyframes bootLoaderFill {
-                0%   { clip-path: inset(0 100% 0 0); opacity: 1; }
-                62%  { clip-path: inset(0 8% 0 0);   opacity: 1; }
-                82%  { clip-path: inset(0 8% 0 0);   opacity: 1; }
-                100% { clip-path: inset(0 8% 0 0);   opacity: 0; }
+                0%   { clip-path: inset(0 100% 0 0); }
+                100% { clip-path: inset(0 10% 0 0); }
             }
             @media (prefers-reduced-motion: reduce) {
                 #bootSplash .bootLoader { animation: none; }
                 #bootSplash .bootMark--fill { animation: none; clip-path: inset(0 45% 0 0); }
+                #bootSplash.is-complete .bootMark--fill { clip-path: inset(0 0 0 0); }
             }
         </style>
         <div id="bootSplash" aria-hidden="true">
@@ -1124,26 +1132,33 @@
             // stalled load can never leave it stuck on screen.
             const bootSplash = document.getElementById('bootSplash');
             let bootHidden = false;
-            const hideBootSplash = () => {
+            const removeBootSplash = () => {
                 if (bootHidden || !bootSplash) return;
                 bootHidden = true;
                 bootSplash.classList.add('is-hidden');
-                setTimeout(() => bootSplash.remove(), 700);
+                setTimeout(() => bootSplash.remove(), 600);
             };
-            const bootSafetyTimer = setTimeout(hideBootSplash, 20000);
+            // Scan ready: fill the logo to 100%, then reveal the scan — the
+            // wordmark finishing IS the tour opening.
+            const finishBootSplash = () => {
+                if (bootHidden || !bootSplash) return;
+                bootSplash.classList.add('is-complete');
+                setTimeout(removeBootSplash, 300);
+            };
+            const bootSafetyTimer = setTimeout(finishBootSplash, 20000);
 
             // viewer.ts calls window.firstFrame?.() once the first frame has
             // rendered — chain onto any existing hook (screenshot tooling).
             const prevFirstFrame = window.firstFrame;
             window.firstFrame = () => {
                 clearTimeout(bootSafetyTimer);
-                hideBootSplash();
+                finishBootSplash();
                 prevFirstFrame?.();
             };
 
             const showFatalError = () => {
                 clearTimeout(bootSafetyTimer);
-                hideBootSplash();
+                removeBootSplash();
                 document.getElementById('loadingWrap')?.classList.add('hidden');
                 document.getElementById('errorCard').style.display = 'flex';
             };

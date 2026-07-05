@@ -510,8 +510,8 @@ class Viewer {
             // fps can't hold. performanceMode forces one notch lower.
             const budgets = {
                 desktop: {
-                    low: 1.2,
-                    mid: 2.2,
+                    low: 1.0,
+                    mid: 2.0,
                     high: 4
                 }
             };
@@ -655,9 +655,9 @@ class Viewer {
                         // less time under floor before demoting, shorter
                         // cooldown, and a snappier fps EMA. Mobile stays gentle
                         // (heat/battery, streaming jank) to avoid oscillation.
-                        const warmupUntilMs = performance.now() + (mobile ? 5000 : 2500);
-                        const belowLimit = mobile ? 3 : 1.5;   // s under floor before a demote
-                        const cooldownS = mobile ? 10 : 5;     // s between demotes
+                        const warmupUntilMs = performance.now() + (mobile ? 5000 : 2200);
+                        const belowLimit = mobile ? 3 : 1.2;   // s under floor before a demote
+                        const cooldownS = mobile ? 10 : 4;     // s between demotes
                         const emaAlpha = mobile ? 0.08 : 0.15;
                         let fpsEma = 60;
                         let belowFor = 0;
@@ -669,7 +669,7 @@ class Viewer {
                         const floorFor = (t: 'low' | 'mid' | 'high') => {
                             if (t === 'low') return 0;
                             if (mobile) return t === 'high' ? 30 : 22;
-                            return t === 'high' ? 45 : 30;
+                            return t === 'high' ? 48 : 33;
                         };
                         app.on('update', (dt: number) => {
                             if (!this.forceRenderNextFrame || dt <= 0) return;
