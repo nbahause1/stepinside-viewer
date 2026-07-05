@@ -41,6 +41,9 @@ const depthClampWgsl = `
 `;
 
 const vec = new Vec3();
+// Scratch for worldToScreen so the per-annotation, per-frame prerender loop
+// allocates nothing (was one Vec3 per annotation per frame).
+const screenVec = new Vec3();
 
 /**
  * A script for creating interactive 3D annotations in a scene. Each annotation consists of:
@@ -115,6 +118,13 @@ export class Annotation extends Script {
      * @private
      */
     materials: StandardMaterial[] = [];
+
+    /** Last written marker opacity, so _update skips redundant uniform writes. */
+    private _lastMarkerOpacity = -1;
+
+    /** Bound listeners/handlers kept so destroy() can deregister them (leak fix). */
+    private _onDocClick: (() => void) | null = null;
+    private _onPrerender: (() => void) | null = null;
 
     /**
      * Injects required CSS styles into the document.
@@ -477,16 +487,30 @@ export class Annotation extends Script {
         this.hotspotDom.addEventListener('pointerenter', enter);
         this.hotspotDom.addEventListener('pointerleave', leave);
 
-        document.addEventListener('click', () => {
+        // Close the tooltip on an outside click. Kept as a bound reference so
+        // destroy() can remove it — previously this document listener (and the
+        // prerender handler below) leaked for the life of the page on every
+        // annotation, and _update kept running for destroyed annotations.
+        this._onDocClick = () => {
             if (Annotation.activeAnnotation === this) {
                 this.hideTooltip();
             }
-        });
+        };
+        document.addEventListener('click', this._onDocClick);
 
         Annotation.parentDom.appendChild(this.hotspotDom);
 
         // Clean up on entity destruction
         this.on('destroy', () => {
+            if (this._onPrerender) {
+                this.app.off('prerender', this._onPrerender);
+                this._onPrerender = null;
+            }
+            if (this._onDocClick) {
+                document.removeEventListener('click', this._onDocClick);
+                this._onDocClick = null;
+            }
+
             this.hotspotDom.remove();
             if (Annotation.activeAnnotation === this) {
                 this.hideTooltip();
@@ -499,9 +523,8 @@ export class Annotation extends Script {
             this.texture = null;
         });
 
-        this.app.on('prerender', () => {
-            this._update();
-        });
+        this._onPrerender = () => this._update();
+        this.app.on('prerender', this._onPrerender);
     }
 
     /**
@@ -514,7 +537,7 @@ export class Annotation extends Script {
         if (!Annotation.camera) return;
 
         const position = this.entity.getPosition();
-        const screenPos = Annotation.camera.camera.worldToScreen(position);
+        const screenPos = Annotation.camera.camera.worldToScreen(position, screenVec);
 
         const { viewMatrix } = Annotation.camera.camera;
         viewMatrix.transformPoint(position, vec);
@@ -526,13 +549,18 @@ export class Annotation extends Script {
         this._updatePositions(screenPos);
         this._updateRotationAndScale(-vec.z);
 
-        // update material opacity and also directly on the uniform so we
-        // can avoid a full material update
+        // Material opacity + the uniform mirror only need writing when the
+        // opacity actually changes (marker hidden toggles, fade in/out) — not
+        // every frame for every annotation. Skipping the redundant
+        // setParameter avoids per-frame shader-uniform churn.
         const markerOpacity = Annotation.markersHidden ? 0 : Annotation.opacity;
-        this.materials[0].opacity = markerOpacity;
-        this.materials[1].opacity = 0.25 * markerOpacity;
-        this.materials[0].setParameter('material_opacity', markerOpacity);
-        this.materials[1].setParameter('material_opacity', 0.25 * markerOpacity);
+        if (markerOpacity !== this._lastMarkerOpacity) {
+            this._lastMarkerOpacity = markerOpacity;
+            this.materials[0].opacity = markerOpacity;
+            this.materials[1].opacity = 0.25 * markerOpacity;
+            this.materials[0].setParameter('material_opacity', markerOpacity);
+            this.materials[1].setParameter('material_opacity', 0.25 * markerOpacity);
+        }
     }
 
     /**
