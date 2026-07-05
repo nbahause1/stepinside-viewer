@@ -37,6 +37,13 @@ import { Viewer } from './viewer';
 import { initZoomIndicator } from './zoom-indicator';
 import { version as appVersion } from '../package.json';
 
+// iPadOS reports a desktop UA, so PlayCanvas' platform.mobile is FALSE on an
+// iPad — which would otherwise give it desktop resolution, desktop (mouse)
+// input, and the desktop LOD falloff. The entry point flags it via
+// config.mobile (a maxTouchPoints probe). Use this everywhere a touch /
+// constrained-device decision is made so an iPad behaves like the tablet it is.
+const isMobile = (config: Config) => config.mobile ?? platform.mobile;
+
 const loadGsplat = async (app: AppBase, config: Config, progressCallback: (progress: number) => void) => {
     const { contents, contentUrl } = config;
     const c = contents as unknown as ArrayBuffer;
@@ -55,7 +62,7 @@ const loadGsplat = async (app: AppBase, config: Config, progressCallback: (progr
                 unified: true,
                 asset
             });
-            if (platform.mobile && entity.gsplat) {
+            if (isMobile(config) && entity.gsplat) {
                 // Indoor LOD distances: the engine default (5 m base, 3x per
                 // level) keeps the NEIGHBOURING room at full detail. In a flat
                 // the next room starts 2-3 m away — drop it a level sooner.
@@ -178,8 +185,10 @@ const createApp = async (canvas: HTMLCanvasElement, config: Config) => {
 
 // initialize canvas size and resizing
 const initCanvas = (global: Global) => {
-    const { app, events, state } = global;
+    const { app, events, state, config } = global;
     const { canvas } = app.graphicsDevice;
+    // Effective touch/constrained flag (iPad-aware; see isMobile).
+    const mobile = isMobile(config);
 
     // maximum pixel dimension we will allow along the shortest screen dimension.
     // WebGL (Safari) can't GPU-sort splats and is fill-rate bound on Retina, so
@@ -200,7 +209,7 @@ const initCanvas = (global: Global) => {
     //   heat is cumulative, weak devices must run cool from second one.
     // Reads state.deviceTier so a runtime DEMOTION resizes too.
     const maxPixelDim = () => {
-        if (!platform.mobile) {
+        if (!mobile) {
             // Desktop is tier-aware too now: a runtime DEMOTION on a weak /
             // throttled Mac drops the resolution cap alongside the splat
             // budget (high = near-native, mid/low progressively lighter).
@@ -245,7 +254,7 @@ const initCanvas = (global: Global) => {
         // image). This is independent of performanceMode, which controls the splat
         // budget — so smoothness while moving is preserved. Desktop keeps the
         // static performanceMode scale.
-        const s = platform.mobile ?
+        const s = mobile ?
             (global.cameraMoving ? 0.5 : 1.0) :
             (state.performanceMode ? 0.5 : 1.0);
         const w = Math.ceil(deviceSize.width * s);
@@ -308,9 +317,9 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
     const state = observe(events, {
         loaded: false,
         readyToRender: false,
-        performanceMode: storedPerformanceMode !== null ? storedPerformanceMode === 'true' : platform.mobile,
+        performanceMode: storedPerformanceMode !== null ? storedPerformanceMode === 'true' : isMobile(config),
         progress: 0,
-        inputMode: platform.mobile ? 'touch' : 'desktop',
+        inputMode: isMobile(config) ? 'touch' : 'desktop',
         cameraMode: 'orbit',
         hasAnimation: false,
         animationDuration: 0,

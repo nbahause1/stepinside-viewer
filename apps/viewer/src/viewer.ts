@@ -510,8 +510,8 @@ class Viewer {
             // fps can't hold. performanceMode forces one notch lower.
             const budgets = {
                 desktop: {
-                    low: 1.5,
-                    mid: 2.5,
+                    low: 1.2,
+                    mid: 2.2,
                     high: 4
                 }
             };
@@ -650,19 +650,26 @@ class Viewer {
                     // rebuffer it causes would cascade). EMA restarts fresh
                     // after each demotion.
                     {
-                        const warmupUntilMs = performance.now() + 5000;
+                        // Desktop reacts FAST (a laggy Mac should settle in a
+                        // few seconds, not half a minute): shorter warm-up,
+                        // less time under floor before demoting, shorter
+                        // cooldown, and a snappier fps EMA. Mobile stays gentle
+                        // (heat/battery, streaming jank) to avoid oscillation.
+                        const warmupUntilMs = performance.now() + (mobile ? 5000 : 2500);
+                        const belowLimit = mobile ? 3 : 1.5;   // s under floor before a demote
+                        const cooldownS = mobile ? 10 : 5;     // s between demotes
+                        const emaAlpha = mobile ? 0.08 : 0.15;
                         let fpsEma = 60;
                         let belowFor = 0;
                         let lastDemote = 0;
                         // Desktop targets a higher floor than mobile (a desktop
-                        // GPU that can't hold 40fps on 4M splats should shed
-                        // load); mobile trades fps for heat/battery so its floor
-                        // is lower. 'low' is the bottom rung (floor 0 = never
-                        // demotes further).
+                        // GPU that can't hold ~45fps should shed load); mobile
+                        // trades fps for heat/battery so its floor is lower.
+                        // 'low' is the bottom rung (floor 0 = never demotes on).
                         const floorFor = (t: 'low' | 'mid' | 'high') => {
                             if (t === 'low') return 0;
                             if (mobile) return t === 'high' ? 30 : 22;
-                            return t === 'high' ? 40 : 28;
+                            return t === 'high' ? 45 : 30;
                         };
                         app.on('update', (dt: number) => {
                             if (!this.forceRenderNextFrame || dt <= 0) return;
@@ -671,10 +678,10 @@ class Viewer {
                                 belowFor = 0;
                                 return;
                             }
-                            fpsEma += (1 / dt - fpsEma) * 0.08;
+                            fpsEma += (1 / dt - fpsEma) * emaAlpha;
                             const floor = floorFor(state.deviceTier);
                             belowFor = (floor > 0 && fpsEma < floor) ? belowFor + dt : 0;
-                            if (belowFor > 3 && nowMs / 1000 - lastDemote > 10) {
+                            if (belowFor > belowLimit && nowMs / 1000 - lastDemote > cooldownS) {
                                 lastDemote = nowMs / 1000;
                                 belowFor = 0;
                                 fpsEma = 60;
