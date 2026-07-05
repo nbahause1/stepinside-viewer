@@ -250,10 +250,18 @@ class Viewer {
         const sceneBound = new BoundingBox();
         let settleFrames = 0; // consecutive still frames, for mobile dynamic resolution
         // Hero-still: timestamp of the last real camera movement; once the camera
-        // has been still for HERO_DELAY_MS we ramp to full detail (see the
+        // has been fully still for HERO_DELAY_MS we ramp to full detail (see the
         // heroStill handling in applyPerfSettings + index.ts's resolution cap).
         let lastMoveMs = 0;
-        const HERO_DELAY_MS = 450;
+        const HERO_DELAY_MS = 300;
+        // Position-stable: the finest LOD (the "mushy close-up" fix) is tied to
+        // the camera POSITION, not its orientation — so looking around on the
+        // spot stays sharp while only the (cheaper) budget/resolution wait for a
+        // full stop. Tracks the last real translation.
+        const prevPos = new Vec3();
+        let lastTranslateMs = 0;
+        const POS_STABLE_MS = 150;
+        const POS_EPS = 0.03; // world units (~3 cm) — ignores sub-pixel jitter
 
         // Track whether a finger/pointer is down so mobile dynamic resolution can
         // hold low res for the whole gesture: during a slow drag the per-frame
@@ -320,12 +328,12 @@ class Viewer {
                 }
             }
 
-            // Hero-still refinement (all devices): once the camera has been still
-            // briefly, ramp to full detail (finest LOD + higher budget + sharper
-            // desktop resolution) for a crisp "hero" frame — this is exactly when
-            // a viewer studies a room. ANY real camera movement reverts instantly
-            // so motion stays on the cheap, smooth profile. Gated to the live
-            // scene (not during load / the staging prewarm flight).
+            // Hero-still refinement (all devices): once the camera has been fully
+            // still briefly, ramp to full detail (finest LOD + higher budget +
+            // sharper desktop resolution) for a crisp "hero" frame — this is
+            // exactly when a viewer studies a room. ANY real camera movement
+            // reverts instantly so motion stays on the cheap, smooth profile.
+            // Gated to the live scene (not during load / the staging prewarm).
             if (cameraChanged && !IdleLook.wandering) {
                 lastMoveMs = now();
                 if (state.heroStill) {
@@ -334,6 +342,22 @@ class Viewer {
             } else if (!state.heroStill && state.readyToRender && !state.prewarming &&
                 now() - lastMoveMs > HERO_DELAY_MS) {
                 state.heroStill = true;
+            }
+
+            // Position-stable: keep the finest LOD while merely LOOKING AROUND
+            // (rotating on the spot). Only a real TRANSLATION resets it, so the
+            // near-field sharpness survives a rotate — budget/resolution still
+            // wait for a full stop (above), keeping the rotation itself smooth.
+            const posMoved = camera.getPosition().distance(prevPos) > POS_EPS;
+            if (posMoved && !IdleLook.wandering) {
+                prevPos.copy(camera.getPosition());
+                lastTranslateMs = now();
+                if (state.positionStable) {
+                    state.positionStable = false;
+                }
+            } else if (!state.positionStable && state.readyToRender && !state.prewarming &&
+                now() - lastTranslateMs > POS_STABLE_MS) {
+                state.positionStable = true;
             }
 
             // suppress rendering till we're ready
@@ -588,11 +612,12 @@ class Viewer {
                 // earlier, and thin the periphery slightly (walk mode centres
                 // the gaze anyway). Desktop keeps maximum quality.
                 if (splatComponent) {
-                    // Hero still: drop lodRangeMin so the FINEST LOD renders right
-                    // up to the camera (the "mushy close-up" fix) — except mobile
-                    // low, which stays a level up for memory. Motion keeps the
-                    // cheaper floor.
-                    splatComponent.lodRangeMin = state.heroStill ?
+                    // Finest LOD (the "mushy close-up" fix) is tied to POSITION
+                    // stability, not a full stop — so looking around on the spot
+                    // stays sharp up to the camera. Mobile low stays a level up
+                    // for memory. Real translation (walking) keeps the cheaper
+                    // floor to bound streaming/fill while moving through space.
+                    splatComponent.lodRangeMin = state.positionStable ?
                         ((mobile && tier === 'low') ? 1 : 0) :
                         ((tier === 'low' || isWebglMobile) ? 2 : (mobile ? 1 : 0));
                     splatComponent.lodRangeMax = 1000;
@@ -670,6 +695,7 @@ class Viewer {
                     events.on('performanceMode:changed', applyPerfSettings);
                     events.on('deviceTier:changed', applyPerfSettings);
                     events.on('heroStill:changed', applyPerfSettings);
+                    events.on('positionStable:changed', applyPerfSettings);
                     applyPerfSettings();
 
                     // Runtime tier DEMOTION — the safety net for devices the

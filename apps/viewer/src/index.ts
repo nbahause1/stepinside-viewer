@@ -254,14 +254,20 @@ const initCanvas = (global: Global) => {
         // and resetting canvas dimensions can invalidate the XRWebGLLayer
         if (app.xr?.active) return;
 
-        // Resolution scale. On mobile we use *dynamic resolution*: render at half
-        // scale while the camera is moving (keeps motion smooth on the fill-rate-
-        // bound WebGL path) and at full scale once it settles (a sharp still
-        // image). This is independent of performanceMode, which controls the splat
-        // budget — so smoothness while moving is preserved. Desktop keeps the
-        // static performanceMode scale.
+        // Resolution scale. On mobile we use *dynamic resolution*: render at
+        // reduced scale while the camera is moving (keeps motion smooth on the
+        // fill-rate-bound path) and full scale once it settles (a sharp still).
+        // Nuance for "looking around on the spot": rotating in place is exactly
+        // where a viewer studies a room, and the harsh 0.5x reads as blurry —
+        // so when the POSITION is stable (rotation only, no walking) capable
+        // phones render at a higher moving scale. Walking through space keeps
+        // the hard 0.5x (streaming + fill), and the low tier always stays 0.5x
+        // to protect smoothness. Desktop keeps the static performanceMode scale.
+        const movingScale = state.positionStable ?
+            (state.deviceTier === 'high' ? 0.85 : (state.deviceTier === 'mid' ? 0.7 : 0.5)) :
+            0.5;
         const s = mobile ?
-            (global.cameraMoving ? 0.5 : 1.0) :
+            (global.cameraMoving ? movingScale : 1.0) :
             (state.performanceMode ? 0.5 : 1.0);
         const w = Math.ceil(deviceSize.width * s);
         const h = Math.ceil(deviceSize.height * s);
@@ -299,6 +305,12 @@ const initCanvas = (global: Global) => {
     // ...and when the hero-still state flips (desktop resolution boost on settle)
     events.on('heroStill:changed', () => {
         set(clientSize.width, clientSize.height);
+        app.renderNextFrame = true;
+    });
+
+    // ...and when position-stability flips (mobile rotate-in-place gets a higher
+    // moving scale; apply() reads it live, this just forces the re-render).
+    events.on('positionStable:changed', () => {
         app.renderNextFrame = true;
     });
 
@@ -352,7 +364,8 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
         prewarming: false,
         tourRevealActive: false,
         deviceTier: config.tier ?? 'high',
-        heroStill: false
+        heroStill: false,
+        positionStable: false
     });
 
     const global: Global = {

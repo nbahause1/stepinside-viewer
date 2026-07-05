@@ -55,7 +55,8 @@ type State = {
     prewarming: boolean;                        // true while staging silently flies to the drone view at load to pre-capture (gates onboarding so it can't fight the camera)
     tourRevealActive: boolean;                  // true while a tour fly-by annotation bubble is up (camera-manager slows the track so the text is readable)
     deviceTier: 'low' | 'mid' | 'high';         // current tier (starts at config.tier; runtime demotes when measured FPS can't hold the profile — never promotes)
-    heroStill: boolean;                         // true once the camera has been still briefly — ramps to full detail (finest LOD + higher budget + sharper res) for a crisp "hero" still; reverts instantly on any movement
+    heroStill: boolean;                         // true once the camera has been fully still briefly — ramps to full detail (finest LOD + higher budget + sharper res) for a crisp "hero" still; reverts on ANY movement
+    positionStable: boolean;                    // true when the camera hasn't TRANSLATED recently (rotation-in-place allowed) — keeps the finest LOD so looking around stays sharp, at the cheaper motion budget/resolution
 };
 
 type Global = {
