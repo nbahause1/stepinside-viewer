@@ -6,7 +6,8 @@
  * the full 1..5 range (especially 5) across all accepted payload shapes.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { extractSurveyRating, handleReport } from '../src/analytics.js';
+import { handleReport } from '../src/analytics.js';
+import { extractSurveyRating } from '../src/report-data.js';
 import type { D1Like, D1StatementLike } from '../src/analytics.js';
 
 describe('extractSurveyRating', () => {
