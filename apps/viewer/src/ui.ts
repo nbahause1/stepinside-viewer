@@ -241,7 +241,6 @@ const initUI = (global: Global) => {
     const dom = [
         'ui',
         'controlsWrap',
-        'arMode', 'vrMode',
         'enterFullscreen', 'exitFullscreen',
         'info', 'infoPanel', 'desktopTab', 'touchTab', 'desktopInfoPanel', 'touchInfoPanel',
         'timelineContainer', 'handle', 'time',
@@ -262,8 +261,7 @@ const initUI = (global: Global) => {
         'showCollision', 'desktopShowCollisionHelp',
         'tooltip',
         'annotationNav', 'annotationPrev', 'annotationNext', 'annotationInfo', 'annotationNavTitle',
-        'viewerBranding', 'viewerTitle', 'appVersionLabel',
-        'xrModal', 'xrModalOk', 'xrModalCancel'
+        'viewerBranding', 'viewerTitle', 'appVersionLabel'
     ].reduce((acc: Record<string, HTMLElement>, id) => {
         acc[id] = document.getElementById(id);
         return acc;
@@ -402,44 +400,10 @@ const initUI = (global: Global) => {
     events.on('gamingControls:changed', updateGamingControls);
     events.on('inputMode:changed', updateGamingControls);
     updateGamingControls();
-
-    // AR/VR
-    const arChanged = () => dom.arMode.classList[state.hasAR ? 'remove' : 'add']('hidden');
-    const vrChanged = () => dom.vrMode.classList[state.hasVR ? 'remove' : 'add']('hidden');
-
-    // XR sessions require a WebGL device. Under WebGPU, prompt the user to reload
-    // the viewer with the WebGL renderer before starting AR/VR. Use replace() so
-    // the renderer-switch reload doesn't add a back-button entry — important
-    // because the viewer often runs inside an iframe (e.g. superspl.at /scene).
-    const reloadWithWebgl = () => {
-        const reloadUrl = new URL(location.href);
-        reloadUrl.searchParams.set('webgl', '');
-        location.replace(reloadUrl.toString());
-    };
-
-    const showXrModal = () => dom.xrModal.classList.remove('hidden');
-    const hideXrModal = () => dom.xrModal.classList.add('hidden');
-
-    dom.xrModalOk.addEventListener('click', reloadWithWebgl);
-    dom.xrModalCancel.addEventListener('click', hideXrModal);
-    dom.xrModal.addEventListener('pointerdown', hideXrModal);
-
-    const handleXrClick = (type: 'AR' | 'VR') => {
-        if (global.renderer !== 'webgl') {
-            showXrModal();
-        } else {
-            events.fire(type === 'AR' ? 'startAR' : 'startVR');
-        }
-    };
-
-    dom.arMode.addEventListener('click', () => handleXrClick('AR'));
-    dom.vrMode.addEventListener('click', () => handleXrClick('VR'));
-
-    events.on('hasAR:changed', arChanged);
-    events.on('hasVR:changed', vrChanged);
-
-    arChanged();
-    vrChanged();
+    // AR/VR was removed: a link-delivered real-estate walkthrough has no use
+    // for headset VR or table-top AR, and the WebGPU->WebGL reload prompt it
+    // needed only confused visitors. (See xr.ts deletion; the arMode/vrMode
+    // buttons and #xrModal are gone from index.html.)
 
     // Info panel
     const updateInfoTab = (tab: 'desktop' | 'touch') => {
@@ -765,8 +729,6 @@ const initUI = (global: Global) => {
     tooltip.register(dom.showCollision, localize('tooltip.show-collision'), 'top');
     tooltip.register(dom.settings, localize('tooltip.settings'), 'top');
     tooltip.register(dom.info, localize('tooltip.help'), 'top');
-    tooltip.register(dom.arMode, localize('tooltip.enter-ar'), 'top');
-    tooltip.register(dom.vrMode, localize('tooltip.enter-vr'), 'top');
     tooltip.register(dom.enterFullscreen, localize('tooltip.fullscreen'), 'top');
     tooltip.register(dom.exitFullscreen, localize('tooltip.fullscreen'), 'top');
 

@@ -34,7 +34,6 @@ import { initTutorial } from './tutorial';
 import type { Config, Global } from './types';
 import { initPoster, initUI } from './ui';
 import { Viewer } from './viewer';
-import { initXr } from './xr';
 import { initZoomIndicator } from './zoom-indicator';
 import { version as appVersion } from '../package.json';
 
@@ -311,8 +310,6 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
         animationDuration: 0,
         animationTime: 0,
         animationPaused: true,
-        hasAR: false,
-        hasVR: false,
         hasCollision: false,
         hasCollisionOverlay: false,
         walkAllowed: false,
@@ -363,10 +360,6 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
     }
 
     camera.addComponent('camera');
-
-    // Initialize XR support (availability detection always runs so the UI can offer
-    // a reload into WebGL when the user requests AR/VR under WebGPU)
-    initXr(global);
 
     // Initialize user interface
     initLocalization();
