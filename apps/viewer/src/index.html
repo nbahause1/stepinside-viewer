@@ -1144,12 +1144,36 @@
             </div>
         </div>
 
+        <!-- Unsupported-device card: shown when the app bundle itself won't run
+             (e.g. Safari 15 on a 2017 iPad — the modern engine won't load, and
+             the hardware is below the floor for a walkable splat scan). Distinct
+             from the transient error card: a retry won't help, so it points the
+             visitor to a newer device instead of a frozen splash. -->
+        <div id="unsupportedCard" style="display: none; position: fixed; inset: 0; z-index: 9999; align-items: center; justify-content: center; padding: 24px; background: #000;">
+            <div style="max-width: 360px; width: 100%; padding: 30px 26px; border-radius: 24px; background: rgba(28, 28, 32, 0.7); border: 1px solid rgba(255, 255, 255, 0.12); box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4); text-align: center; font-family: 'Montserrat', sans-serif; color: #fff;">
+                <div style="display: inline-flex; align-items: center; gap: 10px; margin-bottom: 18px; font-weight: 700; font-size: 20px; line-height: 1;">
+                    <span style="width: 13px; height: 13px; transform: rotate(45deg); background: linear-gradient(135deg, #ff8a3d, #f60); display: inline-block;"></span>
+                    <span>StepInside</span>
+                </div>
+                <div style="font-size: 16px; font-weight: 600; margin-bottom: 10px;">Dein Gerät ist für den 3D-Rundgang zu alt.</div>
+                <div style="font-size: 13px; font-weight: 500; line-height: 1.55; color: rgba(255, 255, 255, 0.72);">Der interaktive Rundgang benötigt ein neueres Smartphone, Tablet oder einen aktuellen Browser. Bitte öffne den Link auf einem aktuelleren Gerät.</div>
+            </div>
+        </div>
+
         <!-- Application Script -->
         <script type="module">
-            import { main } from './index.js';
+            // The app bundle is loaded DYNAMICALLY (below), not with a static
+            // import: on an old browser where the modern engine bundle won't
+            // parse/run (e.g. Safari 15 on a 2017 iPad), a static import fails
+            // uncatchably and freezes on the splash. `await import()` lets us
+            // catch that and show the "device too old" card instead.
 
             const { config, settings } = window.sse;
             const { poster } = config;
+
+            // Kick off loading the app bundle immediately (as eagerly as a static
+            // import would) but keep the handle so a failure stays catchable.
+            const appModulePromise = import('./index.js');
 
             // Fatal-error UX: hide the loading UI and show the glass error card.
             // Covers (a) scene/content load failures (signalled via the
@@ -1191,6 +1215,13 @@
                 document.getElementById('loadingWrap')?.classList.add('hidden');
                 document.getElementById('errorCard').style.display = 'flex';
             };
+            // Shown when the app bundle itself can't run (old/unsupported browser).
+            const showUnsupported = () => {
+                clearTimeout(bootSafetyTimer);
+                removeBootSplash();
+                document.getElementById('loadingWrap')?.classList.add('hidden');
+                document.getElementById('unsupportedCard').style.display = 'flex';
+            };
             document.getElementById('errorRetry').addEventListener('click', () => location.reload());
             window.addEventListener('sse:error', showFatalError);
 
@@ -1205,11 +1236,24 @@
                 document.documentElement.style.setProperty('--canvas-opacity', '0');
             }
 
-            window.__diag?.('main.js imported');
-
             document.addEventListener('DOMContentLoaded', async () => {
                 window.__diag?.('DOMContentLoaded');
                 const canvas = document.getElementById('application-canvas');
+
+                // Load the app bundle first; a failure here = the browser can't
+                // run it (too old) → the "device too old" card, not a retry.
+                let main;
+                try {
+                    window.__diag?.('loading app bundle…');
+                    ({ main } = await appModulePromise);
+                    window.__diag?.('app bundle loaded');
+                } catch (err) {
+                    window.__diag?.('❌ app bundle failed to load: ' + (err && (err.message || err.stack) || err));
+                    console.error(err);
+                    showUnsupported();
+                    return;
+                }
+
                 try {
                     window.__diag?.('awaiting settings…');
                     const settingsJson = await settings;
