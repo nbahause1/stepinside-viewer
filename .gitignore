@@ -23,3 +23,13 @@ apps/trailer-render/node_modules/
 *.mp4
 apps/trailer-render/*.png
 apps/trailer-render/frames-list.txt
+
+# Scan assets (scene + collision) now live in R2, served by apps/assets-cdn.
+# They are NO LONGER in the repo — uploaded via tools once per property.
+apps/website/public/viewer/scene/
+apps/website/public/viewer/scene-pruned/
+apps/website/public/viewer/scene-pruned-light.sog
+apps/website/public/viewer/scene-light.sog
+apps/website/public/viewer/scene.sog
+apps/website/public/viewer/scene.voxel.bin
+apps/website/public/viewer/scene.voxel.json

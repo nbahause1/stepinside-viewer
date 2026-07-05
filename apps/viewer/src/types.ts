@@ -42,8 +42,6 @@ type State = {
     animationDuration: number;
     animationTime: number;
     animationPaused: boolean;
-    hasAR: boolean;
-    hasVR: boolean;
     hasCollision: boolean;
     hasCollisionOverlay: boolean;
     walkAllowed: boolean;
