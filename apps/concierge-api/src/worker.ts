@@ -54,7 +54,8 @@ import {
 import type { KvLike, RateLimiter } from './ratelimit.js';
 import { handleConcierge } from './core.js';
 import { handleStaging } from './staging.js';
-import { handleEvents, handleLead, handleReport, tokensMatch } from './analytics.js';
+import { handleEvents, handleLead, handleReport } from './analytics.js';
+import { tokensMatch } from './auth.js';
 import type { D1Like } from './analytics.js';
 import { parseAllowedOrigins, resolveAllowOrigin, corsHeaders } from './cors.js';
 
