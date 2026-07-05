@@ -169,6 +169,14 @@ export class Annotation extends Script {
                 visibility: hidden;
             }
 
+            /* Phone: compact bottom-centre card (see _updatePositions).
+               No arrow, a touch tighter, and it may use most of the width. */
+            .pc-annotation.sheet {
+                max-width: min(300px, calc(100vw - 44px));
+                padding: 11px 14px;
+            }
+            .pc-annotation.sheet::before { display: none; }
+
             .pc-annotation-title {
                 font-size: 14px;
                 font-weight: 600;
@@ -670,12 +678,29 @@ export class Annotation extends Script {
             const tooltip = Annotation.tooltipDom;
             const margin = 8;
             const arrowOffset = 25;
-            const tw = tooltip.offsetWidth;
-            const th = tooltip.offsetHeight;
             const vw = window.innerWidth;
             const vh = window.innerHeight;
 
-            // Default position: to the right of hotspot, vertically centered
+            // Narrow screens (phones): a 240px bubble beside a mid-screen point
+            // fits on neither side, so the old code jammed it against an edge
+            // with the arrow pointing nowhere. Switch to the standard mobile
+            // pattern instead — a compact card anchored bottom-centre (like a
+            // map POI card), sized by CSS via the .sheet class, no arrow.
+            const sheet = vw <= 520;
+            tooltip.classList.toggle('sheet', sheet);
+            const tw = tooltip.offsetWidth;
+            const th = tooltip.offsetHeight;
+
+            if (sheet) {
+                tooltip.classList.remove('arrow-right', 'arrow-left');
+                tooltip.style.transform = 'none';
+                tooltip.style.left = `${Math.round((vw - tw) / 2)}px`;
+                // sit above the control dome (bottom: 14px + dome height)
+                tooltip.style.top = `${Math.max(margin, vh - th - 88)}px`;
+                return;
+            }
+
+            // Desktop: to the right of the hotspot, vertically centered.
             let left = screenPos.x + arrowOffset;
             let top = screenPos.y - th / 2;
             let flipped = false;
