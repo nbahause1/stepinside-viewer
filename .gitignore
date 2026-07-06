@@ -33,3 +33,7 @@ apps/website/public/viewer/scene-light.sog
 apps/website/public/viewer/scene.sog
 apps/website/public/viewer/scene.voxel.bin
 apps/website/public/viewer/scene.voxel.json
+
+# Auto-experience pipeline build/test outputs
+dist/
+apps/website/public/garage/

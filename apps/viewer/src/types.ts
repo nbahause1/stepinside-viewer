@@ -13,6 +13,8 @@ type Config = {
     contentUrl?: string;
     contents?: Promise<Response>;
     collisionUrl?: string;
+    assets?: string;                            // scan asset base (?assets=); staging images resolve against it
+    assetsExplicit?: boolean;                   // true when ?assets= was passed (per-scan) vs the default demo base
 
     noui: boolean;
     noanim: boolean;

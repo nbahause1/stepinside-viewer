@@ -39,7 +39,7 @@ const STAGING_AERIAL_INDEX = 0;
 const DEMO_DELAY_MS = 6000;
 
 const initStaging = (global: Global) => {
-    const { app, settings, state, events, renderer } = global;
+    const { app, settings, state, events, renderer, config } = global;
 
     // Cast-through config (not part of the validated schema core; see v2.ts).
     const cfg = settings.staging;
@@ -54,10 +54,21 @@ const initStaging = (global: Global) => {
     // Narrow/portrait screens (phones) get the 9:16 image; everything else the
     // landscape one. Falls back to the landscape image if no portrait is set.
     const isPortrait = () => window.matchMedia('(max-width: 600px)').matches;
+    // Per-scan staging images are stored RELATIVE to the scan's asset base
+    // (settings.staging.styles[].image = "staged/x.jpg"). When the scan was
+    // loaded via ?assets=, resolve them against that base so the correct images
+    // load — page-relative resolution would hit the site's own demo /staged/
+    // folder (the bug that showed the old Altbau image on every scan). Absolute /
+    // data: / root paths pass through. The default demo (no ?assets=) is unchanged.
+    const resolveImg = (p: string | undefined): string | undefined => {
+        if (!p || !config.assetsExplicit || !config.assets) return p;
+        if (/^(https?:|data:|\/)/i.test(p)) return p;
+        return `${config.assets.replace(/\/+$/, '')}/${p}`;
+    };
     const styleImage = (id: string | undefined): string | undefined => {
         const s = styles.find(s => s.id === id);
         if (!s) return undefined;
-        return (isPortrait() && s.imagePortrait) ? s.imagePortrait : s.image;
+        return resolveImg((isPortrait() && s.imagePortrait) ? s.imagePortrait : s.image);
     };
     const wait = (ms: number) => new Promise<void>(resolve => window.setTimeout(resolve, ms));
 

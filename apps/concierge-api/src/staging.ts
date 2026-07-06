@@ -20,11 +20,11 @@
  * The GEMINI_API_KEY lives server-side only; the browser never sees it.
  */
 import { validateStagingRequest, StagingValidationError } from './staging-validation.js';
-import { buildStagingPrompt, resolveStyle } from './staging-prompt.js';
+import { buildStagingPrompt, buildEmptyingPrompt, resolveStyle } from './staging-prompt.js';
 import type { StagingStyle } from './staging-prompt.js';
 import type { RateLimiter, RateLimitResult } from './ratelimit.js';
 import { generateWithFalKontext, FalError } from './staging-fal.js';
-import { planLayout } from './staging-planner.js';
+import { planLayout, detectOccupied } from './staging-planner.js';
 import type { LayoutPlan } from './staging-planner.js';
 
 /** A reference furniture photo used to condition the generation. */
@@ -109,11 +109,12 @@ const GEMINI_RETRY_BACKOFF_MS = [2000, 5000];
 const GEMINI_RETRYABLE_STATUS = new Set([503, 500]);
 
 // Hard ceiling on a single upstream generate call. Pro-model image generation
-// legitimately takes tens of seconds; anything past ~75s is a hung connection,
-// and without an abort the Worker (and the visitor) would wait indefinitely.
-// On abort we surface the existing 502 path — the viewer already shows a
-// friendly German message for it.
-const GEMINI_TIMEOUT_MS = 75_000;
+// legitimately takes tens of seconds (2K output + high upstream load can push a
+// single call past 75s — seen live), and an occupied room does TWO calls back to
+// back (empty then furnish), so give each generous headroom. Past this it's a
+// hung connection; on abort we surface the existing 502 path (friendly German
+// message in the viewer).
+const GEMINI_TIMEOUT_MS = 120_000;
 
 const delay = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
 
@@ -214,63 +215,78 @@ export async function handleStaging(
     console.warn('[staging] reference load failed:', String(err));
   }
 
-  // 3b. Room-aware layout plan ("the brain"): a fast vision model reads the
-  //     frame, detects windows/doors itself and decides WHERE each piece goes.
-  //     Strictly fail-soft: null just means the render runs un-planned.
-  let plan: LayoutPlan | null = null;
+  // 3b. Engine + key selection. Validate the key ONCE up front so both the
+  //     emptying pre-pass and the staging render share it.
   const engine = deps.engine ?? 'gemini';
-  if ((deps.enablePlanner ?? true) && engine === 'gemini' && deps.geminiApiKey) {
-    let roomFacts: Record<string, unknown> | null = null;
-    try {
-      roomFacts = (await deps.loadRoomFacts?.(request.propertyId)) ?? null;
-    } catch {
-      roomFacts = null;
-    }
-    plan = await planLayout(
-      deps.geminiApiKey,
-      { mimeType: request.mimeType, base64: request.imageBase64 },
-      style.planPieces,
-      { model: deps.planModel, roomFacts },
-    );
-    if (!plan) {
-      console.warn('[staging] planner unavailable - rendering without a layout plan');
-    }
+  if (engine === 'fal' ? !deps.falApiKey : !deps.geminiApiKey) {
+    return { status: 502, body: { error: 'The staging service is misconfigured.' } };
   }
-  const prompt = buildStagingPrompt(style, plan);
+
+  const aspectRatio = pickAspectRatio(request.width, request.height);
+  // The frame the planner reads and the staging step furnishes. For an occupied
+  // room it is replaced below by the AI-emptied frame (same architecture-freeze,
+  // so it still lines up with the live scan).
+  let frameBase64 = request.imageBase64;
+  let frameMime: 'image/jpeg' | 'image/png' = request.mimeType;
 
   try {
-    // 4/5. Generate + extract the inline image, on the configured engine.
-    const aspectRatio = pickAspectRatio(request.width, request.height);
-    let image: string | null;
-    if (engine === 'fal') {
-      if (!deps.falApiKey) {
-        return { status: 502, body: { error: 'The staging service is misconfigured.' } };
-      }
-      image = await generateWithFalKontext(
-        deps.falApiKey,
-        prompt,
-        request.imageBase64,
-        request.mimeType,
-        aspectRatio,
-        references,
-      );
-    } else {
-      if (!deps.geminiApiKey) {
-        return { status: 502, body: { error: 'The staging service is misconfigured.' } };
-      }
-      image = await generateWithGemini(
-        deps.geminiApiKey,
-        prompt,
-        request.imageBase64,
-        request.mimeType,
-        aspectRatio,
-        references,
-      );
+    // 3c. Decide whether the room needs emptying. An explicit flag (from
+    //     onboarding knowledge) always wins; otherwise AUTO-DETECT from the
+    //     frame with a fast Gemini vision call. Fail-soft: default to "empty"
+    //     (skip the pass) when detection is unavailable or fails.
+    let occupied = request.occupied;
+    if (occupied === undefined) {
+      occupied = (engine === 'gemini' && deps.geminiApiKey)
+        ? (await detectOccupied(deps.geminiApiKey, { mimeType: frameMime, base64: frameBase64 }, { model: deps.planModel })) ?? false
+        : false;
+      console.log(`[staging] auto-detected room as ${occupied ? 'FURNISHED -> emptying first' : 'empty'}`);
     }
+
+    // 3d. EMPTYING PRE-PASS (occupied rooms only). Removes the movable contents
+    //     while freezing the architecture, so the emptied frame is a clean plate
+    //     for the normal staging step. Fail-soft: if it yields nothing we stage
+    //     the original frame (the staging prompt still tries to clear furniture).
+    if (occupied) {
+      const emptied = await generateImage(engine, deps, buildEmptyingPrompt(), frameBase64, frameMime, aspectRatio, []);
+      const parsed = emptied ? parseImageDataUrl(emptied) : null;
+      if (parsed) {
+        frameBase64 = parsed.base64;
+        frameMime = parsed.mimeType;
+      } else {
+        console.warn('[staging] emptying pass produced no usable image - staging the original furnished frame');
+      }
+    }
+
+    // 3e. Room-aware layout plan ("the brain") on the (possibly emptied) frame:
+    //     a fast vision model detects windows/doors and decides WHERE each piece
+    //     goes. Strictly fail-soft: null just means the render runs un-planned.
+    let plan: LayoutPlan | null = null;
+    if ((deps.enablePlanner ?? true) && engine === 'gemini' && deps.geminiApiKey) {
+      let roomFacts: Record<string, unknown> | null = null;
+      try {
+        roomFacts = (await deps.loadRoomFacts?.(request.propertyId)) ?? null;
+      } catch {
+        roomFacts = null;
+      }
+      plan = await planLayout(
+        deps.geminiApiKey,
+        { mimeType: frameMime, base64: frameBase64 },
+        style.planPieces,
+        { model: deps.planModel, roomFacts },
+      );
+      if (!plan) {
+        console.warn('[staging] planner unavailable - rendering without a layout plan');
+      }
+    }
+    const prompt = buildStagingPrompt(style, plan);
+
+    // 4/5. Generate + extract the inline furnished image on the configured engine.
+    const image = await generateImage(engine, deps, prompt, frameBase64, frameMime, aspectRatio, references);
     if (!image) {
       return { status: 502, body: { error: 'No image was generated. Please try again.' } };
     }
-    return { status: 200, body: { image, style: style.id } };
+    // `occupied` reports what the pipeline decided (esp. useful when auto-detected).
+    return { status: 200, body: { image, style: style.id, occupied } };
   } catch (err) {
     if (err instanceof FalError) {
       console.warn(`[staging] fal ${err.status}:`, err.detail.slice(0, 600));
@@ -295,6 +311,35 @@ export async function handleStaging(
     }
     return { status: 502, body: { error: 'The staging service is temporarily unavailable.' } };
   }
+}
+
+/**
+ * Run one image generation on the configured engine — shared by the emptying
+ * pre-pass and the staging render so both take the identical path. The API key
+ * is validated by the caller before this is reached.
+ */
+async function generateImage(
+  engine: 'gemini' | 'fal',
+  deps: StagingDeps,
+  prompt: string,
+  base64: string,
+  mimeType: string,
+  aspectRatio: string,
+  references: ReferenceImage[],
+): Promise<string | null> {
+  if (engine === 'fal') {
+    return generateWithFalKontext(deps.falApiKey!, prompt, base64, mimeType, aspectRatio, references);
+  }
+  return generateWithGemini(deps.geminiApiKey!, prompt, base64, mimeType, aspectRatio, references);
+}
+
+/** Parse a `data:image/...;base64,...` URL into parts, or null if unparseable. */
+function parseImageDataUrl(dataUrl: string): { mimeType: 'image/jpeg' | 'image/png'; base64: string } | null {
+  const m = /^data:(image\/[a-z+]+);base64,(.+)$/i.exec(dataUrl);
+  if (!m || m[2].length === 0) return null;
+  // Downstream generation only handles jpeg/png; treat anything else as png.
+  const mimeType = m[1].toLowerCase() === 'image/jpeg' ? 'image/jpeg' : 'image/png';
+  return { mimeType, base64: m[2] };
 }
 
 /** Carries the upstream HTTP status + detail so the core can map errors. */

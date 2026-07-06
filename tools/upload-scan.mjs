@@ -34,8 +34,12 @@ if (!/^v[0-9]+$/.test(version)) {
 const BUCKET = 'stepinside-assets';
 const WRANGLER_CWD = join(process.cwd(), 'apps/concierge-api'); // any dir with wrangler installed
 
-// The files/dirs that make up a servable scan.
-const TARGETS = ['scene-pruned', 'scene-pruned-light.sog', 'scene.voxel.json', 'scene.voxel.bin'];
+// The files/dirs that make up a servable scan. settings.json is the per-scan
+// experience config (start camera, drone views, room facts) derived by
+// tools/derive-settings.mts — the viewer loads it via ?settings=<base>/settings.json.
+// room-facts.json (from derive-settings) is the ground-truth room geometry the
+// staging planner reads via loadRoomFacts to scale furniture correctly.
+const TARGETS = ['scene-pruned', 'scene-pruned-light.sog', 'scene.voxel.json', 'scene.voxel.bin', 'settings.json', 'room-facts.json'];
 
 const contentType = (f) =>
   f.endsWith('.webp') ? 'image/webp' :

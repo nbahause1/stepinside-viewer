@@ -14,5 +14,5 @@
         "resolveJsonModule": true,
     },
     "includes": ["src", "module", "types.d.ts"],
-    "exclude": ["dist", "public"]
+    "exclude": ["dist", "public", "tools"]
 }

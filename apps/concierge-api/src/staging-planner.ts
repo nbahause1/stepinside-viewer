@@ -135,3 +135,58 @@ Return ONLY JSON: {"pieces":[{"item":"...","wall":"left|right|back|front|center"
     clearTimeout(timer);
   }
 }
+
+// Occupancy detection is a one-word classification; keep it snappy so it barely
+// adds to the staging latency (it runs before the emptying decision).
+const DETECT_TIMEOUT_MS = 12_000;
+
+/**
+ * Detect whether a room is currently FURNISHED, so the pipeline can decide on
+ * its own whether to run the emptying pre-pass — no manual `occupied` flag
+ * needed. Built-in fixtures (fitted kitchen, radiators, built-in wardrobes) do
+ * NOT count as furnished. Fail-soft: returns null on any failure so the caller
+ * can fall back to a safe default (treat as empty = no emptying pass).
+ */
+export async function detectOccupied(
+  apiKey: string,
+  frame: { mimeType: string; base64: string },
+  opts?: { model?: string },
+): Promise<boolean | null> {
+  const model = opts?.model || DEFAULT_PLAN_MODEL;
+  const prompt = `Look at this interior room photo. Is the room currently FURNISHED — does it contain movable furniture or belongings such as sofas, chairs, tables, beds, shelves, rugs, lamps, plants, wall art, boxes or clutter? Built-in fixtures (a fitted kitchen, radiators, built-in wardrobes) do NOT count. Answer ONLY JSON: {"furnished": true} or {"furnished": false}.`;
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), DETECT_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${GEMINI_BASE}/models/${model}:generateContent`, {
+      method: 'POST',
+      headers: { 'x-goog-api-key': apiKey, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{
+          parts: [
+            { text: prompt },
+            { inline_data: { mime_type: frame.mimeType, data: frame.base64 } },
+          ],
+        }],
+        generationConfig: { responseMimeType: 'application/json', temperature: 0 },
+      }),
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      console.warn(`[staging] occupancy detect ${model} answered ${res.status}`);
+      return null;
+    }
+    const data = await res.json() as {
+      candidates?: { content?: { parts?: { text?: string }[] } }[];
+    };
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!text) return null;
+    const parsed = JSON.parse(text) as { furnished?: unknown };
+    return typeof parsed.furnished === 'boolean' ? parsed.furnished : null;
+  } catch (err) {
+    console.warn('[staging] occupancy detect failed:', String(err).slice(0, 200));
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}

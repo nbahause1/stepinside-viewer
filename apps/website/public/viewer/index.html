@@ -156,6 +156,12 @@
                 collisionUrl,
                 contentUrl,
                 contents: fetch(contentUrl),
+                // Scan asset base + whether it was explicitly given (?assets=).
+                // Per-scan staging images (settings.staging.styles[].image) resolve
+                // against this; the default demo (no ?assets=) keeps its old
+                // page-relative behaviour so it never breaks.
+                assets: assetsBase,
+                assetsExplicit: url.searchParams.has('assets'),
                 noui: url.searchParams.has('noui'),
                 noanim: url.searchParams.has('noanim'),
                 nofx: url.searchParams.has('nofx'),
