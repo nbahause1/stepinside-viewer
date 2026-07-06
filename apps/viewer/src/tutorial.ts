@@ -210,7 +210,12 @@ const initTutorial = (global: Global) => {
 
     // Onboarding complete: clear the hint and dismiss the cards.
     const finishAll = () => {
+        if (phase === 'done') return;
         phase = 'done';
+        // Signal the tutorial is over (naturally or via the skip x). The survey
+        // module restarts its engagement clock from here, so the "how helpful?"
+        // card appears a set time into free exploration, not glued to the end.
+        events.fire('tutorial:done');
         state.moveLocked = false;
         window.clearTimeout(droneTimer);
         hintButtons();
@@ -223,6 +228,10 @@ const initTutorial = (global: Global) => {
         // hand off to the post-onboarding feature hints (sofa, then concierge)
         startFeatureHints();
     };
+
+    // The skip "x": dismiss the whole tutorial at any step — unlocks movement,
+    // clears the button hints, hides the cards, and restarts the survey clock.
+    document.getElementById('tutorialClose')?.addEventListener('click', finishAll);
 
     app.on('update', () => {
         if (phase === 'look') {

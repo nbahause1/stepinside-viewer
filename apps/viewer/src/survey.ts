@@ -29,7 +29,7 @@ import type { Global } from './types';
 //     comes back afterwards) — only an explicit answer or dismissal ("Nein
 //     danke" / close X) sets the once-per-device flag.
 
-const ENGAGEMENT_TRIGGER_MS = 40000;    // accumulated visible time that counts as engaged (settings.survey.afterSeconds overrides)
+const ENGAGEMENT_TRIGGER_MS = 60000;    // engaged after this much VISIBLE time — the clock restarts when the tutorial ends (see 'tutorial:done'), so it counts free exploration, not the tutorial. settings.survey.afterSeconds overrides.
 const ENGAGEMENT_CHECK_MS = 1000;       // how often the engagement clock is compared
 const FULLSCREEN_MIN_MS = 30000;        // fullscreen stint that counts as engaged on exit
 const BLOCKED_RETRY_MS = 2000;          // re-check cadence while tutorial/staging block the card
@@ -408,6 +408,22 @@ const init = (global: Global) => {
             if (engagedMs() >= triggerMs) trigger();
         }, ENGAGEMENT_CHECK_MS);
     }
+
+    // When the tutorial ends (completed OR skipped via its x), restart the
+    // engagement clock so the survey is timed from FREE exploration — otherwise
+    // the tutorial-length wait is already spent and the card pops the instant the
+    // tutorial clears. Also cancels a pending (blocked) show from before.
+    events.on('tutorial:done', () => {
+        if (alreadyAsked || card) return;   // already answered or already showing → leave it
+        triggered = false;
+        window.clearInterval(retryTimer);
+        window.clearInterval(engagementTimer);
+        activeMs = 0;
+        visibleSince = (clockArmed && document.visibilityState === 'visible') ? performance.now() : null;
+        engagementTimer = window.setInterval(() => {
+            if (engagedMs() >= triggerMs) trigger();
+        }, ENGAGEMENT_CHECK_MS);
+    });
 
     // ---- inquiry pill → straight to the lead form -----------------------------
     // A deliberate tap on "Besichtigung anfragen" opens the mini form directly
