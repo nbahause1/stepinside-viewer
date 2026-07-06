@@ -207,6 +207,8 @@ interface LeadRequest {
   contact: string;
   message: string | null;
   interest: string | null;
+  /** Move-in timeframe from the appointment qualifier (null on the exposé path). */
+  timeframe: string | null;
 }
 
 /** Validate a /lead body. Throws ValidationError (=> 400) on any violation. */
@@ -244,7 +246,14 @@ export function validateLeadRequest(body: unknown): LeadRequest {
     }
     interest = body['interest'].trim() || null;
   }
-  return { propertyId, name, contact, message, interest };
+  let timeframe: string | null = null;
+  if (body['timeframe'] !== undefined && body['timeframe'] !== null) {
+    if (typeof body['timeframe'] !== 'string' || body['timeframe'].length > MAX_LEAD_INTEREST_CHARS) {
+      throw new ValidationError(`Field "timeframe" must be a string up to ${MAX_LEAD_INTEREST_CHARS} characters.`);
+    }
+    timeframe = body['timeframe'].trim() || null;
+  }
+  return { propertyId, name, contact, message, interest, timeframe };
 }
 
 /**
@@ -288,9 +297,9 @@ export async function handleLead(
   try {
     await db
       .prepare(
-        'INSERT INTO leads (property_id, ts, name, contact, message, interest, consent) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1)',
+        'INSERT INTO leads (property_id, ts, name, contact, message, interest, timeframe, consent) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1)',
       )
-      .bind(request.propertyId, Date.now(), request.name, request.contact, request.message, request.interest)
+      .bind(request.propertyId, Date.now(), request.name, request.contact, request.message, request.interest, request.timeframe)
       .run();
   } catch (err) {
     console.warn('[analytics] lead insert failed:', String(err));

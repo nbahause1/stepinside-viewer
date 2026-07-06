@@ -1961,6 +1961,41 @@ body.measure-active #controlDome #domeMeasureAerial .domeIcon--measureExit {
   box-shadow: 0 6px 14px -10px rgba(0, 0, 0, 0.3), inset 0 1px 0 0 rgba(255, 255, 255, 0.9);
   color: var(--ink-1);
 }
+#surveyCard .survey__subtitle {
+  padding: 4px 24px 0;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.35;
+  color: var(--ink-2, rgba(24, 24, 26, 0.55));
+}
+#surveyCard .survey__timeframes {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 14px;
+}
+#surveyCard .survey__timeframe {
+  min-height: 42px;
+  padding: 9px 16px;
+  text-align: left;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.8), rgba(246, 247, 250, 0.62));
+  box-shadow: 0 6px 14px -10px rgba(0, 0, 0, 0.3), inset 0 1px 0 0 rgba(255, 255, 255, 0.9);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-1);
+  cursor: pointer;
+  transition: transform 160ms var(--ease-out), filter 160ms var(--ease-out);
+}
+#surveyCard .survey__timeframe:hover {
+  filter: brightness(1.04);
+  transform: translateY(-1px);
+}
+#surveyCard .survey__timeframe:active {
+  transform: translateY(1px) scale(0.99);
+}
 #surveyCard .survey__decline {
   margin-top: 10px;
   padding: 4px 8px;

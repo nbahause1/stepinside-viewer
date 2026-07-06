@@ -80,7 +80,7 @@ export async function collectReportData(
 
   const leads = await db
     .prepare(
-      `SELECT ts, name, contact, interest FROM leads
+      `SELECT ts, name, contact, interest, timeframe FROM leads
        WHERE property_id = ?1 ORDER BY ts DESC LIMIT 200`,
     )
     .bind(propertyId)
@@ -128,6 +128,7 @@ export async function collectReportData(
       name: typeof row['name'] === 'string' ? row['name'] : '',
       contact: typeof row['contact'] === 'string' ? row['contact'] : '',
       interest: typeof row['interest'] === 'string' ? row['interest'] : null,
+      timeframe: typeof row['timeframe'] === 'string' ? row['timeframe'] : null,
     })),
   };
 }

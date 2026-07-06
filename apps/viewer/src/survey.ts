@@ -88,6 +88,16 @@ const CARD_HTML = `
         </div>
         <button type="button" class="survey__decline">Nein, danke</button>
     </div>
+    <div class="survey__step hidden" data-step="timeframe">
+        <div class="survey__title">Ab wann könnten Sie sich einen Einzug vorstellen?</div>
+        <div class="survey__subtitle">Damit wir passende Termine vorschlagen können</div>
+        <div class="survey__timeframes">
+            <button type="button" class="survey__timeframe" data-timeframe="Innerhalb der nächsten 4 Wochen">Innerhalb der nächsten 4 Wochen</button>
+            <button type="button" class="survey__timeframe" data-timeframe="In 1–3 Monaten">In 1–3 Monaten</button>
+            <button type="button" class="survey__timeframe" data-timeframe="In 3–6 Monaten">In 3–6 Monaten</button>
+            <button type="button" class="survey__timeframe" data-timeframe="Ich schaue erstmal unverbindlich">Ich schaue erstmal unverbindlich</button>
+        </div>
+    </div>
     <form class="survey__step survey__form hidden" data-step="form" novalidate>
         <div class="survey__title" data-role="formTitle">Besichtigung anfragen</div>
         <input class="survey__input" name="name" type="text" placeholder="Dein Name" autocomplete="name" />
@@ -228,22 +238,47 @@ const init = (global: Global) => {
 
         // -- step 2: CTAs (only reached after a 4-5 rating) --------------------
         let interest = 'besichtigung';
+        let timeframe: string | null = null;   // move-in qualifier (Besichtigung path only)
         root.querySelectorAll<HTMLButtonElement>('.survey__cta[data-cta]').forEach((btn) => {
             btn.addEventListener('click', () => {
                 interest = btn.dataset.cta ?? 'besichtigung';
                 events.fire('analytics', 'cta_click', { cta: interest });
                 q('[data-role="formTitle"]').textContent =
                     interest === 'expose' ? 'Exposé erhalten' : 'Besichtigung anfragen';
+                // The appointment path first asks "ab wann Einzug?" to qualify the
+                // lead; the exposé path goes straight to the form.
+                if (interest === 'besichtigung') {
+                    showStep('timeframe');
+                } else {
+                    timeframe = null;
+                    showStep('form');
+                }
+            });
+        });
+
+        // -- step 2b: appointment qualifier — move-in timeframe ---------------
+        // Only on the Besichtigung path, so the owner can propose fitting slots
+        // and see which leads are hot. The choice rides along in the lead payload.
+        root.querySelectorAll<HTMLButtonElement>('.survey__timeframe[data-timeframe]').forEach((btn) => {
+            btn.addEventListener('click', () => {
+                timeframe = btn.dataset.timeframe ?? null;
+                events.fire('analytics', 'timeframe_select', { timeframe });
                 showStep('form');
             });
         });
 
-        // Inquiry-pill entry: jump straight to the form, no rating step.
+        // Inquiry-pill entry: an appointment request, so it also runs the
+        // "ab wann Einzug?" qualifier first (exposé would skip straight to form).
         openLeadForm = (interestValue: string) => {
             interest = interestValue;
             q('[data-role="formTitle"]').textContent =
                 interestValue === 'expose' ? 'Exposé erhalten' : 'Besichtigung anfragen';
-            showStep('form');
+            if (interestValue === 'besichtigung') {
+                showStep('timeframe');
+            } else {
+                timeframe = null;
+                showStep('form');
+            }
         };
 
         // -- step 3: mini lead form --------------------------------------------
@@ -308,6 +343,7 @@ const init = (global: Global) => {
                     contact,
                     message: message !== '' ? message : undefined,
                     interest,
+                    timeframe: timeframe ?? undefined,
                     consent: true
                 })
             }).then((res) => {
