@@ -33,19 +33,26 @@ const LABELS = { classic: 'Designklassiker', scandi: 'Minimal', warm: 'Colour-Po
 
 const STUDIO = process.env.SI_STUDIO_BASE || 'http://localhost:4545';
 const STAGE_API = process.env.SI_STAGE_API || 'http://localhost:8787/stage';
-const outDir = join(repo, 'dist', 'onboard', propertyId, 'v1');
+// SI_OUT_DIR: where staged/ images (and the settings.json update) go. Defaults to
+// the onboard output. SI_NO_SETTINGS=1: only write images, leave settings.json
+// alone (e.g. re-staging the live demo whose staging config already exists).
+const noSettings = process.env.SI_NO_SETTINGS === '1';
+const outDir = process.env.SI_OUT_DIR ? resolve(process.env.SI_OUT_DIR) : join(repo, 'dist', 'onboard', propertyId, 'v1');
 const settingsPath = join(outDir, 'settings.json');
-if (!existsSync(settingsPath)) {
-  console.error(`no settings.json at ${settingsPath} — run onboard/derive first.`);
+if (!noSettings && !existsSync(settingsPath)) {
+  console.error(`no settings.json at ${settingsPath} — run onboard/derive first (or set SI_NO_SETTINGS=1).`);
   process.exit(1);
 }
 
+// Viewer URL for the headless capture. Override with SI_VIEWER_URL to stage an
+// EXISTING scan (e.g. the live demo, loaded from its default R2 assets + site
+// settings). ?scout exposes window.viewer (dev helper gated behind
+// ?debug/?scout/?record, index.ts:394); the debug panel is DOM, never in the
+// WebGL canvas capture. &noui hides the chrome.
 const assetsBase = `${STUDIO}/out/${propertyId}/v1`;
-// ?scout exposes window.viewer (dev helper, gated behind ?debug/?scout/?record —
-// see apps/viewer/src/index.ts:394). The debug panel is a DOM overlay, so it
-// never appears in the WebGL canvas capture. &noui hides the normal chrome.
-const viewerUrl = `${STUDIO}/viewer/index.html?assets=${encodeURIComponent(assetsBase)}` +
-  `&settings=${encodeURIComponent(assetsBase + '/settings.json')}&webgl&noui&scout`;
+const viewerUrl = process.env.SI_VIEWER_URL ||
+  (`${STUDIO}/viewer/index.html?assets=${encodeURIComponent(assetsBase)}` +
+   `&settings=${encodeURIComponent(assetsBase + '/settings.json')}&webgl&noui&scout`);
 
 const MAX_CAPTURE_EDGE = 1536;         // matches viewer staging.ts
 const WIDTH = 1920, HEIGHT = 1080;
@@ -63,7 +70,9 @@ page.on('console', m => { const t = m.text(); if (/error|fail/i.test(t)) console
 
 await page.goto(viewerUrl, { waitUntil: 'networkidle2', timeout: 180000 });
 await page.waitForFunction(() => window.viewer?.app?.graphicsDevice, { timeout: 60000 });
-await new Promise(r => setTimeout(r, 4000));                    // let the splat paint
+// Let the splat stream + paint at full quality before capture. Assets streamed
+// from R2 (the live demo) need longer than a local Studio-served scan.
+await new Promise(r => setTimeout(r, Number(process.env.SI_PAINT_MS) || 4000));
 
 await page.evaluate(() => new Promise((res) => {
   const g = window.viewer;
@@ -119,6 +128,12 @@ for (const id of STYLES) {
 if (doneStyles.length === 0) { console.error('no styles generated.'); process.exit(1); }
 
 // ---- 3. Switch the scan's staging config on, pointing at the stills --------
+if (noSettings) {
+  console.log(`\n✓ STAGE complete — ${doneStyles.length} style(s): ${doneStyles.map(s => s.id).join(', ')}`);
+  console.log(`  images: ${join(outDir, 'staged')}`);
+  console.log(`  settings.json left unchanged (SI_NO_SETTINGS)`);
+  process.exit(0);
+}
 const settings = JSON.parse(readFileSync(settingsPath, 'utf8'));
 // Merge with any styles staged in a previous run (new wins), so incremental
 // runs accumulate instead of dropping earlier styles.
