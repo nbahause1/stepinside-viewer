@@ -3218,18 +3218,13 @@ body.staging-open {
   }
 
   #annotationNav {
-    // was: brand-pill bottom + 10px (the +50px offset). With the brand
-    // pill gone, take its top-centre position instead.
-    top: max(14px, env(safe-area-inset-top));
-
-    // The share (top-left) and inquiry (top-right) controls sit at this same
-    // height. Keep the highlights pill a uniform width that fits cleanly
-    // BETWEEN them (with breathing room) rather than crowding into them —
-    // still fixed per screen (independent of the title), just narrower than
-    // the desktop 210px. Long room titles ellipsise.
-    > #annotationInfo {
-      width: min(156px, calc(100vw - 236px));
-    }
+    // Brand pill gone, so the top-CENTRE is now empty — but the share
+    // (top-left) and inquiry (top-right) controls still sit in the very top
+    // row. Rather than squeeze the (wide) highlights pill between them (three
+    // mismatched sizes crammed on one line), drop it just BELOW that row so it
+    // gets the full width to itself: clean, centred, its own line, lots of air
+    // to the corners. Keeps its fixed uniform width (fits full titles).
+    top: calc(max(14px, env(safe-area-inset-top)) + 52px);
   }
 }
 

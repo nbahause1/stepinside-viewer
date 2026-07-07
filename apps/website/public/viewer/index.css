@@ -2727,10 +2727,7 @@ body.staging-open #surveyCard {
     display: none;
   }
   #annotationNav {
-    top: max(14px, env(safe-area-inset-top));
-  }
-  #annotationNav > #annotationInfo {
-    width: min(156px, 100vw - 236px);
+    top: calc(max(14px, env(safe-area-inset-top)) + 52px);
   }
 }
 
