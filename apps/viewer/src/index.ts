@@ -620,10 +620,10 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
             const id = ambient.play();
             ambId = id;
             ambient.volume(0, id);
-            ambient.fade(0, ambVol, 450, id); // spool up
+            ambient.fade(0, ambVol, 250, id); // snappy spool up
             ambient.once('fade', () => {
                 if (ambId !== id || state.cameraMode !== 'aerial') { ambient.stop(id); return; }
-                ambient.fade(ambVol, 0, 2200, id); // settle to silence
+                ambient.fade(ambVol, 0, 800, id); // short decay — stays tied to the press
                 ambient.once('fade', () => { if (ambId === id) stopAmbient(); }, id);
             }, id);
         };
