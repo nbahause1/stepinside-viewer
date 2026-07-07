@@ -56,15 +56,31 @@ export default function Demos() {
     doorRef.current = door;
     introRef.current = intro;
 
-    // The viewer (same-origin iframe) posts this once the scene is on screen —
-    // i.e. as the loader's "e" completes and the loading SFX resolves. Let that
-    // resolve ring out (don't cut it) and layer the intro sting on top.
+    // The viewer (same-origin iframe) posts this once the scene is on screen.
+    // On a CACHED scan the reveal fires almost instantly, well before the door
+    // "unlock" (~2.9s) has finished — so don't stomp the intro over it: if the
+    // door is still playing, wait for it to end, then play the intro.
     const onMessage = (e: MessageEvent) => {
       if (e.origin !== window.location.origin) return;
       if (e.data?.type !== "stepinside:viewerReady") return;
-      intro.currentTime = 0;
-      intro.volume = SFX_VOLUME;
-      intro.play().catch(() => {});
+      const playIntro = () => {
+        intro.currentTime = 0;
+        intro.volume = SFX_VOLUME;
+        intro.play().catch(() => {});
+      };
+      if (!door.paused && !door.ended) {
+        let done = false;
+        const go = () => {
+          if (done) return;
+          done = true;
+          door.removeEventListener("ended", go);
+          playIntro();
+        };
+        door.addEventListener("ended", go, { once: true });
+        window.setTimeout(go, 3500); // fallback if 'ended' never fires
+      } else {
+        playIntro();
+      }
     };
     window.addEventListener("message", onMessage);
     return () => {
