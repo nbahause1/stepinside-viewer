@@ -20,6 +20,15 @@ export interface StagingRequest {
   width: number | undefined;
   /** Captured frame pixel height, used to pick a matching output aspect. */
   height: number | undefined;
+  /**
+   * Whether the room is already furnished → run the AI emptying pre-pass (same
+   * architecture-freeze technique) before staging. Tri-state:
+   *   true  = force the emptying pass, false = skip it (empty room),
+   *   undefined = let the server AUTO-DETECT it from the frame (the default when
+   *   the client sends nothing). An explicit value (from onboarding knowledge)
+   *   always overrides detection.
+   */
+  occupied: boolean | undefined;
 }
 
 /** Thrown for any malformed input; mapped to HTTP 400 by the core. */
@@ -101,7 +110,12 @@ export function validateStagingRequest(body: unknown): StagingRequest {
   const width = optionalDimension(body['width'], 'width');
   const height = optionalDimension(body['height'], 'height');
 
-  return { propertyId, imageBase64, mimeType, style, width, height };
+  // Tri-state: explicit true/false is honoured; anything else (absent, null,
+  // garbage) is undefined => the server auto-detects occupancy from the frame.
+  const rawOccupied = body['occupied'];
+  const occupied = rawOccupied === true ? true : rawOccupied === false ? false : undefined;
+
+  return { propertyId, imageBase64, mimeType, style, width, height, occupied };
 }
 
 /** Validate an optional positive pixel dimension (1..16384). */

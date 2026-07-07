@@ -37,6 +37,13 @@ import { Viewer } from './viewer';
 import { initZoomIndicator } from './zoom-indicator';
 import { version as appVersion } from '../package.json';
 
+// iPadOS reports a desktop UA, so PlayCanvas' platform.mobile is FALSE on an
+// iPad — which would otherwise give it desktop resolution, desktop (mouse)
+// input, and the desktop LOD falloff. The entry point flags it via
+// config.mobile (a maxTouchPoints probe). Use this everywhere a touch /
+// constrained-device decision is made so an iPad behaves like the tablet it is.
+const isMobile = (config: Config) => config.mobile ?? platform.mobile;
+
 const loadGsplat = async (app: AppBase, config: Config, progressCallback: (progress: number) => void) => {
     const { contents, contentUrl } = config;
     const c = contents as unknown as ArrayBuffer;
@@ -55,7 +62,7 @@ const loadGsplat = async (app: AppBase, config: Config, progressCallback: (progr
                 unified: true,
                 asset
             });
-            if (platform.mobile && entity.gsplat) {
+            if (isMobile(config) && entity.gsplat) {
                 // Indoor LOD distances: the engine default (5 m base, 3x per
                 // level) keeps the NEIGHBOURING room at full detail. In a flat
                 // the next room starts 2-3 m away — drop it a level sooner.
@@ -178,8 +185,10 @@ const createApp = async (canvas: HTMLCanvasElement, config: Config) => {
 
 // initialize canvas size and resizing
 const initCanvas = (global: Global) => {
-    const { app, events, state } = global;
+    const { app, events, state, config } = global;
     const { canvas } = app.graphicsDevice;
+    // Effective touch/constrained flag (iPad-aware; see isMobile).
+    const mobile = isMobile(config);
 
     // maximum pixel dimension we will allow along the shortest screen dimension.
     // WebGL (Safari) can't GPU-sort splats and is fill-rate bound on Retina, so
@@ -200,7 +209,19 @@ const initCanvas = (global: Global) => {
     //   heat is cumulative, weak devices must run cool from second one.
     // Reads state.deviceTier so a runtime DEMOTION resizes too.
     const maxPixelDim = () => {
-        if (!platform.mobile) return webgl ? 1080 : 1536;
+        // Hero still: once the camera has settled, a desktop renders the static
+        // frame near-native (it's cheap when nothing moves and this is exactly
+        // when detail is judged). Mobile keeps its tier cap — there the detail
+        // win comes from finer LOD + budget (see viewer.ts), not resolution,
+        // to stay within fill-rate/memory limits.
+        if (state.heroStill && !mobile) return webgl ? 1536 : 2048;
+        if (!mobile) {
+            // Desktop is tier-aware too now: a runtime DEMOTION on a weak /
+            // throttled Mac drops the resolution cap alongside the splat
+            // budget (high = near-native, mid/low progressively lighter).
+            if (webgl) return state.deviceTier === 'low' ? 900 : 1080;
+            return state.deviceTier === 'low' ? 1080 : (state.deviceTier === 'mid' ? 1280 : 1536);
+        }
         if (webgl) return state.deviceTier === 'low' ? 560 : 768;
         return state.deviceTier === 'low' ? 560 : (state.deviceTier === 'mid' ? 900 : 1080);
     };
@@ -233,14 +254,20 @@ const initCanvas = (global: Global) => {
         // and resetting canvas dimensions can invalidate the XRWebGLLayer
         if (app.xr?.active) return;
 
-        // Resolution scale. On mobile we use *dynamic resolution*: render at half
-        // scale while the camera is moving (keeps motion smooth on the fill-rate-
-        // bound WebGL path) and at full scale once it settles (a sharp still
-        // image). This is independent of performanceMode, which controls the splat
-        // budget — so smoothness while moving is preserved. Desktop keeps the
-        // static performanceMode scale.
-        const s = platform.mobile ?
-            (global.cameraMoving ? 0.5 : 1.0) :
+        // Resolution scale. On mobile we use *dynamic resolution*: render at
+        // reduced scale while the camera is moving (keeps motion smooth on the
+        // fill-rate-bound path) and full scale once it settles (a sharp still).
+        // Nuance for "looking around on the spot": rotating in place is exactly
+        // where a viewer studies a room, and the harsh 0.5x reads as blurry —
+        // so when the POSITION is stable (rotation only, no walking) capable
+        // phones render at a higher moving scale. Walking through space keeps
+        // the hard 0.5x (streaming + fill), and the low tier always stays 0.5x
+        // to protect smoothness. Desktop keeps the static performanceMode scale.
+        const movingScale = state.positionStable ?
+            (state.deviceTier === 'high' ? 0.85 : (state.deviceTier === 'mid' ? 0.7 : 0.5)) :
+            0.5;
+        const s = mobile ?
+            (global.cameraMoving ? movingScale : 1.0) :
             (state.performanceMode ? 0.5 : 1.0);
         const w = Math.ceil(deviceSize.width * s);
         const h = Math.ceil(deviceSize.height * s);
@@ -275,6 +302,18 @@ const initCanvas = (global: Global) => {
         app.renderNextFrame = true;
     });
 
+    // ...and when the hero-still state flips (desktop resolution boost on settle)
+    events.on('heroStill:changed', () => {
+        set(clientSize.width, clientSize.height);
+        app.renderNextFrame = true;
+    });
+
+    // ...and when position-stability flips (mobile rotate-in-place gets a higher
+    // moving scale; apply() reads it live, this just forces the re-render).
+    events.on('positionStable:changed', () => {
+        app.renderNextFrame = true;
+    });
+
     // Resize canvas before render() so the swap chain texture is acquired at the correct size.
     app.on('framerender', apply);
 
@@ -286,7 +325,10 @@ const initCanvas = (global: Global) => {
 };
 
 const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config) => {
+    const d = (window as any).__diag as ((m: string) => void) | undefined;
+    d?.(`main: creating app + graphics device (${config.renderer})…`);
     const { app, camera, renderer } = await createApp(canvas, config);
+    d?.(`main: device ready (${renderer})`);
 
     // create events
     const events = new EventHandler();
@@ -302,9 +344,9 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
     const state = observe(events, {
         loaded: false,
         readyToRender: false,
-        performanceMode: storedPerformanceMode !== null ? storedPerformanceMode === 'true' : platform.mobile,
+        performanceMode: storedPerformanceMode !== null ? storedPerformanceMode === 'true' : isMobile(config),
         progress: 0,
-        inputMode: platform.mobile ? 'touch' : 'desktop',
+        inputMode: isMobile(config) ? 'touch' : 'desktop',
         cameraMode: 'orbit',
         hasAnimation: false,
         animationDuration: 0,
@@ -321,7 +363,9 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
         chatOpen: false,
         prewarming: false,
         tourRevealActive: false,
-        deviceTier: config.tier ?? 'high'
+        deviceTier: config.tier ?? 'high',
+        heroStill: false,
+        positionStable: false
     });
 
     const global: Global = {
@@ -382,11 +426,13 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
     initSurvey(global);
 
     // Load model
+    d?.('main: UI ready → loading scene…');
     const gsplatLoad = loadGsplat(
         app,
         config,
         (progress: number) => {
             state.progress = progress;
+            d?.(`scene ${progress}%`);
         }
     );
 
@@ -415,17 +461,331 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
         }
     }
 
-    // Load and play sound
-    if (global.settings.soundUrl) {
-        const sound = new Audio(global.settings.soundUrl);
-        sound.crossOrigin = 'anonymous';
-        document.body.addEventListener('click', () => {
-            if (sound) {
-                sound.play();
+    // Entry sound effects: a subtle two-part "arrival" — a door unlocking over
+    // the loading screen, then an intro sting once you're standing in the room.
+    //
+    // When EMBEDDED (marketing site / customer iframe) the audio can't play from
+    // here: iOS only unlocks audio from a gesture in the same document, and this
+    // iframe never gets one before loading. The parent plays it, synced to the
+    // real "Vollbild" launch gesture; the boot splash (index.html) posts
+    // 'stepinside:viewerReady' at the fixed-arrival reveal to cue the parent's
+    // intro. Nothing to do here for that path.
+
+    // Built-in fallback for the TOP-LEVEL viewer (direct link / QR): there is no
+    // parent to choreograph the audio and no gesture until the visitor taps, so
+    // play the sequence on the first interaction after the scene is revealed.
+    // The intro url falls back to the legacy `soundUrl` for older experiences.
+    const sfx = global.settings.sound;
+    const introUrl = sfx?.intro ?? global.settings.soundUrl;
+    const doorUrl = sfx?.door;
+    if (window.top === window.self && (introUrl || doorUrl)) {
+        const volume = Math.max(0, Math.min(1, sfx?.volume ?? 0.6));
+        const gapMs = sfx?.gap ?? 0;
+
+        const makeAudio = (url?: string) => {
+            if (!url) return null;
+            const a = new Audio(url);
+            a.crossOrigin = 'anonymous';
+            a.preload = 'auto';
+            a.volume = volume;
+            return a;
+        };
+        const intro = makeAudio(introUrl);
+        const door = makeAudio(doorUrl);
+
+        const playDoor = () => {
+            if (!door) return;
+            door.currentTime = 0;
+            door.volume = volume;
+            window.setTimeout(() => door.play().catch(() => {}), Math.max(0, gapMs));
+        };
+
+        const playSequence = () => {
+            // Unlock the door element WITHIN the gesture: a browser only lets an
+            // element play later (from the intro's async 'ended') if it was
+            // already blessed by a real, user-initiated play(). A *muted* play
+            // does not grant that on iOS, so prime it unmuted but at volume 0 —
+            // a silent real play — then restore the volume.
+            if (door) {
+                door.volume = 0;
+                door.play().then(() => {
+                    door.pause();
+                    door.currentTime = 0;
+                    door.volume = volume;
+                }).catch(() => {
+                    door.volume = volume;
+                });
             }
-        }, {
-            capture: true,
-            once: true
+            if (intro) {
+                intro.addEventListener('ended', playDoor, { once: true });
+                // If the intro can't play, still give the door its moment.
+                intro.play().catch(playDoor);
+            } else {
+                playDoor();
+            }
+        };
+
+        // Arm on the first interaction, but only once the scene is on screen —
+        // a tap on the loading poster shouldn't fire the arrival. pointerdown
+        // covers both touch and mouse and beats 'click' to the punch.
+        const arm = () => {
+            document.body.addEventListener('pointerdown', playSequence, {
+                capture: true,
+                once: true
+            });
+        };
+        if (state.loaded) {
+            arm();
+        } else {
+            events.on('loaded:changed', arm);
+        }
+    }
+
+    // Audio elements that must fall silent when the embedding page HIDES the
+    // viewer (collapsed back to the website — the iframe stays mounted and would
+    // otherwise keep playing off-screen). Collected here; suspended/resumed by
+    // the parent's visibility message near the end of main().
+    const suspendable: HTMLAudioElement[] = [];
+
+    // Footstep audio while auto-walking to a clicked point. Starts when a walk
+    // actually begins (navTarget:set — fired only past the onboarding move-lock)
+    // and stops the instant the walker arrives or the walk is cancelled
+    // (navTarget:clear), with a short fade so a step isn't hard-clipped. The tap
+    // that starts the walk is itself the gesture that unlocks audio on iOS, and
+    // this runs in the viewer document, so it works embedded AND standalone.
+    const footstepsUrl = sfx?.footsteps;
+    if (footstepsUrl) {
+        const steps = new Audio(footstepsUrl);
+        steps.crossOrigin = 'anonymous';
+        steps.preload = 'auto';
+        steps.loop = true; // cover the rare walk longer than the clip
+        suspendable.push(steps);
+        const stepsVol = Math.max(0, Math.min(1, sfx?.footstepsVolume ?? 0.5));
+        let fadeTimer = 0;
+        const clearFade = () => {
+            if (fadeTimer) {
+                clearInterval(fadeTimer);
+                fadeTimer = 0;
+            }
+        };
+
+        events.on('navTarget:set', () => {
+            // Only in walk mode — navTarget:set also fires for click-to-fly, and
+            // footsteps while flying would be wrong.
+            if (state.cameraMode !== 'walk') return;
+            clearFade();
+            steps.volume = stepsVol;
+            // RESUME from where it paused (never reset to 0) so the long track
+            // advances across walks — the footsteps vary instead of repeating the
+            // same opening steps. `loop` wraps it round at the end.
+            if (steps.paused) {
+                steps.play().catch(() => {});
+            }
+        });
+
+        events.on('navTarget:clear', () => {
+            clearFade();
+            if (steps.paused) return;
+            // ~100 ms fade to silence, then PAUSE (keep the position) — reads as
+            // "stops when you stop" without hard-clipping, and the next walk picks
+            // up from here.
+            const dec = stepsVol / 6;
+            fadeTimer = window.setInterval(() => {
+                steps.volume = Math.max(0, steps.volume - dec);
+                if (steps.volume <= 0.001) {
+                    clearFade();
+                    steps.pause();
+                    steps.volume = stepsVol;
+                }
+            }, 16);
+        });
+    }
+
+    // Measurement SFX: a tick when the first point is placed (measureFirst) and a
+    // confirmation when the second point finalises the measure (measureComplete).
+    // Both fire from a tap, so audio is already unlocked; viewer-side, so it works
+    // embedded and standalone.
+    const measureStartUrl = sfx?.measureStart;
+    const measureEndUrl = sfx?.measureEnd;
+    if (measureStartUrl || measureEndUrl) {
+        const mVol = Math.max(0, Math.min(1, sfx?.measureVolume ?? 0.4));
+        const mkOneShot = (url?: string) => {
+            if (!url) return null;
+            const a = new Audio(url);
+            a.crossOrigin = 'anonymous';
+            a.preload = 'auto';
+            a.volume = mVol;
+            return a;
+        };
+        const mStart = mkOneShot(measureStartUrl);
+        const mEnd = mkOneShot(measureEndUrl);
+        if (mStart) suspendable.push(mStart);
+        if (mEnd) suspendable.push(mEnd);
+        const playOneShot = (a: HTMLAudioElement | null) => {
+            if (!a) return;
+            a.currentTime = 0;
+            a.volume = mVol;
+            a.play().catch(() => {});
+        };
+        events.on('measureFirst', () => playOneShot(mStart));
+        events.on('measureComplete', () => playOneShot(mEnd));
+    }
+
+    // Drone (aerial) mode SFX: a looping ambient hum WHILE in aerial mode — it
+    // starts on entering the drone and stops (fades) when leaving back to
+    // walk/etc. — plus a take-off/fly-away one-shot each time the view is
+    // switched (aerialNext / aerialPrev). Both are entered via a tap, so audio
+    // is already unlocked.
+    const droneAmbientUrl = sfx?.droneAmbient;
+    const droneSwitchUrl = sfx?.droneSwitch;
+    if (droneAmbientUrl || droneSwitchUrl) {
+        const ambVol = Math.max(0, Math.min(1, sfx?.droneAmbientVolume ?? 0.5));
+        const swVol = Math.max(0, Math.min(1, sfx?.droneSwitchVolume ?? 0.5));
+
+        const ambient = droneAmbientUrl ? new Audio(droneAmbientUrl) : null;
+        if (ambient) {
+            ambient.crossOrigin = 'anonymous';
+            // Lazy: the full ambient clip is a few MB — don't fetch it for the
+            // many visitors who never open the drone. play() streams it on the
+            // first aerial entry (a continuous hum tolerates the tiny start lag).
+            ambient.preload = 'none';
+            ambient.loop = true;
+            ambient.volume = ambVol;
+        }
+        const sw = droneSwitchUrl ? new Audio(droneSwitchUrl) : null;
+        if (sw) {
+            sw.crossOrigin = 'anonymous';
+            sw.preload = 'auto';
+            sw.volume = swVol;
+        }
+        if (ambient) suspendable.push(ambient);
+        if (sw) suspendable.push(sw);
+
+        let ambFade = 0;
+        const clearAmbFade = () => {
+            if (ambFade) {
+                clearInterval(ambFade);
+                ambFade = 0;
+            }
+        };
+
+        events.on('cameraMode:changed', () => {
+            if (!ambient) return;
+            if (state.cameraMode === 'aerial') {
+                clearAmbFade();
+                ambient.volume = ambVol;
+                if (ambient.paused) {
+                    ambient.play().catch(() => {});
+                }
+            } else if (!ambient.paused) {
+                // fade the hum out over ~300ms when leaving the drone
+                clearAmbFade();
+                const dec = ambVol / 10;
+                ambFade = window.setInterval(() => {
+                    ambient.volume = Math.max(0, ambient.volume - dec);
+                    if (ambient.volume <= 0.001) {
+                        clearAmbFade();
+                        ambient.pause();
+                        ambient.currentTime = 0;
+                        ambient.volume = ambVol;
+                    }
+                }, 30);
+            }
+        });
+
+        events.on('inputEvent', (name: string) => {
+            if (!sw) return;
+            if ((name === 'aerialNext' || name === 'aerialPrev') && state.cameraMode === 'aerial') {
+                sw.currentTime = 0;
+                sw.volume = swVol;
+                sw.play().catch(() => {});
+            }
+        });
+    }
+
+    // Drone view-switch polish — a subtle AUTOFOCUS HUNT. On a view change the
+    // camera briefly loses focus and quickly hunts to lock it (defocus → rack in
+    // → small overshoot → settle sharp), like a real drone camera refocusing.
+    // Short (~0.5s) and scene-only via the Web Animations API — fill defaults to
+    // 'none', so nothing lingers on the canvas afterwards.
+    {
+        const sceneCanvas = app.graphicsDevice.canvas as HTMLCanvasElement;
+        let focusAnim: Animation | null = null;
+        const refocus = () => {
+            focusAnim?.cancel();
+            focusAnim = sceneCanvas.animate([
+                { filter: 'blur(6px)' },            // lost focus as the shot changes
+                { filter: 'blur(0.4px)', offset: 0.42 }, // racks in fast
+                { filter: 'blur(2.4px)', offset: 0.58 }, // overshoots — the "hunt"
+                { filter: 'blur(0.3px)', offset: 0.78 }, // back toward sharp
+                { filter: 'blur(1px)', offset: 0.88 },   // tiny second pump
+                { filter: 'blur(0px)' }              // locks sharp
+            ], { duration: 520, easing: 'ease-out' });
+        };
+        events.on('inputEvent', (name: string) => {
+            if ((name === 'aerialNext' || name === 'aerialPrev') && state.cameraMode === 'aerial') {
+                refocus();
+            }
+        });
+        events.on('cameraMode:changed', () => {
+            if (state.cameraMode !== 'aerial') {
+                focusAnim?.cancel();
+                focusAnim = null;
+            }
+        });
+    }
+
+    // "Möbliert" staging reveal SFX: plays as the furnished room is unveiled
+    // after the loader (staging.ts fires 'stagingReveal'). The reveal is async
+    // (post-loader), so it isn't inside a gesture — prime the element on
+    // 'stagingStart' (fired within the pill click) so iOS lets it play later.
+    const stagingRevealUrl = sfx?.stagingReveal;
+    if (stagingRevealUrl) {
+        const reveal = new Audio(stagingRevealUrl);
+        reveal.crossOrigin = 'anonymous';
+        reveal.preload = 'auto';
+        const revVol = Math.max(0, Math.min(1, sfx?.stagingRevealVolume ?? 0.4));
+        reveal.volume = revVol;
+        suspendable.push(reveal);
+
+        let primed = false;
+        events.on('stagingStart', () => {
+            if (primed) return;
+            primed = true;
+            // silent real play → unlocks the element for the later async reveal
+            reveal.volume = 0;
+            reveal.play().then(() => {
+                reveal.pause();
+                reveal.currentTime = 0;
+                reveal.volume = revVol;
+            }).catch(() => {
+                reveal.volume = revVol;
+            });
+        });
+        events.on('stagingReveal', () => {
+            reveal.currentTime = 0;
+            reveal.volume = revVol;
+            reveal.play().catch(() => {});
+        });
+    }
+
+    // Suspend all viewer audio when the embedding page hides the viewer (the
+    // "close"/collapse on the website keeps the iframe mounted, so a loop like
+    // the drone hum would otherwise keep playing off-screen). Resume whatever was
+    // playing when it's shown again. Message is posted by the parent (Demos.tsx).
+    if (window.parent && window.parent !== window) {
+        let suspendedPlaying: HTMLAudioElement[] = [];
+        window.addEventListener('message', (e: MessageEvent) => {
+            if (e.source !== window.parent) return;
+            const data = e.data as { type?: string, visible?: boolean } | null;
+            if (data?.type !== 'stepinside:visibility') return;
+            if (data.visible === false) {
+                suspendedPlaying = suspendable.filter(a => !a.paused);
+                suspendedPlaying.forEach(a => a.pause());
+            } else {
+                suspendedPlaying.forEach(a => a.play().catch(() => {}));
+                suspendedPlaying = [];
+            }
         });
     }
 

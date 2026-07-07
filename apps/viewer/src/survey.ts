@@ -29,7 +29,7 @@ import type { Global } from './types';
 //     comes back afterwards) — only an explicit answer or dismissal ("Nein
 //     danke" / close X) sets the once-per-device flag.
 
-const ENGAGEMENT_TRIGGER_MS = 40000;    // accumulated visible time that counts as engaged (settings.survey.afterSeconds overrides)
+const ENGAGEMENT_TRIGGER_MS = 60000;    // engaged after this much VISIBLE time — the clock restarts when the tutorial ends (see 'tutorial:done'), so it counts free exploration, not the tutorial. settings.survey.afterSeconds overrides.
 const ENGAGEMENT_CHECK_MS = 1000;       // how often the engagement clock is compared
 const FULLSCREEN_MIN_MS = 30000;        // fullscreen stint that counts as engaged on exit
 const BLOCKED_RETRY_MS = 2000;          // re-check cadence while tutorial/staging block the card
@@ -87,6 +87,16 @@ const CARD_HTML = `
             <button type="button" class="survey__cta survey__cta--secondary" data-cta="expose">Exposé erhalten</button>
         </div>
         <button type="button" class="survey__decline">Nein, danke</button>
+    </div>
+    <div class="survey__step hidden" data-step="timeframe">
+        <div class="survey__title">Ab wann könnten Sie sich einen Einzug vorstellen?</div>
+        <div class="survey__subtitle">Damit wir passende Termine vorschlagen können</div>
+        <div class="survey__timeframes">
+            <button type="button" class="survey__timeframe" data-timeframe="Innerhalb der nächsten 4 Wochen">Innerhalb der nächsten 4 Wochen</button>
+            <button type="button" class="survey__timeframe" data-timeframe="In 1–3 Monaten">In 1–3 Monaten</button>
+            <button type="button" class="survey__timeframe" data-timeframe="In 3–6 Monaten">In 3–6 Monaten</button>
+            <button type="button" class="survey__timeframe" data-timeframe="Ich schaue erstmal unverbindlich">Ich schaue erstmal unverbindlich</button>
+        </div>
     </div>
     <form class="survey__step survey__form hidden" data-step="form" novalidate>
         <div class="survey__title" data-role="formTitle">Besichtigung anfragen</div>
@@ -228,22 +238,47 @@ const init = (global: Global) => {
 
         // -- step 2: CTAs (only reached after a 4-5 rating) --------------------
         let interest = 'besichtigung';
+        let timeframe: string | null = null;   // move-in qualifier (Besichtigung path only)
         root.querySelectorAll<HTMLButtonElement>('.survey__cta[data-cta]').forEach((btn) => {
             btn.addEventListener('click', () => {
                 interest = btn.dataset.cta ?? 'besichtigung';
                 events.fire('analytics', 'cta_click', { cta: interest });
                 q('[data-role="formTitle"]').textContent =
                     interest === 'expose' ? 'Exposé erhalten' : 'Besichtigung anfragen';
+                // The appointment path first asks "ab wann Einzug?" to qualify the
+                // lead; the exposé path goes straight to the form.
+                if (interest === 'besichtigung') {
+                    showStep('timeframe');
+                } else {
+                    timeframe = null;
+                    showStep('form');
+                }
+            });
+        });
+
+        // -- step 2b: appointment qualifier — move-in timeframe ---------------
+        // Only on the Besichtigung path, so the owner can propose fitting slots
+        // and see which leads are hot. The choice rides along in the lead payload.
+        root.querySelectorAll<HTMLButtonElement>('.survey__timeframe[data-timeframe]').forEach((btn) => {
+            btn.addEventListener('click', () => {
+                timeframe = btn.dataset.timeframe ?? null;
+                events.fire('analytics', 'timeframe_select', { timeframe });
                 showStep('form');
             });
         });
 
-        // Inquiry-pill entry: jump straight to the form, no rating step.
+        // Inquiry-pill entry: an appointment request, so it also runs the
+        // "ab wann Einzug?" qualifier first (exposé would skip straight to form).
         openLeadForm = (interestValue: string) => {
             interest = interestValue;
             q('[data-role="formTitle"]').textContent =
                 interestValue === 'expose' ? 'Exposé erhalten' : 'Besichtigung anfragen';
-            showStep('form');
+            if (interestValue === 'besichtigung') {
+                showStep('timeframe');
+            } else {
+                timeframe = null;
+                showStep('form');
+            }
         };
 
         // -- step 3: mini lead form --------------------------------------------
@@ -308,6 +343,7 @@ const init = (global: Global) => {
                     contact,
                     message: message !== '' ? message : undefined,
                     interest,
+                    timeframe: timeframe ?? undefined,
                     consent: true
                 })
             }).then((res) => {
@@ -408,6 +444,22 @@ const init = (global: Global) => {
             if (engagedMs() >= triggerMs) trigger();
         }, ENGAGEMENT_CHECK_MS);
     }
+
+    // When the tutorial ends (completed OR skipped via its x), restart the
+    // engagement clock so the survey is timed from FREE exploration — otherwise
+    // the tutorial-length wait is already spent and the card pops the instant the
+    // tutorial clears. Also cancels a pending (blocked) show from before.
+    events.on('tutorial:done', () => {
+        if (alreadyAsked || card) return;   // already answered or already showing → leave it
+        triggered = false;
+        window.clearInterval(retryTimer);
+        window.clearInterval(engagementTimer);
+        activeMs = 0;
+        visibleSince = (clockArmed && document.visibilityState === 'visible') ? performance.now() : null;
+        engagementTimer = window.setInterval(() => {
+            if (engagedMs() >= triggerMs) trigger();
+        }, ENGAGEMENT_CHECK_MS);
+    });
 
     // ---- inquiry pill → straight to the lead form -----------------------------
     // A deliberate tap on "Besichtigung anfragen" opens the mini form directly

@@ -25,6 +25,8 @@ import { parseAllowedOrigins, resolveAllowOrigin, corsHeaders } from './cors.js'
 const PORT = 8787;
 const KNOWLEDGE_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'knowledge');
 const STAGING_REFS_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'staging-refs');
+// Where derive-settings writes each scan's room-facts.json (repo/dist/onboard/<id>/v1/).
+const ONBOARD_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'dist', 'onboard');
 const REF_MIME: Record<string, string> = {
   '.png': 'image/png', '.webp': 'image/webp', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
 };
@@ -42,6 +44,21 @@ async function loadStyleReferences(style: StagingStyle) {
     }
   }
   return out;
+}
+
+/**
+ * Ground-truth room geometry for the staging planner (dev: read the local
+ * onboard output written by derive-settings). Fail-soft: null when absent, so a
+ * property without a prepared scan just plans without measured scale.
+ */
+async function loadRoomFacts(propertyId: string): Promise<Record<string, unknown> | null> {
+  if (!PROPERTY_ID_RE.test(propertyId)) return null;
+  try {
+    const parsed = JSON.parse(await readFile(join(ONBOARD_DIR, propertyId, 'v1', 'room-facts.json'), 'utf8'));
+    return typeof parsed === 'object' && parsed !== null ? parsed as Record<string, unknown> : null;
+  } catch {
+    return null;
+  }
 }
 const PROPERTY_ID_RE = /^[a-z0-9-]{1,64}$/;
 const cache = new Map<string, KnowledgeBase>();
@@ -175,6 +192,7 @@ const server = createServer((req: IncomingMessage, res: ServerResponse) => {
         rateLimiter: stagingRateLimiter,
         clientIp: clientIpOf(req),
         loadStyleReferences,
+        loadRoomFacts,
       });
       send(res, result.status, result.body, cors, result.retryAfterSeconds);
       return;

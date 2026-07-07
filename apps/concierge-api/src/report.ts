@@ -12,6 +12,7 @@ export interface ReportLeadRow {
   name: string;
   contact: string;
   interest: string | null;
+  timeframe: string | null;
 }
 
 export interface ReportData {
@@ -173,7 +174,7 @@ export function renderReportHtml(d: ReportData): string {
   const leadRows = d.leads
     .map(
       (l) =>
-        `<tr><td>${escapeHtml(fmtDate(l.ts))}</td><td>${escapeHtml(l.name)}</td><td>${escapeHtml(l.contact)}</td><td>${l.interest ? escapeHtml(l.interest) : '–'}</td></tr>`,
+        `<tr><td>${escapeHtml(fmtDate(l.ts))}</td><td>${escapeHtml(l.name)}</td><td>${escapeHtml(l.contact)}</td><td>${l.interest ? escapeHtml(l.interest) : '–'}</td><td>${l.timeframe ? escapeHtml(l.timeframe) : '–'}</td></tr>`,
     )
     .join('\n');
 
@@ -236,7 +237,7 @@ export function renderReportHtml(d: ReportData): string {
     ${
       leadRows.length > 0
         ? `<div class="table-scroll"><table>
-      <thead><tr><th>Datum</th><th>Name</th><th>Kontakt</th><th>Interesse</th></tr></thead>
+      <thead><tr><th>Datum</th><th>Name</th><th>Kontakt</th><th>Interesse</th><th>Einzug</th></tr></thead>
       <tbody>${leadRows}</tbody>
     </table></div>`
         : '<p class="empty">Noch keine Anfragen eingegangen.</p>'

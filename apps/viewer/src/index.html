@@ -5,15 +5,41 @@
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
         <base href="">
-        <!-- Montserrat self-hosted (latin subset): no render-blocking Google
-             roundtrip, no visitor-IP leak to fonts.googleapis.com (GDPR). -->
+        <!-- Inter self-hosted (latin subset, variable → one file covers all
+             weights): no render-blocking Google roundtrip, no visitor-IP leak to
+             fonts.googleapis.com (GDPR). License-free (SIL OFL). -->
         <style>
-            @font-face { font-family: 'Montserrat'; font-style: normal; font-weight: 500; font-display: swap; src: url('./fonts/montserrat-500.woff2') format('woff2'); unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
-            @font-face { font-family: 'Montserrat'; font-style: normal; font-weight: 600; font-display: swap; src: url('./fonts/montserrat-600.woff2') format('woff2'); unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
-            @font-face { font-family: 'Montserrat'; font-style: normal; font-weight: 700; font-display: swap; src: url('./fonts/montserrat-700.woff2') format('woff2'); unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
+            @font-face { font-family: 'Inter'; font-style: normal; font-weight: 100 900; font-display: swap; src: url('./fonts/inter-latin.woff2') format('woff2'); unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
         </style>
         <link rel="stylesheet" href="./index.css">
         <script type="module">
+            // ---- On-screen diagnostics (only with ?diag) ---------------------
+            // Prints boot stages + any error straight onto the screen so a device
+            // with no dev console (iPad) can be debugged from a screenshot.
+            const DIAG = new URL(location.href).searchParams.has('diag');
+            const diag = (msg) => {
+                if (!DIAG) return;
+                try {
+                    let el = document.getElementById('__diag');
+                    if (!el) {
+                        el = document.createElement('pre');
+                        el.id = '__diag';
+                        el.style.cssText = 'position:fixed;left:0;top:0;z-index:99999;max-width:100vw;max-height:70vh;overflow:auto;margin:0;padding:8px;background:rgba(0,0,0,.82);color:#3f6;font:11px/1.35 ui-monospace,monospace;white-space:pre-wrap;pointer-events:none';
+                        (document.body || document.documentElement).appendChild(el);
+                    }
+                    el.textContent += msg + '\n';
+                } catch (_) { /* never let diagnostics break the page */ }
+            };
+            window.__diag = diag;
+            if (DIAG) {
+                window.addEventListener('error', (e) => diag('❌ ERROR: ' + (e.message || e.error) + '  @' + (e.filename || '') + ':' + (e.lineno || '')));
+                window.addEventListener('unhandledrejection', (e) => diag('❌ REJECT: ' + (e.reason && (e.reason.message || e.reason.stack) || e.reason)));
+                diag('boot ok');
+                diag('UA=' + navigator.userAgent);
+                diag('touch=' + navigator.maxTouchPoints + ' webgpu=' + !!navigator.gpu + ' mem=' + (navigator.deviceMemory || '?') + 'GB cores=' + (navigator.hardwareConcurrency || '?'));
+                diag('screen=' + screen.width + 'x' + screen.height + ' dpr=' + window.devicePixelRatio);
+            }
+
             const createImage = (url) => {
                 const img = new Image();
                 img.src = url;
@@ -40,9 +66,17 @@
             // was fixed with engine 2.20 (upstream supersplat-viewer ships
             // WebGPU-default too; verified on a real iPhone 2026-07-02).
             // `?webgl` forces WebGL everywhere; `?webgpu` forces WebGPU.
+            // iPadOS reports a desktop ("Macintosh") UA; a real Mac has no
+            // touch, so maxTouchPoints > 1 + "Macintosh" uniquely marks an iPad.
+            const isIPadOS = navigator.maxTouchPoints > 1 && /Macintosh/i.test(navigator.userAgent);
             const hasWebGPU = !!navigator.gpu;
+            // iPad defaults to WebGL: WebGPU on iPadOS Safari is where the scan
+            // fails to open at all (device init / memory), and the CPU-sorted
+            // WebGL path is the most compatible, lowest-memory route — "gets in"
+            // beats "prettier but won't load". ?webgpu forces it back on for
+            // testing a capable iPad.
             const renderer = url.searchParams.has('webgpu') ? 'webgpu' :
-                (url.searchParams.has('webgl') || !hasWebGPU) ? 'webgl' : 'webgpu';
+                (url.searchParams.has('webgl') || !hasWebGPU || isIPadOS) ? 'webgl' : 'webgpu';
 
             // BOTH renderers stream the multi-LOD SOG (`lod-meta.json`): lowest
             // LOD paints almost instantly, higher detail streams on demand. The
@@ -60,33 +94,73 @@
             const budgetParam = url.searchParams.get('budget');
             const budget = budgetParam !== null ? Number(budgetParam) : undefined;
 
-            // Device tier ladder (mobile only; desktop is untouched):
+            // Device tier ladder (now spans desktop AND mobile — the tier
+            // drives splat budget + resolution + culling, and the viewer
+            // DEMOTES one tier at runtime (high -> mid -> low) whenever the
+            // measured fps can't hold the profile; it never promotes):
             //   low  — 12-mini class (A14 in the worst thermal chassis Apple
-            //          ever shipped) + anything without WebGPU (old iOS = old
-            //          device): 30fps cap, hard resolution/budget caps.
-            //   mid  — 12/13/14-class iPhones and Android: balanced profile.
+            //          ever shipped) + anything mobile without WebGPU (old iOS
+            //          = old device): 30fps cap, hard resolution/budget caps.
+            //   mid  — 12/13/14-class iPhones, Android, iPad-on-WebGL, and
+            //          weak desktops (WebGL fallback / few cores / little RAM):
+            //          balanced profile.
             //   high — 14 Pro/15/16/17 class (shortest side >= 393 CSS px at
-            //          DPR 3 with WebGPU): near-desktop quality; these chips
-            //          have the fill rate to spare.
-            // ?tier=low|mid|high forces a profile for A/B. The viewer also
-            // DEMOTES itself one tier at runtime if measured FPS can't hold
-            // the profile (see viewer.ts) — the safety net for devices this
-            // heuristic can't know.
-            const isMobileUA = /iPhone|iPad|Android|Mobile/i.test(navigator.userAgent);
+            //          DPR 3 with WebGPU), WebGPU iPads, and normal desktops:
+            //          near-native quality.
+            // ?tier=low|mid|high forces a profile for A/B.
+            // iPadOS 13+ Safari reports the DESKTOP UA ("Macintosh"), so an
+            // iPad is not caught by the mobile regex — it would get the full
+            // desktop splat budget (up to 4M) and run out of memory / fail to
+            // load. Macs have no touch, so maxTouchPoints > 1 + "Macintosh"
+            // uniquely identifies an iPad. Treat it as a (mid/high) mobile.
+            const isMobileUA = /iPhone|iPad|Android|Mobile/i.test(navigator.userAgent) || isIPadOS;
             const shortSide = Math.min(screen.width, screen.height);
+            // Desktop has no touch/thermal signal to read up front, so start
+            // optimistic (high) and let the runtime demote a struggling GPU. A
+            // couple of cheap static signals still catch obviously weak
+            // machines so they never have to visibly demote: the WebGL
+            // fallback (no WebGPU = old browser/GPU) and very low core/RAM
+            // counts (deviceMemory is Chromium-only; hardwareConcurrency is
+            // everywhere incl. Safari).
+            const lowEndDesktop = renderer === 'webgl' ||
+                (navigator.hardwareConcurrency > 0 && navigator.hardwareConcurrency <= 4) ||
+                (navigator.deviceMemory > 0 && navigator.deviceMemory <= 4);
             const tierParam = url.searchParams.get('tier');
             const tier = ['low', 'mid', 'high'].includes(tierParam) ? tierParam :
-                !isMobileUA ? 'high' :
+                // Desktop starts SMOOTH-first, not max-first: a lot of "desktops"
+                // are thin laptops / integrated GPUs / thermally-throttled
+                // MacBooks that choke on the full 4M budget (the low LOD paints
+                // fine for a few seconds, then the full detail streams in and
+                // tanks). So the safe default is 'mid' and the runtime promotes
+                // no one but demotes fast; weak machines start at 'low'.
+                // Power users force max with ?tier=high.
+                !isMobileUA ? (lowEndDesktop ? 'low' : 'mid') :
+                // Any WebGL mobile (incl. an old iPad without WebGPU) is the
+                // CPU-sorted path with no per-chunk culling on the weakest
+                // hardware -> the safe 'low' rung (this is checked before the
+                // iPad branch, so a WebGL iPad lands here, which is intended:
+                // "runs at all" beats "looks nicer but crashes").
                 (renderer === 'webgl' || (shortSide <= 376 && window.devicePixelRatio >= 3)) ? 'low' :
-                (shortSide >= 393 && window.devicePixelRatio >= 3 && renderer === 'webgpu') ? 'high' :
-                'mid';
+                // WebGPU iPad + phones from the 14 Pro class up have the fill
+                // rate for high; other WebGPU phones get the balanced mid.
+                (isIPadOS ? 'high' :
+                    (shortSide >= 393 && window.devicePixelRatio >= 3 && renderer === 'webgpu') ? 'high' : 'mid');
+
+            diag('detected: iPad=' + isIPadOS + ' mobile=' + isMobileUA + ' renderer=' + renderer + ' tier=' + tier);
 
             const sseConfig = {
+                mobile: isMobileUA,
                 poster: posterUrl && createImage(posterUrl),
                 skyboxUrl,
                 collisionUrl,
                 contentUrl,
                 contents: fetch(contentUrl),
+                // Scan asset base + whether it was explicitly given (?assets=).
+                // Per-scan staging images (settings.staging.styles[].image) resolve
+                // against this; the default demo (no ?assets=) keeps its old
+                // page-relative behaviour so it never breaks.
+                assets: assetsBase,
+                assetsExplicit: url.searchParams.has('assets'),
                 noui: url.searchParams.has('noui'),
                 noanim: url.searchParams.has('noanim'),
                 nofx: url.searchParams.has('nofx'),
@@ -124,6 +198,109 @@
         </svg>
 
         <canvas id="application-canvas"></canvas>
+
+        <!-- Boot splash: an OPAQUE branded cover shown from the very first
+             paint so the visitor never stares at the black canvas during the
+             unavoidable startup gap (graphics-device init + first network
+             fetch + WebGPU shader compile can take a few seconds). Styles are
+             inlined so it renders before index.css and any JS. Faded out on
+             the first rendered frame (window.firstFrame, wired below) with a
+             hard safety timeout; replaced by the error card on fatal errors. -->
+        <style>
+            #bootSplash {
+                position: fixed;
+                inset: 0;
+                z-index: 400;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                /* Plain black — no scene yet, and the wordmark should read as
+                   the only thing on screen. */
+                background: #000;
+                font-family: 'Inter', 'Arial', sans-serif;
+                opacity: 1;
+                transition: opacity 0.5s ease;
+                -webkit-tap-highlight-color: transparent;
+            }
+            #bootSplash.is-hidden {
+                opacity: 0;
+                pointer-events: none;
+            }
+            /* The StepInside filling-logo loader (same as the "Möbliert sehen"
+               staging loader): a dim base wordmark with a bright copy revealed
+               left-to-right. It fills fast at first, then keeps creeping toward
+               ~96% (never freezing) for as long as the scan streams; when the
+               scene is ready it snaps to 100% and reveals — the logo finishing ==
+               the tour opening. The embedding page lands its intro on the reveal
+               (via the stepinside:viewerReady message), so audio stays in sync
+               with the arrival no matter how long the load takes. */
+            #bootSplash .bootLoader {
+                position: relative;
+                animation: bootLoaderIn 560ms cubic-bezier(0.16, 1, 0.3, 1) both;
+            }
+            #bootSplash .bootMark {
+                display: inline-flex;
+                align-items: center;
+                gap: 13px;
+                white-space: nowrap;
+                padding: 6px 16px;
+                font-weight: 700;
+                font-size: 30px;
+                letter-spacing: 0.01em;
+                line-height: 1;
+            }
+            #bootSplash .bootMark__diamond {
+                width: 16px;
+                height: 16px;
+                flex-shrink: 0;
+                transform: rotate(45deg);
+                background: currentColor;
+            }
+            #bootSplash .bootMark--base { color: rgba(255, 255, 255, 0.24); }
+            #bootSplash .bootMark--fill {
+                position: absolute;
+                inset: 0;
+                color: #fff;
+                clip-path: inset(0 100% 0 0);
+                /* "Living" loader: fills fast at first, then keeps creeping toward
+                   ~96% (never freezing) for as long as the scan streams — so a
+                   long load never looks stalled. When the scene is ready it snaps
+                   to 100% (.is-complete) and reveals. */
+                animation: bootLoaderFill 9s cubic-bezier(0.1, 0.8, 0.2, 1) forwards;
+            }
+            /* scene ready: snap the remainder to 100%, then #bootSplash fades out */
+            #bootSplash.is-complete .bootMark--fill {
+                animation: none;
+                clip-path: inset(0 0 0 0);
+                transition: clip-path 0.35s ease-out;
+            }
+            @keyframes bootLoaderIn {
+                from { transform: translateY(-16vh) scale(0.55); opacity: 0; }
+                55%  { opacity: 1; }
+                to   { transform: translateY(0) scale(1); opacity: 1; }
+            }
+            @keyframes bootLoaderFill {
+                0%   { clip-path: inset(0 100% 0 0); }
+                100% { clip-path: inset(0 4% 0 0); }
+            }
+            @media (prefers-reduced-motion: reduce) {
+                #bootSplash .bootLoader { animation: none; }
+                #bootSplash .bootMark--fill { animation: none; clip-path: inset(0 12% 0 0); }
+                #bootSplash.is-complete .bootMark--fill { clip-path: inset(0 0 0 0); }
+            }
+        </style>
+        <div id="bootSplash" aria-hidden="true">
+            <div class="bootLoader">
+                <div class="bootMark bootMark--base">
+                    <span class="bootMark__diamond"></span>
+                    <span>StepInside</span>
+                </div>
+                <div class="bootMark bootMark--fill">
+                    <span class="bootMark__diamond"></span>
+                    <span>StepInside</span>
+                </div>
+            </div>
+        </div>
 
         <!-- Peripheral-vision overlay for walk mode: soft, darkened, slightly
              blurred edges with a sharp centre. Sibling of #ui so it is not
@@ -273,6 +450,9 @@
                  (drag left/right) then moving (click to walk). Movement is gated
                  until the visitor has looked around. Logic in tutorial.ts. -->
             <div id="tutorial" class="hidden" aria-live="polite">
+                <button type="button" id="tutorialClose" class="tutorialClose" aria-label="Tutorial überspringen" title="Überspringen">
+                    <svg width="12" height="12" viewBox="0 0 22 22" aria-hidden="true"><path d="M6 6 L16 16 M16 6 L6 16" /></svg>
+                </button>
                 <div id="tutorialLook" class="tutorialCard">
                     <div class="tutorialCard__icon">
                         <svg width="38" height="14" viewBox="0 0 38 14" class="hintLook" aria-hidden="true">
@@ -932,7 +1112,10 @@
                 <path fill-rule="evenodd" clip-rule="evenodd" d="M12 1.33337C13.4727 1.33337 14.6666 2.52728 14.6666 4.00004C14.6666 5.4728 13.4727 6.66671 12 6.66671C11.4931 6.66671 11.0194 6.52491 10.6159 6.27934L10.2721 6.62374C10.0345 6.86142 9.90102 7.18411 9.90102 7.52022V8.47986C9.90102 8.81597 10.0345 9.13866 10.2721 9.37634L10.6159 9.72009C11.0193 9.47463 11.4932 9.33337 12 9.33337C13.4727 9.33337 14.6666 10.5273 14.6666 12C14.6666 13.4728 13.4727 14.6667 12 14.6667C10.5272 14.6667 9.33331 13.4728 9.33331 12C9.33331 11.4932 9.47457 11.0194 9.72003 10.6159L9.37628 10.2722C9.1386 10.0345 8.81591 9.90108 8.4798 9.90108H7.52016C7.18405 9.90108 6.86136 10.0345 6.62368 10.2722L6.27928 10.6159C6.52485 11.0195 6.66665 11.4931 6.66665 12C6.66665 13.4728 5.47274 14.6667 3.99998 14.6667C2.52722 14.6667 1.33331 13.4728 1.33331 12C1.33331 10.5273 2.52722 9.33337 3.99998 9.33337C4.50658 9.33337 4.98008 9.47481 5.38344 9.72009L5.72784 9.37634C5.9655 9.13866 6.09894 8.81597 6.09894 8.47986V7.52022C6.09894 7.18411 5.9655 6.86142 5.72784 6.62374L5.38344 6.27934C4.98001 6.52473 4.5067 6.66671 3.99998 6.66671C2.52722 6.66671 1.33331 5.4728 1.33331 4.00004C1.33331 2.52728 2.52722 1.33337 3.99998 1.33337C5.47274 1.33337 6.66665 2.52728 6.66665 4.00004C6.66665 4.50676 6.52467 4.98008 6.27928 5.3835L6.62368 5.72791C6.86136 5.96556 7.18405 6.099 7.52016 6.099H8.4798C8.81591 6.099 9.1386 5.96556 9.37628 5.72791L9.72003 5.3835C9.47475 4.98014 9.33331 4.50664 9.33331 4.00004C9.33331 2.52728 10.5272 1.33337 12 1.33337ZM3.99998 10.3998C3.11632 10.3998 2.39972 11.1164 2.39972 12C2.39972 12.8837 3.11632 13.6003 3.99998 13.6003C4.88364 13.6003 5.60024 12.8837 5.60024 12C5.60024 11.7911 5.55917 11.5919 5.48631 11.4089L4.41469 12.4812C4.16723 12.7284 3.76625 12.7286 3.51886 12.4812C3.27147 12.2338 3.27158 11.8328 3.51886 11.5853L4.59047 10.5131C4.40769 10.4404 4.20862 10.3998 3.99998 10.3998ZM12 10.3998C11.7911 10.3998 11.5918 10.4403 11.4088 10.5131L12.4811 11.5853C12.7284 11.8328 12.7285 12.2338 12.4811 12.4812C12.2337 12.7286 11.8327 12.7284 11.5853 12.4812L10.513 11.4089C10.4402 11.5918 10.3997 11.7912 10.3997 12C10.3997 12.8837 11.1163 13.6003 12 13.6003C12.8836 13.6003 13.6002 12.8837 13.6002 12C13.6002 11.1164 12.8836 10.3998 12 10.3998ZM3.99998 2.39978C3.11632 2.39978 2.39972 3.11639 2.39972 4.00004C2.39972 4.8837 3.11632 5.6003 3.99998 5.6003C4.20871 5.6003 4.40763 5.55909 4.59047 5.48637L3.51886 4.41475C3.27158 4.16729 3.27147 3.76631 3.51886 3.51892C3.76625 3.27153 4.16723 3.27164 4.41469 3.51892L5.48631 4.59054C5.55903 4.40769 5.60024 4.20877 5.60024 4.00004C5.60024 3.11639 4.88364 2.39978 3.99998 2.39978ZM12 2.39978C11.1163 2.39978 10.3997 3.11639 10.3997 4.00004C10.3997 4.20868 10.4403 4.40775 10.513 4.59054L11.5853 3.51892C11.8327 3.27164 12.2337 3.27153 12.4811 3.51892C12.7285 3.76631 12.7284 4.16729 12.4811 4.41475L11.4088 5.48637C11.5918 5.55923 11.791 5.6003 12 5.6003C12.8836 5.6003 13.6002 4.8837 13.6002 4.00004C13.6002 3.11639 12.8836 2.39978 12 2.39978Z"/>
             </symbol>
             <symbol id="walkIcon" viewBox="-2 -2 20 20">
-                <path d="M9.75 2a1.75 1.75 0 1 1-3.5 0 1.75 1.75 0 0 1 3.5 0zM5.25 4.75h5.5v4.5h-.5v5h-2v-5h-.5v5h-2v-5h-.5z"/>
+                <circle cx="8" cy="2.6" r="1.7"/>
+                <rect x="7.2" y="4.1" width="1.6" height="5.2" rx="0.8"/>
+                <rect x="6.25" y="9" width="1.5" height="5.6" rx="0.75"/>
+                <rect x="8.25" y="9" width="1.5" height="5.6" rx="0.75"/>
             </symbol>
             <symbol id="infoIcon" viewBox="-2 -2 24 24">
                 <path d="M9.98633 7.58301C10.2598 7.58301 10.4854 7.67643 10.6631 7.86328C10.8408 8.05013 10.9297 8.3099 10.9297 8.64258V14.0361C10.9297 14.4098 10.8408 14.6924 10.6631 14.8838C10.4854 15.0752 10.2598 15.1709 9.98633 15.1709C9.71289 15.1709 9.48958 15.0729 9.31641 14.877C9.14779 14.681 9.06348 14.4007 9.06348 14.0361V8.69727C9.06348 8.32812 9.14779 8.05013 9.31641 7.86328C9.48958 7.67643 9.71289 7.58301 9.98633 7.58301Z"/>
@@ -970,27 +1153,121 @@
              to initialise. Body-level sibling of #ui so the #ui pointer-events
              rules don't apply; styled inline to match the frosted-glass look. -->
         <div id="errorCard" style="display: none; position: fixed; inset: 0; z-index: 9999; align-items: center; justify-content: center; padding: 24px; background: rgba(0, 0, 0, 0.45);">
-            <div style="max-width: 340px; width: 100%; padding: 28px 24px; border-radius: 24px; background: rgba(28, 28, 32, 0.55); backdrop-filter: blur(20px) saturate(150%); -webkit-backdrop-filter: blur(20px) saturate(150%); border: 1px solid rgba(255, 255, 255, 0.14); box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35); text-align: center; font-family: 'Montserrat', sans-serif; color: #fff;">
+            <div style="max-width: 340px; width: 100%; padding: 28px 24px; border-radius: 24px; background: rgba(28, 28, 32, 0.55); backdrop-filter: blur(20px) saturate(150%); -webkit-backdrop-filter: blur(20px) saturate(150%); border: 1px solid rgba(255, 255, 255, 0.14); box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35); text-align: center; font-family: 'Inter', sans-serif; color: #fff;">
                 <div style="font-size: 16px; font-weight: 600; margin-bottom: 8px;">Der Rundgang konnte nicht geladen werden.</div>
                 <div style="font-size: 13px; font-weight: 500; line-height: 1.5; color: rgba(255, 255, 255, 0.7); margin-bottom: 20px;">Bitte versuch es gleich nochmal.</div>
                 <button id="errorRetry" type="button" style="appearance: none; border: 1px solid rgba(255, 255, 255, 0.25); background: rgba(255, 255, 255, 0.12); color: #fff; font-family: inherit; font-size: 14px; font-weight: 600; padding: 10px 24px; border-radius: 999px; cursor: pointer;">Erneut versuchen</button>
             </div>
         </div>
 
+        <!-- Unsupported-device card: shown when the app bundle itself won't run
+             (e.g. Safari 15 on a 2017 iPad — the modern engine won't load, and
+             the hardware is below the floor for a walkable splat scan). Distinct
+             from the transient error card: a retry won't help, so it points the
+             visitor to a newer device instead of a frozen splash. -->
+        <div id="unsupportedCard" style="display: none; position: fixed; inset: 0; z-index: 9999; align-items: center; justify-content: center; padding: 24px; background: #000;">
+            <div style="max-width: 360px; width: 100%; padding: 30px 26px; border-radius: 24px; background: rgba(28, 28, 32, 0.7); border: 1px solid rgba(255, 255, 255, 0.12); box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4); text-align: center; font-family: 'Inter', sans-serif; color: #fff;">
+                <div style="display: inline-flex; align-items: center; gap: 10px; margin-bottom: 18px; font-weight: 700; font-size: 20px; line-height: 1;">
+                    <span style="width: 13px; height: 13px; transform: rotate(45deg); background: linear-gradient(135deg, #ff8a3d, #f60); display: inline-block;"></span>
+                    <span>StepInside</span>
+                </div>
+                <div style="font-size: 16px; font-weight: 600; margin-bottom: 10px;">Dein Gerät ist für den 3D-Rundgang zu alt.</div>
+                <div style="font-size: 13px; font-weight: 500; line-height: 1.55; color: rgba(255, 255, 255, 0.72);">Der interaktive Rundgang benötigt ein neueres Smartphone, Tablet oder einen aktuellen Browser. Bitte öffne den Link auf einem aktuelleren Gerät.</div>
+            </div>
+        </div>
+
         <!-- Application Script -->
         <script type="module">
-            import { main } from './index.js';
+            // The app bundle is loaded DYNAMICALLY (below), not with a static
+            // import: on an old browser where the modern engine bundle won't
+            // parse/run (e.g. Safari 15 on a 2017 iPad), a static import fails
+            // uncatchably and freezes on the splash. `await import()` lets us
+            // catch that and show the "device too old" card instead.
 
             const { config, settings } = window.sse;
             const { poster } = config;
+
+            // Kick off loading the app bundle immediately (as eagerly as a static
+            // import would) but keep the handle so a failure stays catchable.
+            const appModulePromise = import('./index.js');
 
             // Fatal-error UX: hide the loading UI and show the glass error card.
             // Covers (a) scene/content load failures (signalled via the
             // 'sse:error' window event from the viewer) and (b) graphics-device
             // or startup failures (main() throwing below).
+            // Boot splash (opaque branded cover over the black canvas): fade it
+            // out on the first rendered frame, immediately on a fatal error
+            // (the error card takes over), and via a hard safety timeout so a
+            // stalled load can never leave it stuck on screen.
+            const bootSplash = document.getElementById('bootSplash');
+            let bootHidden = false;
+            const removeBootSplash = () => {
+                if (bootHidden || !bootSplash) return;
+                bootHidden = true;
+                bootSplash.classList.add('is-hidden');
+                setTimeout(() => bootSplash.remove(), 600);
+            };
+
+            // "Living" arrival. The CSS fill creeps toward ~96% on its own (never
+            // freezing). We reveal the scene when the first frame is ready — but
+            // never before a short MIN_MS, so on a fast load the wordmark still
+            // gets a beat instead of flashing. On reveal we snap to 100%, fade the
+            // splash, and post 'stepinside:viewerReady' so the embedding page
+            // lands its intro sting on the actual arrival (any load time).
+            const MIN_MS = 1200;
+            const SNAP_MS = 350;
+            const loaderStart = Date.now();
+
+            const signalViewerReady = () => {
+                try {
+                    if (window.parent && window.parent !== window) {
+                        window.parent.postMessage({ type: 'stepinside:viewerReady' }, '*');
+                    }
+                } catch (e) { /* cross-origin parent: ignore */ }
+            };
+            // Snap the fill to 100%, cue the intro as the wordmark completes, then
+            // fade the splash and reveal the scene.
+            const finishBootSplash = () => {
+                if (bootHidden || !bootSplash) return;
+                bootSplash.classList.add('is-complete');      // snaps to 100% over SNAP_MS
+                setTimeout(signalViewerReady, SNAP_MS);       // intro on completion
+                setTimeout(removeBootSplash, SNAP_MS + 20);   // then fade the splash
+            };
+            // Reveal once the first frame is ready AND the minimum has elapsed.
+            let firstFrameSeen = false;
+            const tryFinish = () => {
+                if (bootHidden || !bootSplash || !firstFrameSeen) return;
+                const remaining = loaderStart + MIN_MS - Date.now();
+                if (remaining > 0) {
+                    setTimeout(tryFinish, remaining);
+                    return;
+                }
+                finishBootSplash();
+            };
+            const bootSafetyTimer = setTimeout(() => { firstFrameSeen = true; tryFinish(); }, 20000);
+
+            // viewer.ts calls window.firstFrame?.() once the first frame has
+            // rendered — chain onto any existing hook (screenshot tooling).
+            const prevFirstFrame = window.firstFrame;
+            window.firstFrame = () => {
+                clearTimeout(bootSafetyTimer);
+                firstFrameSeen = true;
+                tryFinish();
+                prevFirstFrame?.();
+            };
+
             const showFatalError = () => {
+                clearTimeout(bootSafetyTimer);
+                removeBootSplash();
                 document.getElementById('loadingWrap')?.classList.add('hidden');
                 document.getElementById('errorCard').style.display = 'flex';
+            };
+            // Shown when the app bundle itself can't run (old/unsupported browser).
+            const showUnsupported = () => {
+                clearTimeout(bootSafetyTimer);
+                removeBootSplash();
+                document.getElementById('loadingWrap')?.classList.add('hidden');
+                document.getElementById('unsupportedCard').style.display = 'flex';
             };
             document.getElementById('errorRetry').addEventListener('click', () => location.reload());
             window.addEventListener('sse:error', showFatalError);
@@ -1007,11 +1284,31 @@
             }
 
             document.addEventListener('DOMContentLoaded', async () => {
+                window.__diag?.('DOMContentLoaded');
                 const canvas = document.getElementById('application-canvas');
+
+                // Load the app bundle first; a failure here = the browser can't
+                // run it (too old) → the "device too old" card, not a retry.
+                let main;
                 try {
-                    const settingsJson = await settings;
-                    await main(canvas, settingsJson, config);
+                    window.__diag?.('loading app bundle…');
+                    ({ main } = await appModulePromise);
+                    window.__diag?.('app bundle loaded');
                 } catch (err) {
+                    window.__diag?.('❌ app bundle failed to load: ' + (err && (err.message || err.stack) || err));
+                    console.error(err);
+                    showUnsupported();
+                    return;
+                }
+
+                try {
+                    window.__diag?.('awaiting settings…');
+                    const settingsJson = await settings;
+                    window.__diag?.('settings ok → calling main()…');
+                    await main(canvas, settingsJson, config);
+                    window.__diag?.('✅ main() resolved (loaded)');
+                } catch (err) {
+                    window.__diag?.('❌ main() threw: ' + (err && (err.message || err.stack) || err));
                     console.error(err);
                     showFatalError();
                 }

@@ -34,7 +34,7 @@ export interface StagingStyle {
 }
 
 /** Shared rule block appended to every style prompt. */
-const PRESERVE = `Keep the centre of the floor open and leave every door and window clear. Use only these few pieces; do not invent extra furniture. Ignore any logos, text or watermarks printed on the reference photos.
+const PRESERVE = `Keep the centre of the floor open and leave every door and window clear. Always include the specified reference pieces, reproduced faithfully — those are required. Beyond them you MAY freely add tasteful, complementary items where they genuinely suit the room's style, scale and mood: accessories and décor (a rug, cushions, a throw, books, a vase, plants, framed art) and additional furniture where it fits and makes sense for the space. Keep it realistic, cohesive and never cluttered. Ignore any logos, text or watermarks printed on the reference photos.
 
 CRITICAL - FREEZE THE ARCHITECTURE: treat the room shell as a locked background plate. Do NOT move, resize, add, remove or redraw any window, door, wall, moulding, panel, skirting or the ceiling. Every window and door must keep its EXACT position, width, height and perspective from image 1, pixel-for-pixel. Keep the identical floor, the exact same camera angle, vanishing lines and daylight. The ONLY change allowed is placing the furniture on the floor, so the result lines up perfectly with the original empty room.
 
@@ -126,4 +126,23 @@ ${plan.pieces.map((p) => {
 ${style.placement}${planBlock}
 
 ${PRESERVE}`;
+}
+
+/**
+ * Build the EMPTYING prompt for occupied rooms — the pre-pass that runs before
+ * normal staging. Same architecture-freeze technique as staging (windows,
+ * doors, walls, camera angle pixel-locked), but the only allowed change is
+ * REMOVING all movable contents so the room comes back empty and ready to be
+ * re-staged. Built-in / fixed elements (fitted kitchens, built-in wardrobes,
+ * radiators) deliberately stay — you only strip free-standing contents. The
+ * emptied frame then feeds the normal staging step unchanged.
+ */
+export function buildEmptyingPrompt(): string {
+  // Verbatim the proven declutter prompt from experiments/staging/declutter.mjs
+  // (validated end-to-end: furnished classic.jpg -> clean empty Altbau, 2026-07).
+  // Reusing the tested wording rather than inventing a new one.
+  return `You are a professional real-estate photo editor. Image 1 is a furnished room. Produce the EXACT same room but COMPLETELY EMPTY.
+Remove ALL furniture, sofas, chairs, tables, beds, shelves, rugs, curtains that are not part of the architecture, plants, lamps, wall art, electronics, boxes and every piece of clutter. Reconstruct any floor, wall or baseboard area that was hidden behind the removed objects so the surfaces are continuous and clean.
+Freeze the architecture: keep every window, door, wall, ceiling, moulding, radiator, built-in fixture and the floor material/pattern pixel-identical to image 1. Keep the SAME camera angle, framing, lens, perspective, lighting and daylight. Do not move, rotate or crop anything.
+Photorealistic interior real-estate photograph of an empty room, natural even lighting, accurate shadows, not a 3D render, no text, no watermark, no people.`;
 }

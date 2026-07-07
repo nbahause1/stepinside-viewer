@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>StepInside Studio</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font: 15px/1.5 -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    background: radial-gradient(120% 120% at 50% -10%, #1c2030 0%, #0c0e14 60%);
+    color: #e7e9ee; min-height: 100vh; display: grid; place-items: center; padding: 24px;
+  }
+  .card {
+    width: 100%; max-width: 560px; background: rgba(255,255,255,.04);
+    border: 1px solid rgba(255,255,255,.08); border-radius: 20px; padding: 32px;
+    box-shadow: 0 30px 80px -30px rgba(0,0,0,.7); backdrop-filter: blur(20px);
+  }
+  h1 { font-size: 20px; font-weight: 600; letter-spacing: -.01em; }
+  .sub { color: #8b90a0; font-size: 13px; margin-top: 4px; }
+  .drop {
+    margin-top: 24px; border: 1.5px dashed rgba(255,255,255,.18); border-radius: 16px;
+    padding: 44px 20px; text-align: center; transition: .18s; cursor: pointer;
+    background: rgba(255,255,255,.015);
+  }
+  .drop.hover { border-color: #6ea8fe; background: rgba(110,168,254,.08); }
+  .drop.has { border-style: solid; border-color: rgba(110,168,254,.4); }
+  .drop .big { font-size: 15px; font-weight: 500; }
+  .drop .small { color: #8b90a0; font-size: 12.5px; margin-top: 6px; }
+  .row { margin-top: 18px; display: flex; gap: 10px; align-items: center; }
+  input[type=text] {
+    flex: 1; background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.1);
+    color: #e7e9ee; border-radius: 11px; padding: 11px 13px; font-size: 14px;
+  }
+  input:focus { outline: none; border-color: #6ea8fe; }
+  button {
+    background: #4f83f1; color: #fff; border: 0; border-radius: 11px; padding: 11px 20px;
+    font-size: 14px; font-weight: 600; cursor: pointer; transition: .15s;
+  }
+  button:hover { background: #5f90f5; }
+  button:disabled { opacity: .4; cursor: not-allowed; }
+  .log {
+    margin-top: 18px; background: #06070b; border: 1px solid rgba(255,255,255,.07);
+    border-radius: 12px; padding: 14px; height: 220px; overflow-y: auto; display: none;
+    font: 12px/1.55 ui-monospace, 'SF Mono', Menlo, monospace; color: #a9b0c0; white-space: pre-wrap;
+  }
+  .log.show { display: block; }
+  .log b { color: #6ea8fe; font-weight: 600; }
+  .done {
+    margin-top: 18px; display: none; gap: 10px; align-items: center; justify-content: space-between;
+    background: rgba(52,199,120,.1); border: 1px solid rgba(52,199,120,.3);
+    border-radius: 12px; padding: 14px 16px;
+  }
+  .done.show { display: flex; }
+  .done .ok { color: #46d189; font-weight: 600; font-size: 14px; }
+  .done a { background: #34c778; color: #04140b; text-decoration: none; padding: 9px 18px; border-radius: 10px; font-weight: 700; font-size: 13px; }
+  .hint { color: #6b7080; font-size: 11.5px; margin-top: 20px; text-align: center; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>StepInside Studio</h1>
+    <div class="sub">Rohscan rein → begehbares Produkt raus. Läuft lokal auf deiner GPU.</div>
+
+    <div class="drop" id="drop">
+      <div class="big" id="dropLabel">Scan hierher ziehen</div>
+      <div class="small">.ply · .sog · .compressed.ply  — oder klicken zum Auswählen</div>
+      <input type="file" id="file" accept=".ply,.sog" hidden>
+    </div>
+
+    <div class="row">
+      <input type="text" id="pid" placeholder="Objekt-Name (z. B. altbau-schwabing)" autocomplete="off">
+      <button id="go" disabled>Start</button>
+    </div>
+
+    <div class="log" id="log"></div>
+
+    <div class="done" id="done">
+      <span class="ok">Fertig — dein Produkt ist bereit.</span>
+      <a id="view" href="#" target="_blank">Ansehen →</a>
+    </div>
+
+    <div class="hint">Verarbeitung dauert je nach Scangröße einige Minuten (Floater, Kompression, Voxel, Geometrie).</div>
+  </div>
+
+<script>
+  const $ = id => document.getElementById(id);
+  const drop = $('drop'), fileInput = $('file'), pid = $('pid'), go = $('go');
+  const log = $('log'), done = $('done'), view = $('view'), dropLabel = $('dropLabel');
+  let picked = null;
+
+  const slug = s => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  const refresh = () => { go.disabled = !(picked && slug(pid.value).length); };
+
+  const setFile = f => { picked = f; dropLabel.textContent = f.name; drop.classList.add('has'); refresh(); };
+
+  drop.onclick = () => fileInput.click();
+  fileInput.onchange = e => e.target.files[0] && setFile(e.target.files[0]);
+  drop.ondragover = e => { e.preventDefault(); drop.classList.add('hover'); };
+  drop.ondragleave = () => drop.classList.remove('hover');
+  drop.ondrop = e => { e.preventDefault(); drop.classList.remove('hover'); e.dataTransfer.files[0] && setFile(e.dataTransfer.files[0]); };
+  pid.oninput = refresh;
+
+  const line = (t, cls) => { log.classList.add('show'); const b = cls ? `<b>${t}</b>` : t; log.insertAdjacentHTML('beforeend', b + '\n'); log.scrollTop = log.scrollHeight; };
+
+  go.onclick = async () => {
+    go.disabled = true; done.classList.remove('show'); log.textContent = '';
+    const id = slug(pid.value);
+    line('Lade Scan hoch …', true);
+    try {
+      const up = await fetch('/upload', { method: 'PUT', body: picked, headers: { 'x-filename': picked.name } });
+      const { file } = await up.json();
+      line('Upload fertig. Starte Pipeline …', true);
+
+      const es = new EventSource(`/process?file=${encodeURIComponent(file)}&pid=${encodeURIComponent(id)}`);
+      es.addEventListener('log', e => line(JSON.parse(e.data)));
+      es.addEventListener('error', e => { line('Fehler: ' + (e.data ? JSON.parse(e.data) : 'Verbindung unterbrochen'), true); es.close(); go.disabled = false; });
+      es.addEventListener('done', e => {
+        const { previewUrl } = JSON.parse(e.data);
+        line('✓ Fertig.', true);
+        view.href = previewUrl; done.classList.add('show'); es.close(); go.disabled = false;
+      });
+    } catch (err) { line('Fehler: ' + err.message, true); go.disabled = false; }
+  };
+</script>
+</body>
+</html>

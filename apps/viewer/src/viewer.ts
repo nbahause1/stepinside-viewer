@@ -184,6 +184,14 @@ class Viewer {
         const { app, settings, config, events, state, camera, renderer } = global;
         const { graphicsDevice } = app;
 
+        // Effective "constrained device" flag for the perf profile. PlayCanvas'
+        // platform.mobile is false on iPadOS (it reports a desktop UA), so an
+        // iPad would otherwise take the full desktop splat budget and fail to
+        // load — index.html's UA check (config.mobile, which includes the
+        // iPad maxTouchPoints probe) catches it; fall back to platform.mobile
+        // when the entry point didn't provide the flag.
+        const mobile = config.mobile ?? platform.mobile;
+
         // render skybox as plain equirect
         const glsl = ShaderChunks.get(graphicsDevice, 'glsl');
         glsl.set('skyboxPS', patchChunk(glsl.get('skyboxPS'), 'mapRoughnessUv(uv, mipLevel)', 'uv', 'glsl skyboxPS'));
@@ -241,6 +249,22 @@ class Viewer {
         const prevWorld = new Mat4();
         const sceneBound = new BoundingBox();
         let settleFrames = 0; // consecutive still frames, for mobile dynamic resolution
+        // Hero-still: timestamp of the last real camera movement; once the camera
+        // has been fully still for HERO_DELAY_MS we ramp to full detail (see the
+        // heroStill handling in applyPerfSettings + index.ts's resolution cap).
+        let lastMoveMs = 0;
+        const HERO_DELAY_MS = 200;
+        // Position-stable: the finest LOD (the "mushy close-up" fix) is tied to
+        // the camera POSITION, not its orientation — so looking around on the
+        // spot stays sharp while only the (cheaper) budget/resolution wait for a
+        // full stop. Tracks the last real translation.
+        const prevPos = new Vec3();
+        let lastTranslateMs = 0;
+        // Short so the finest LOD starts streaming the instant you stop walking
+        // (the click-to-walk glide decelerates below POS_EPS just before the
+        // full stop, so this often fires mid-deceleration → sharp on arrival).
+        const POS_STABLE_MS = 60;
+        const POS_EPS = 0.03; // world units (~3 cm) — ignores sub-pixel jitter
 
         // Track whether a finger/pointer is down so mobile dynamic resolution can
         // hold low res for the whole gesture: during a slow drag the per-frame
@@ -249,7 +273,7 @@ class Viewer {
         // realloc = stutter). Capture-phase + window so we still see the release
         // if the input controller stops propagation or the finger lifts off-canvas.
         let pointerActive = false;
-        if (platform.mobile) {
+        if (mobile) {
             const down = () => {
                 pointerActive = true;
             };
@@ -294,7 +318,7 @@ class Viewer {
             // missed release (sharpens after a held still moment). The resize
             // happens in initCanvas's apply(); we just flip the flag and force one
             // full-res render on settle. Desktop is left untouched.
-            if (platform.mobile) {
+            if (mobile) {
                 // The idle look-around moves the camera but should stay sharp, so
                 // it must NOT count as user movement — only a real camera change
                 // (not the idle wander) keeps the resolution low.
@@ -305,6 +329,38 @@ class Viewer {
                     global.cameraMoving = false;
                     app.renderNextFrame = true;
                 }
+            }
+
+            // Hero-still refinement (all devices): once the camera has been fully
+            // still briefly, ramp to full detail (finest LOD + higher budget +
+            // sharper desktop resolution) for a crisp "hero" frame — this is
+            // exactly when a viewer studies a room. ANY real camera movement
+            // reverts instantly so motion stays on the cheap, smooth profile.
+            // Gated to the live scene (not during load / the staging prewarm).
+            if (cameraChanged && !IdleLook.wandering) {
+                lastMoveMs = now();
+                if (state.heroStill) {
+                    state.heroStill = false;
+                }
+            } else if (!state.heroStill && state.readyToRender && !state.prewarming &&
+                now() - lastMoveMs > HERO_DELAY_MS) {
+                state.heroStill = true;
+            }
+
+            // Position-stable: keep the finest LOD while merely LOOKING AROUND
+            // (rotating on the spot). Only a real TRANSLATION resets it, so the
+            // near-field sharpness survives a rotate — budget/resolution still
+            // wait for a full stop (above), keeping the rotation itself smooth.
+            const posMoved = camera.getPosition().distance(prevPos) > POS_EPS;
+            if (posMoved && !IdleLook.wandering) {
+                prevPos.copy(camera.getPosition());
+                lastTranslateMs = now();
+                if (state.positionStable) {
+                    state.positionStable = false;
+                }
+            } else if (!state.positionStable && state.readyToRender && !state.prewarming &&
+                now() - lastTranslateMs > POS_STABLE_MS) {
+                state.positionStable = true;
             }
 
             // suppress rendering till we're ready
@@ -321,7 +377,7 @@ class Viewer {
             // these devices throttle into a death spiral otherwise). Skipped
             // frames merely postpone: prevWorld is only advanced on rendered
             // frames, so a pending camera change re-triggers next tick.
-            if (platform.mobile && state.deviceTier === 'low' && app.renderNextFrame) {
+            if (mobile && state.deviceTier === 'low' && app.renderNextFrame) {
                 const nowMs = now();
                 if (nowMs - lastLowTierRenderMs < FRAME_CAP_MS - 1) {
                     app.renderNextFrame = false;
@@ -494,13 +550,20 @@ class Viewer {
             // is the ceiling an iPhone renders fluidly, and thermal
             // throttling takes 30-50% off peak within minutes, so they
             // target sustained, not cold-start performance.
+            // Desktop now has a tier ladder too (it used to be a flat 4M): a
+            // weak / thermally-throttled Mac or an integrated-GPU laptop can't
+            // sustain 4M splats, and desktop has no touch heuristic to know
+            // that up front — so it starts at 'high' and the runtime demotes
+            // it (high -> mid -> low) exactly like mobile when the measured
+            // fps can't hold. performanceMode forces one notch lower.
             const budgets = {
                 desktop: {
-                    low: 2,
+                    low: 1.0,
+                    mid: 2.0,
                     high: 4
                 }
             };
-            const isWebglMobile = platform.mobile && renderer === 'webgl';
+            const isWebglMobile = mobile && renderer === 'webgl';
 
             // The LOD range knobs live on the COMPONENT in 2.20.5 — the
             // scene-level lodRangeMin/Max setters are deprecated no-op stubs
@@ -513,8 +576,19 @@ class Viewer {
                     if (config.budget !== undefined && Number.isFinite(config.budget) && config.budget > 0) {
                         return config.budget;
                     }
-                    if (!platform.mobile) {
-                        return state.performanceMode ? budgets.desktop.low : budgets.desktop.high;
+                    if (state.heroStill) {
+                        // Camera settled → render the "hero" still at full detail.
+                        // Bounded per tier so a static frame never blows memory on
+                        // weak devices (the full asset is ~5.4M splats). This is a
+                        // still frame, so it need not sustain 60fps.
+                        if (!mobile) return tier === 'high' ? 5.4 : (tier === 'mid' ? 3.5 : 2.0);
+                        if (isWebglMobile) return 0.9;
+                        return tier === 'low' ? 0.6 : (tier === 'mid' ? 1.6 : 2.8);
+                    }
+                    if (!mobile) {
+                        const base = budgets.desktop[tier] ?? budgets.desktop.high;
+                        // performanceMode = manual "run lighter": one notch down.
+                        return state.performanceMode ? base * 0.6 : base;
                     }
                     if (tier === 'low') {
                         // 12-mini class: sustained-thermal target, not peak.
@@ -541,16 +615,23 @@ class Viewer {
                 // earlier, and thin the periphery slightly (walk mode centres
                 // the gaze anyway). Desktop keeps maximum quality.
                 if (splatComponent) {
-                    splatComponent.lodRangeMin = (tier === 'low' || isWebglMobile) ? 2 : (platform.mobile ? 1 : 0);
+                    // Finest LOD (the "mushy close-up" fix) is tied to POSITION
+                    // stability, not a full stop — so looking around on the spot
+                    // stays sharp up to the camera. Mobile low stays a level up
+                    // for memory. Real translation (walking) keeps the cheaper
+                    // floor to bound streaming/fill while moving through space.
+                    splatComponent.lodRangeMin = state.positionStable ?
+                        ((mobile && tier === 'low') ? 1 : 0) :
+                        ((tier === 'low' || isWebglMobile) ? 2 : (mobile ? 1 : 0));
                     splatComponent.lodRangeMax = 1000;
                 }
-                gsplat.colorUpdateAngle = (platform.mobile && tier === 'low') || state.performanceMode ? 4 : 2;
+                gsplat.colorUpdateAngle = (mobile && tier === 'low') || state.performanceMode ? 4 : 2;
                 // Anti-overdraw ladder: harsh culling reads as thinned-out,
                 // "washed" splats — only the weakest devices get the harsh
                 // values; high-tier phones stay near desktop quality.
-                gsplat.minContribution = !platform.mobile ? 1 : (tier === 'low' ? 8 : (tier === 'mid' ? 3 : 2));
-                gsplat.alphaClip = !platform.mobile ? 1 / 255 : (tier === 'low' ? 8 / 255 : (tier === 'mid' ? 4 / 255 : 2 / 255));
-                gsplat.foveationStrength = !platform.mobile ? 0 : (tier === 'low' ? 0.5 : (tier === 'mid' ? 0.25 : 0));
+                gsplat.minContribution = !mobile ? 1 : (tier === 'low' ? 8 : (tier === 'mid' ? 3 : 2));
+                gsplat.alphaClip = !mobile ? 1 / 255 : (tier === 'low' ? 8 / 255 : (tier === 'mid' ? 4 / 255 : 2 / 255));
+                gsplat.foveationStrength = !mobile ? 0 : (tier === 'low' ? 0.5 : (tier === 'mid' ? 0.25 : 0));
                 gsplat.antiAlias = config.aa && tier !== 'low';
             };
 
@@ -612,9 +693,12 @@ class Viewer {
 
                     state.readyToRender = true;
 
-                    // handle quality mode changes + runtime tier demotion
+                    // handle quality mode changes + runtime tier demotion +
+                    // hero-still refinement (ramp detail up on settle, down on move)
                     events.on('performanceMode:changed', applyPerfSettings);
                     events.on('deviceTier:changed', applyPerfSettings);
+                    events.on('heroStill:changed', applyPerfSettings);
+                    events.on('positionStable:changed', applyPerfSettings);
                     applyPerfSettings();
 
                     // Runtime tier DEMOTION — the safety net for devices the
@@ -632,22 +716,43 @@ class Viewer {
                     // prewarm flight, and 10s after a demotion (the resize/
                     // rebuffer it causes would cascade). EMA restarts fresh
                     // after each demotion.
-                    if (platform.mobile) {
-                        const warmupUntilMs = performance.now() + 5000;
+                    {
+                        // Desktop reacts FAST (a laggy Mac should settle in a
+                        // few seconds, not half a minute): shorter warm-up,
+                        // less time under floor before demoting, shorter
+                        // cooldown, and a snappier fps EMA. Mobile stays gentle
+                        // (heat/battery, streaming jank) to avoid oscillation.
+                        const warmupUntilMs = performance.now() + (mobile ? 5000 : 2200);
+                        const belowLimit = mobile ? 3 : 1.2;   // s under floor before a demote
+                        const cooldownS = mobile ? 10 : 4;     // s between demotes
+                        const emaAlpha = mobile ? 0.08 : 0.15;
                         let fpsEma = 60;
                         let belowFor = 0;
                         let lastDemote = 0;
+                        // Desktop targets a higher floor than mobile (a desktop
+                        // GPU that can't hold ~45fps should shed load); mobile
+                        // trades fps for heat/battery so its floor is lower.
+                        // 'low' is the bottom rung (floor 0 = never demotes on).
+                        const floorFor = (t: 'low' | 'mid' | 'high') => {
+                            if (t === 'low') return 0;
+                            if (mobile) return t === 'high' ? 30 : 22;
+                            return t === 'high' ? 48 : 33;
+                        };
                         app.on('update', (dt: number) => {
                             if (!this.forceRenderNextFrame || dt <= 0) return;
                             const nowMs = performance.now();
-                            if (nowMs < warmupUntilMs || nowMs < streamingHoldUntilMs || state.prewarming) {
+                            // Never demote on a hero still: a heavier STATIC frame
+                            // doesn't stutter, and the extra load is intentional
+                            // and momentary — measuring it would wrongly downgrade
+                            // the moving profile.
+                            if (nowMs < warmupUntilMs || nowMs < streamingHoldUntilMs || state.prewarming || state.heroStill) {
                                 belowFor = 0;
                                 return;
                             }
-                            fpsEma += (1 / dt - fpsEma) * 0.08;
-                            const floor = state.deviceTier === 'high' ? 30 : (state.deviceTier === 'mid' ? 22 : 0);
+                            fpsEma += (1 / dt - fpsEma) * emaAlpha;
+                            const floor = floorFor(state.deviceTier);
                             belowFor = (floor > 0 && fpsEma < floor) ? belowFor + dt : 0;
-                            if (belowFor > 3 && nowMs / 1000 - lastDemote > 10) {
+                            if (belowFor > belowLimit && nowMs / 1000 - lastDemote > cooldownS) {
                                 lastDemote = nowMs / 1000;
                                 belowFor = 0;
                                 fpsEma = 60;
@@ -696,6 +801,10 @@ class Viewer {
         const { postEffectSettings } = settings;
         const { background } = settings;
 
+        // effective constrained-device flag (see the constructor): config.mobile
+        // includes the iPadOS probe, platform.mobile is the fallback.
+        const mobile = config.mobile ?? platform.mobile;
+
         // hpr override takes precedence over settings.highPrecisionRendering
         const highPrecisionRendering = config.hpr ?? settings.highPrecisionRendering;
 
@@ -703,7 +812,7 @@ class Viewer {
         // pass costs real fill rate on phones (the primary bottleneck), and the
         // sharpness gain is invisible at mobile pixel sizes. Verified on-device
         // 2026-07-02: ?nofx was the smoothest variant on iPhone.
-        const postFxRequested = !config.nofx && !platform.mobile &&
+        const postFxRequested = !config.nofx && !mobile &&
             (anyPostEffectEnabled(postEffectSettings) || highPrecisionRendering);
 
         const enableCameraFrame = !app.xr.active && postFxRequested;

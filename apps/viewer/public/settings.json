@@ -2,6 +2,23 @@
   "version": 2,
   "tonemapping": "none",
   "highPrecisionRendering": false,
+  "sound": {
+    "intro": "sfx/intro.mp3",
+    "door": "sfx/door.mp3",
+    "volume": 0.32,
+    "gap": 0,
+    "footsteps": "sfx/footsteps.mp3?v=3",
+    "footstepsVolume": 0.28,
+    "measureStart": "sfx/measure-start.mp3",
+    "measureEnd": "sfx/measure-end.mp3",
+    "measureVolume": 0.4,
+    "droneAmbient": "sfx/drone-ambient.mp3?v=2",
+    "droneSwitch": "sfx/drone-switch.mp3",
+    "droneAmbientVolume": 0.1,
+    "droneSwitchVolume": 0.15,
+    "stagingReveal": "sfx/staging-reveal.mp3",
+    "stagingRevealVolume": 0.4
+  },
   "background": {
     "color": [
       0.05,
@@ -12,7 +29,7 @@
   "postEffectSettings": {
     "sharpness": {
       "enabled": true,
-      "amount": 0.5
+      "amount": 0.7
     },
     "bloom": {
       "enabled": false,
