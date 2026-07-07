@@ -461,17 +461,299 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
         }
     }
 
-    // Load and play sound
-    if (global.settings.soundUrl) {
-        const sound = new Audio(global.settings.soundUrl);
-        sound.crossOrigin = 'anonymous';
-        document.body.addEventListener('click', () => {
-            if (sound) {
-                sound.play();
+    // Entry sound effects: a subtle two-part "arrival" — a door unlocking over
+    // the loading screen, then an intro sting once you're standing in the room.
+    //
+    // When EMBEDDED (marketing site / customer iframe) the audio can't play from
+    // here: iOS only unlocks audio from a gesture in the same document, and this
+    // iframe never gets one before loading. The parent plays it, synced to the
+    // real "Vollbild" launch gesture; the boot splash (index.html) posts
+    // 'stepinside:viewerReady' at the fixed-arrival reveal to cue the parent's
+    // intro. Nothing to do here for that path.
+
+    // Built-in fallback for the TOP-LEVEL viewer (direct link / QR): there is no
+    // parent to choreograph the audio and no gesture until the visitor taps, so
+    // play the sequence on the first interaction after the scene is revealed.
+    // The intro url falls back to the legacy `soundUrl` for older experiences.
+    const sfx = global.settings.sound;
+    const introUrl = sfx?.intro ?? global.settings.soundUrl;
+    const doorUrl = sfx?.door;
+    if (window.top === window.self && (introUrl || doorUrl)) {
+        const volume = Math.max(0, Math.min(1, sfx?.volume ?? 0.6));
+        const gapMs = sfx?.gap ?? 0;
+
+        const makeAudio = (url?: string) => {
+            if (!url) return null;
+            const a = new Audio(url);
+            a.crossOrigin = 'anonymous';
+            a.preload = 'auto';
+            a.volume = volume;
+            return a;
+        };
+        const intro = makeAudio(introUrl);
+        const door = makeAudio(doorUrl);
+
+        const playDoor = () => {
+            if (!door) return;
+            door.currentTime = 0;
+            door.volume = volume;
+            window.setTimeout(() => door.play().catch(() => {}), Math.max(0, gapMs));
+        };
+
+        const playSequence = () => {
+            // Unlock the door element WITHIN the gesture: a browser only lets an
+            // element play later (from the intro's async 'ended') if it was
+            // already blessed by a real, user-initiated play(). A *muted* play
+            // does not grant that on iOS, so prime it unmuted but at volume 0 —
+            // a silent real play — then restore the volume.
+            if (door) {
+                door.volume = 0;
+                door.play().then(() => {
+                    door.pause();
+                    door.currentTime = 0;
+                    door.volume = volume;
+                }).catch(() => {
+                    door.volume = volume;
+                });
             }
-        }, {
-            capture: true,
-            once: true
+            if (intro) {
+                intro.addEventListener('ended', playDoor, { once: true });
+                // If the intro can't play, still give the door its moment.
+                intro.play().catch(playDoor);
+            } else {
+                playDoor();
+            }
+        };
+
+        // Arm on the first interaction, but only once the scene is on screen —
+        // a tap on the loading poster shouldn't fire the arrival. pointerdown
+        // covers both touch and mouse and beats 'click' to the punch.
+        const arm = () => {
+            document.body.addEventListener('pointerdown', playSequence, {
+                capture: true,
+                once: true
+            });
+        };
+        if (state.loaded) {
+            arm();
+        } else {
+            events.on('loaded:changed', arm);
+        }
+    }
+
+    // Audio elements that must fall silent when the embedding page HIDES the
+    // viewer (collapsed back to the website — the iframe stays mounted and would
+    // otherwise keep playing off-screen). Collected here; suspended/resumed by
+    // the parent's visibility message near the end of main().
+    const suspendable: HTMLAudioElement[] = [];
+
+    // Footstep audio while auto-walking to a clicked point. Starts when a walk
+    // actually begins (navTarget:set — fired only past the onboarding move-lock)
+    // and stops the instant the walker arrives or the walk is cancelled
+    // (navTarget:clear), with a short fade so a step isn't hard-clipped. The tap
+    // that starts the walk is itself the gesture that unlocks audio on iOS, and
+    // this runs in the viewer document, so it works embedded AND standalone.
+    const footstepsUrl = sfx?.footsteps;
+    if (footstepsUrl) {
+        const steps = new Audio(footstepsUrl);
+        steps.crossOrigin = 'anonymous';
+        steps.preload = 'auto';
+        steps.loop = true; // cover the rare walk longer than the clip
+        suspendable.push(steps);
+        const stepsVol = Math.max(0, Math.min(1, sfx?.footstepsVolume ?? 0.5));
+        let fadeTimer = 0;
+        const clearFade = () => {
+            if (fadeTimer) {
+                clearInterval(fadeTimer);
+                fadeTimer = 0;
+            }
+        };
+
+        events.on('navTarget:set', () => {
+            // Only in walk mode — navTarget:set also fires for click-to-fly, and
+            // footsteps while flying would be wrong.
+            if (state.cameraMode !== 'walk') return;
+            clearFade();
+            steps.volume = stepsVol;
+            // RESUME from where it paused (never reset to 0) so the long track
+            // advances across walks — the footsteps vary instead of repeating the
+            // same opening steps. `loop` wraps it round at the end.
+            if (steps.paused) {
+                steps.play().catch(() => {});
+            }
+        });
+
+        events.on('navTarget:clear', () => {
+            clearFade();
+            if (steps.paused) return;
+            // ~100 ms fade to silence, then PAUSE (keep the position) — reads as
+            // "stops when you stop" without hard-clipping, and the next walk picks
+            // up from here.
+            const dec = stepsVol / 6;
+            fadeTimer = window.setInterval(() => {
+                steps.volume = Math.max(0, steps.volume - dec);
+                if (steps.volume <= 0.001) {
+                    clearFade();
+                    steps.pause();
+                    steps.volume = stepsVol;
+                }
+            }, 16);
+        });
+    }
+
+    // Measurement SFX: a tick when the first point is placed (measureFirst) and a
+    // confirmation when the second point finalises the measure (measureComplete).
+    // Both fire from a tap, so audio is already unlocked; viewer-side, so it works
+    // embedded and standalone.
+    const measureStartUrl = sfx?.measureStart;
+    const measureEndUrl = sfx?.measureEnd;
+    if (measureStartUrl || measureEndUrl) {
+        const mVol = Math.max(0, Math.min(1, sfx?.measureVolume ?? 0.4));
+        const mkOneShot = (url?: string) => {
+            if (!url) return null;
+            const a = new Audio(url);
+            a.crossOrigin = 'anonymous';
+            a.preload = 'auto';
+            a.volume = mVol;
+            return a;
+        };
+        const mStart = mkOneShot(measureStartUrl);
+        const mEnd = mkOneShot(measureEndUrl);
+        if (mStart) suspendable.push(mStart);
+        if (mEnd) suspendable.push(mEnd);
+        const playOneShot = (a: HTMLAudioElement | null) => {
+            if (!a) return;
+            a.currentTime = 0;
+            a.volume = mVol;
+            a.play().catch(() => {});
+        };
+        events.on('measureFirst', () => playOneShot(mStart));
+        events.on('measureComplete', () => playOneShot(mEnd));
+    }
+
+    // Drone (aerial) mode SFX: a looping ambient hum WHILE in aerial mode — it
+    // starts on entering the drone and stops (fades) when leaving back to
+    // walk/etc. — plus a take-off/fly-away one-shot each time the view is
+    // switched (aerialNext / aerialPrev). Both are entered via a tap, so audio
+    // is already unlocked.
+    const droneAmbientUrl = sfx?.droneAmbient;
+    const droneSwitchUrl = sfx?.droneSwitch;
+    if (droneAmbientUrl || droneSwitchUrl) {
+        const ambVol = Math.max(0, Math.min(1, sfx?.droneAmbientVolume ?? 0.5));
+        const swVol = Math.max(0, Math.min(1, sfx?.droneSwitchVolume ?? 0.5));
+
+        const ambient = droneAmbientUrl ? new Audio(droneAmbientUrl) : null;
+        if (ambient) {
+            ambient.crossOrigin = 'anonymous';
+            // Lazy: the full ambient clip is a few MB — don't fetch it for the
+            // many visitors who never open the drone. play() streams it on the
+            // first aerial entry (a continuous hum tolerates the tiny start lag).
+            ambient.preload = 'none';
+            ambient.loop = true;
+            ambient.volume = ambVol;
+        }
+        const sw = droneSwitchUrl ? new Audio(droneSwitchUrl) : null;
+        if (sw) {
+            sw.crossOrigin = 'anonymous';
+            sw.preload = 'auto';
+            sw.volume = swVol;
+        }
+        if (ambient) suspendable.push(ambient);
+        if (sw) suspendable.push(sw);
+
+        let ambFade = 0;
+        const clearAmbFade = () => {
+            if (ambFade) {
+                clearInterval(ambFade);
+                ambFade = 0;
+            }
+        };
+
+        events.on('cameraMode:changed', () => {
+            if (!ambient) return;
+            if (state.cameraMode === 'aerial') {
+                clearAmbFade();
+                ambient.volume = ambVol;
+                if (ambient.paused) {
+                    ambient.play().catch(() => {});
+                }
+            } else if (!ambient.paused) {
+                // fade the hum out over ~300ms when leaving the drone
+                clearAmbFade();
+                const dec = ambVol / 10;
+                ambFade = window.setInterval(() => {
+                    ambient.volume = Math.max(0, ambient.volume - dec);
+                    if (ambient.volume <= 0.001) {
+                        clearAmbFade();
+                        ambient.pause();
+                        ambient.currentTime = 0;
+                        ambient.volume = ambVol;
+                    }
+                }, 30);
+            }
+        });
+
+        events.on('inputEvent', (name: string) => {
+            if (!sw) return;
+            if ((name === 'aerialNext' || name === 'aerialPrev') && state.cameraMode === 'aerial') {
+                sw.currentTime = 0;
+                sw.volume = swVol;
+                sw.play().catch(() => {});
+            }
+        });
+    }
+
+    // "Möbliert" staging reveal SFX: plays as the furnished room is unveiled
+    // after the loader (staging.ts fires 'stagingReveal'). The reveal is async
+    // (post-loader), so it isn't inside a gesture — prime the element on
+    // 'stagingStart' (fired within the pill click) so iOS lets it play later.
+    const stagingRevealUrl = sfx?.stagingReveal;
+    if (stagingRevealUrl) {
+        const reveal = new Audio(stagingRevealUrl);
+        reveal.crossOrigin = 'anonymous';
+        reveal.preload = 'auto';
+        const revVol = Math.max(0, Math.min(1, sfx?.stagingRevealVolume ?? 0.4));
+        reveal.volume = revVol;
+        suspendable.push(reveal);
+
+        let primed = false;
+        events.on('stagingStart', () => {
+            if (primed) return;
+            primed = true;
+            // silent real play → unlocks the element for the later async reveal
+            reveal.volume = 0;
+            reveal.play().then(() => {
+                reveal.pause();
+                reveal.currentTime = 0;
+                reveal.volume = revVol;
+            }).catch(() => {
+                reveal.volume = revVol;
+            });
+        });
+        events.on('stagingReveal', () => {
+            reveal.currentTime = 0;
+            reveal.volume = revVol;
+            reveal.play().catch(() => {});
+        });
+    }
+
+    // Suspend all viewer audio when the embedding page hides the viewer (the
+    // "close"/collapse on the website keeps the iframe mounted, so a loop like
+    // the drone hum would otherwise keep playing off-screen). Resume whatever was
+    // playing when it's shown again. Message is posted by the parent (Demos.tsx).
+    if (window.parent && window.parent !== window) {
+        let suspendedPlaying: HTMLAudioElement[] = [];
+        window.addEventListener('message', (e: MessageEvent) => {
+            if (e.source !== window.parent) return;
+            const data = e.data as { type?: string, visible?: boolean } | null;
+            if (data?.type !== 'stepinside:visibility') return;
+            if (data.visible === false) {
+                suspendedPlaying = suspendable.filter(a => !a.paused);
+                suspendedPlaying.forEach(a => a.pause());
+            } else {
+                suspendedPlaying.forEach(a => a.play().catch(() => {}));
+                suspendedPlaying = [];
+            }
         });
     }
 

@@ -270,6 +270,10 @@ const initStaging = (global: Global) => {
     const generate = async (styleId: string | undefined = selectedStyle) => {
         if (loading) return;
 
+        // Signal the staging start WITHIN the click gesture so the reveal SFX can
+        // be unlocked (primed) for iOS — the reveal itself happens async later.
+        events.fire('stagingStart');
+
         // Cache per style AND orientation (portrait/landscape use different
         // images), so rotating the device still shows the right one.
         const key = styleId ? `${styleId}:${isPortrait() ? 'p' : 'l'}` : undefined;
@@ -310,6 +314,7 @@ const initStaging = (global: Global) => {
             if (image) {
                 if (key) cache.set(key, image);
                 showResult(image);
+                events.fire('stagingReveal');   // reveal after the loader → SFX
                 setLabel('Möbliert sehen');
             } else {
                 failBack('Kein Bild hinterlegt');
@@ -363,6 +368,7 @@ const initStaging = (global: Global) => {
             if (typeof data.image === 'string' && data.image.length > 0) {
                 if (key) cache.set(key, data.image);
                 showResult(data.image);
+                events.fire('stagingReveal');   // reveal after the loader → SFX
                 setLabel('Möbliert sehen');
             } else {
                 failBack('Kein Bild erhalten');

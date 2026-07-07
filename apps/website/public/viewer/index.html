@@ -229,9 +229,12 @@
             }
             /* The StepInside filling-logo loader (same as the "Möbliert sehen"
                staging loader): a dim base wordmark with a bright copy revealed
-               left-to-right. It fills ONCE and eases toward full; when the scan
-               is ready (.is-complete) it snaps to 100% and the scan is revealed
-               — i.e. the logo finishing == the tour opening. */
+               left-to-right. It fills fast at first, then keeps creeping toward
+               ~96% (never freezing) for as long as the scan streams; when the
+               scene is ready it snaps to 100% and reveals — the logo finishing ==
+               the tour opening. The embedding page lands its intro on the reveal
+               (via the stepinside:viewerReady message), so audio stays in sync
+               with the arrival no matter how long the load takes. */
             #bootSplash .bootLoader {
                 position: relative;
                 animation: bootLoaderIn 560ms cubic-bezier(0.16, 1, 0.3, 1) both;
@@ -260,15 +263,17 @@
                 inset: 0;
                 color: #fff;
                 clip-path: inset(0 100% 0 0);
-                /* eases toward ~90% over the expected load, then HOLDS (forwards)
-                   until the scan is ready — never loops back to empty. */
-                animation: bootLoaderFill 2.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+                /* "Living" loader: fills fast at first, then keeps creeping toward
+                   ~96% (never freezing) for as long as the scan streams — so a
+                   long load never looks stalled. When the scene is ready it snaps
+                   to 100% (.is-complete) and reveals. */
+                animation: bootLoaderFill 9s cubic-bezier(0.1, 0.8, 0.2, 1) forwards;
             }
-            /* scan ready: complete the fill, then #bootSplash fades out */
+            /* scene ready: snap the remainder to 100%, then #bootSplash fades out */
             #bootSplash.is-complete .bootMark--fill {
                 animation: none;
                 clip-path: inset(0 0 0 0);
-                transition: clip-path 0.28s ease-out;
+                transition: clip-path 0.35s ease-out;
             }
             @keyframes bootLoaderIn {
                 from { transform: translateY(-16vh) scale(0.55); opacity: 0; }
@@ -277,11 +282,11 @@
             }
             @keyframes bootLoaderFill {
                 0%   { clip-path: inset(0 100% 0 0); }
-                100% { clip-path: inset(0 10% 0 0); }
+                100% { clip-path: inset(0 4% 0 0); }
             }
             @media (prefers-reduced-motion: reduce) {
                 #bootSplash .bootLoader { animation: none; }
-                #bootSplash .bootMark--fill { animation: none; clip-path: inset(0 45% 0 0); }
+                #bootSplash .bootMark--fill { animation: none; clip-path: inset(0 12% 0 0); }
                 #bootSplash.is-complete .bootMark--fill { clip-path: inset(0 0 0 0); }
             }
         </style>
@@ -1200,21 +1205,52 @@
                 bootSplash.classList.add('is-hidden');
                 setTimeout(() => bootSplash.remove(), 600);
             };
-            // Scan ready: fill the logo to 100%, then reveal the scan — the
-            // wordmark finishing IS the tour opening.
+
+            // "Living" arrival. The CSS fill creeps toward ~96% on its own (never
+            // freezing). We reveal the scene when the first frame is ready — but
+            // never before a short MIN_MS, so on a fast load the wordmark still
+            // gets a beat instead of flashing. On reveal we snap to 100%, fade the
+            // splash, and post 'stepinside:viewerReady' so the embedding page
+            // lands its intro sting on the actual arrival (any load time).
+            const MIN_MS = 1200;
+            const SNAP_MS = 350;
+            const loaderStart = Date.now();
+
+            const signalViewerReady = () => {
+                try {
+                    if (window.parent && window.parent !== window) {
+                        window.parent.postMessage({ type: 'stepinside:viewerReady' }, '*');
+                    }
+                } catch (e) { /* cross-origin parent: ignore */ }
+            };
+            // Snap the fill to 100%, cue the intro as the wordmark completes, then
+            // fade the splash and reveal the scene.
             const finishBootSplash = () => {
                 if (bootHidden || !bootSplash) return;
-                bootSplash.classList.add('is-complete');
-                setTimeout(removeBootSplash, 300);
+                bootSplash.classList.add('is-complete');      // snaps to 100% over SNAP_MS
+                setTimeout(signalViewerReady, SNAP_MS);       // intro on completion
+                setTimeout(removeBootSplash, SNAP_MS + 20);   // then fade the splash
             };
-            const bootSafetyTimer = setTimeout(finishBootSplash, 20000);
+            // Reveal once the first frame is ready AND the minimum has elapsed.
+            let firstFrameSeen = false;
+            const tryFinish = () => {
+                if (bootHidden || !bootSplash || !firstFrameSeen) return;
+                const remaining = loaderStart + MIN_MS - Date.now();
+                if (remaining > 0) {
+                    setTimeout(tryFinish, remaining);
+                    return;
+                }
+                finishBootSplash();
+            };
+            const bootSafetyTimer = setTimeout(() => { firstFrameSeen = true; tryFinish(); }, 20000);
 
             // viewer.ts calls window.firstFrame?.() once the first frame has
             // rendered — chain onto any existing hook (screenshot tooling).
             const prevFirstFrame = window.firstFrame;
             window.firstFrame = () => {
                 clearTimeout(bootSafetyTimer);
-                finishBootSplash();
+                firstFrameSeen = true;
+                tryFinish();
                 prevFirstFrame?.();
             };
 

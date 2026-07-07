@@ -131,6 +131,7 @@ const initMeasure = (global: Global, _picker: Picker, collision: Collision | nul
             a = p;          // first point, or restart after a finished measurement
             b = null;
             preview = p;
+            events.fire('measureFirst');
         } else {
             b = p;          // second point -> complete the measurement
             events.fire('measureComplete');

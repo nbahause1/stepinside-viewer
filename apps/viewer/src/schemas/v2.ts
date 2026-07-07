@@ -78,7 +78,45 @@ type ExperienceSettings = {
     version: 2,
     tonemapping: 'none' | 'linear' | 'filmic' | 'hejl' | 'aces' | 'aces2' | 'neutral',
     highPrecisionRendering: boolean,
+    // Legacy single entry sound (played once on the first user interaction).
+    // Superseded by `sound` below; still honoured as the intro if `sound` is
+    // absent.
     soundUrl?: string,
+
+    // Entry sound effects (optional; cast-through like `concierge` — validateV2
+    // only casts, so extra JSON keys pass through untouched). Subtle SFX played
+    // on the first user interaction AFTER the scene is revealed (gesture-gated:
+    // iOS/Safari block autoplay without a user gesture). `intro` plays first,
+    // then `door` once the intro finishes — the "arrival + step inside" beat.
+    // `volume` (0..1, default 0.6) keeps them discreet; `gap` (ms, default 0)
+    // adds a pause between intro-end and door-start (negative overlaps them).
+    // `footsteps` is a separate loop played while auto-walking to a clicked
+    // point (starts on navTarget:set, stops on navTarget:clear); `footstepsVolume`
+    // (0..1, default 0.5) sets its level.
+    // `measureStart` plays when the first measurement point is placed and
+    // `measureEnd` when the second finalises it; `measureVolume` (default 0.4).
+    // `droneAmbient` is a hum looped while in aerial (drone) mode (starts on
+    // entering, stops on leaving); `droneSwitch` is a take-off one-shot on each
+    // aerial view change. `droneAmbientVolume`/`droneSwitchVolume` default 0.5.
+    sound?: {
+        intro?: string,
+        door?: string,
+        volume?: number,
+        gap?: number,
+        footsteps?: string,
+        footstepsVolume?: number,
+        measureStart?: string,
+        measureEnd?: string,
+        measureVolume?: number,
+        droneAmbient?: string,
+        droneSwitch?: string,
+        droneAmbientVolume?: number,
+        droneSwitchVolume?: number,
+        // `stagingReveal` plays when the furnished ("Möbliert") room is revealed
+        // after the loader; `stagingRevealVolume` (default 0.4).
+        stagingReveal?: string,
+        stagingRevealVolume?: number
+    },
     background: {
         color: [number, number, number],
         skyboxUrl?: string
