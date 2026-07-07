@@ -73,6 +73,7 @@ export default function Demos() {
       if (e.data?.type !== "stepinside:viewerReady") return;
       const playIntro = () => {
         intro.currentTime = 0;
+        intro.muted = false;
         intro.volume = SFX_VOLUME;
         intro.play().catch(() => {});
       };
@@ -114,16 +115,23 @@ export default function Demos() {
         });
       }
       if (intro) {
-        intro.volume = 0;
+        // Prime the intro within the gesture so it can play later from the async
+        // viewerReady message. MUTED, not volume=0: iOS freezes .volume, so a
+        // volume=0 prime actually plays a blip of the intro at full volume during
+        // loading — exactly the "intro over the door" the door bed should own.
+        // muted IS honoured on iOS, so this warms/unlocks it silently; we unmute
+        // before the real deferred play.
+        intro.muted = true;
+        intro.volume = SFX_VOLUME;
         intro
           .play()
           .then(() => {
             intro.pause();
             intro.currentTime = 0;
-            intro.volume = SFX_VOLUME;
+            intro.muted = false;
           })
           .catch(() => {
-            intro.volume = SFX_VOLUME;
+            intro.muted = false;
           });
       }
     }

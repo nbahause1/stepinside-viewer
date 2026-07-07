@@ -2379,36 +2379,46 @@ body.staging-open #surveyCard {
 #stageOverlay #stageHint {
   position: absolute;
   left: 50%;
-  bottom: calc(max(20px, env(safe-area-inset-bottom)) + 66px);
-  transform: translate(-50%, 6px);
+  bottom: calc(max(20px, env(safe-area-inset-bottom)) + 72px);
+  transform: translateX(-50%);
   z-index: 2;
   max-width: calc(100vw - 40px);
-  padding: 8px 16px;
   text-align: center;
   white-space: nowrap;
   font-family: "Inter", sans-serif;
-  font-weight: 500;
-  font-size: 13px;
+  font-weight: 600;
+  font-size: 14px;
   letter-spacing: 0.01em;
-  color: rgba(255, 255, 255, 0.96);
-  border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: linear-gradient(180deg, rgba(30, 30, 32, 0.5), rgba(18, 18, 20, 0.42));
-  backdrop-filter: blur(20px) saturate(150%);
-  -webkit-backdrop-filter: blur(20px) saturate(150%);
-  box-shadow: 0 12px 30px -14px rgba(0, 0, 0, 0.5), inset 0 1px 0 0 rgba(255, 255, 255, 0.12);
+  color: #fff;
+  text-shadow: 0 1px 10px rgba(0, 0, 0, 0.6), 0 0 3px rgba(0, 0, 0, 0.45);
   pointer-events: none;
   opacity: 0;
-  transition: opacity 600ms var(--ease-out), transform 600ms var(--ease-out);
+  transition: opacity 500ms var(--ease-out);
 }
 #stageOverlay #stageHint.is-visible {
   opacity: 1;
-  transform: translate(-50%, 0);
+}
+#stageOverlay #stageHint.is-pulsing {
+  animation: stageHintPulse 1.35s ease-in-out infinite;
 }
 #stageOverlay #stageHint.hidden {
   display: none;
 }
 
+@keyframes stageHintPulse {
+  0%, 100% {
+    opacity: 0.5;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  #stageHint.is-pulsing {
+    animation: none;
+    opacity: 1;
+  }
+}
 @keyframes stageFadeIn {
   from {
     opacity: 0;

@@ -131,10 +131,10 @@ const initStaging = (global: Global) => {
     // style switch without losing the good result behind it).
     let shownUrl: string | undefined;
 
-    // Transient coach hint teaching the press-and-hold-for-original gesture:
-    // shown ONCE, a couple of seconds after the first reveal, fading softly in
-    // then out — or dismissed the instant the visitor presses the image.
-    let hintShown = false;
+    // Coach hint teaching the press-and-hold-for-original gesture. It fades in a
+    // couple of seconds after the reveal, then PULSES and STAYS until the visitor
+    // has performed the gesture once (`peekedOnce`); after that it never returns.
+    let peekedOnce = false;
     const hintTimers: number[] = [];
     const clearHintTimers = () => {
         while (hintTimers.length) window.clearTimeout(hintTimers.pop());
@@ -142,20 +142,23 @@ const initStaging = (global: Global) => {
     const hideHint = () => {
         if (!hintEl) return;
         clearHintTimers();
-        hintEl.classList.remove('is-visible');
-        hintTimers.push(window.setTimeout(() => hintEl.classList.add('hidden'), 600));
+        hintEl.classList.remove('is-visible', 'is-pulsing');
+        hintTimers.push(window.setTimeout(() => hintEl.classList.add('hidden'), 500));
     };
-    const showHintOnce = () => {
-        if (!hintEl || hintShown) return;
-        hintShown = true;
+    const maybeShowHint = () => {
+        if (!hintEl || peekedOnce) return;
+        if (hintEl.classList.contains('is-visible')) return;   // already up
+        clearHintTimers();
         hintTimers.push(window.setTimeout(() => {
-            // only if the furnished room is still on screen
-            if (overlay.classList.contains('hidden') || !showingFurnished) return;
+            if (peekedOnce || overlay.classList.contains('hidden') || !showingFurnished) return;
             hintEl.classList.remove('hidden');
-            void hintEl.offsetWidth;            // restart the fade transition
-            hintEl.classList.add('is-visible');
-            hintTimers.push(window.setTimeout(hideHint, 3200));
-        }, 2000));
+            void hintEl.offsetWidth;             // restart the fade-in transition
+            hintEl.classList.add('is-visible');  // soft fade in
+            // then throb; it stays visible until the gesture is performed
+            hintTimers.push(window.setTimeout(() => {
+                if (!peekedOnce) hintEl.classList.add('is-pulsing');
+            }, 520));
+        }, 1800));
     };
 
     // Show the finished furnished image (no loading state); soft-reveal it.
@@ -170,7 +173,7 @@ const initStaging = (global: Global) => {
         void img.offsetWidth;
         img.classList.add('is-revealed');
         setShowing(true);
-        showHintOnce();
+        maybeShowHint();
     };
 
     // Open the overlay in its generating state IMMEDIATELY (so the logo loader
@@ -459,7 +462,8 @@ const initStaging = (global: Global) => {
         // ignore presses that start on a control (toggle/close/style chips)
         if ((event.target as HTMLElement).closest('button')) return;
         if (!showingFurnished) return;
-        hideHint();             // they found the gesture — drop the coach hint
+        peekedOnce = true;      // gesture performed — the coach hint never returns
+        hideHint();
         overlay.classList.add('is-scan');
     };
     const peekEnd = () => {

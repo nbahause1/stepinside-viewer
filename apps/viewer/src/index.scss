@@ -2861,42 +2861,42 @@ body.staging-open {
         &:active { transform: scale(0.96); }
     }
 
-    // press-and-hold coach hint — a glass pill just above the Home bar that
-    // fades softly in and out (opacity + slight rise). Starts display:none via
-    // .hidden; becomes visible via .is-visible (see staging.ts showHintOnce).
+    // press-and-hold coach hint — plain WHITE TEXT (no box), just above the Home
+    // bar. Fades softly in, then PULSES ("pocht") to draw the eye and STAYS until
+    // the visitor performs the gesture once (staging.ts clears it on first press).
     #stageHint {
         position: absolute;
         left: 50%;
-        bottom: calc(max(20px, env(safe-area-inset-bottom)) + 66px);
-        transform: translate(-50%, 6px);
+        bottom: calc(max(20px, env(safe-area-inset-bottom)) + 72px);
+        transform: translateX(-50%);
         z-index: 2;
         max-width: calc(100vw - 40px);
-        padding: 8px 16px;
         text-align: center;
         white-space: nowrap;
         font-family: 'Inter', sans-serif;
-        font-weight: 500;
-        font-size: 13px;
+        font-weight: 600;
+        font-size: 14px;
         letter-spacing: 0.01em;
-        color: rgba(255, 255, 255, 0.96);
-        border-radius: 999px;
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        background: linear-gradient(180deg, rgba(30, 30, 32, 0.5), rgba(18, 18, 20, 0.42));
-        backdrop-filter: blur(20px) saturate(150%);
-        -webkit-backdrop-filter: blur(20px) saturate(150%);
-        box-shadow:
-            0 12px 30px -14px rgba(0, 0, 0, 0.5),
-            inset 0 1px 0 0 rgba(255, 255, 255, 0.12);
+        color: #fff;
+        // legibility over any image without a box behind it
+        text-shadow: 0 1px 10px rgba(0, 0, 0, 0.6), 0 0 3px rgba(0, 0, 0, 0.45);
         pointer-events: none;
         opacity: 0;
-        transition: opacity 600ms var(--ease-out), transform 600ms var(--ease-out);
+        transition: opacity 500ms var(--ease-out);
 
-        &.is-visible {
-            opacity: 1;
-            transform: translate(-50%, 0);
-        }
+        &.is-visible { opacity: 1; }              // soft fade-in
+        &.is-pulsing { animation: stageHintPulse 1.35s ease-in-out infinite; }
         &.hidden { display: none; }
     }
+}
+
+// gentle throb so the hint keeps drawing the eye until the gesture is performed
+@keyframes stageHintPulse {
+    0%, 100% { opacity: 0.5; }
+    50%      { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+    #stageHint.is-pulsing { animation: none; opacity: 1; }
 }
 
 @keyframes stageFadeIn {
