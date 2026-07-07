@@ -31,6 +31,7 @@ export default function Demos() {
   const [expanded, setExpanded] = useState(false);
   const doorRef = useRef<HTMLAudioElement | null>(null);
   const introRef = useRef<HTMLAudioElement | null>(null);
+  const doorPlayingRef = useRef(false);
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
   // Tell the viewer when it's hidden (collapsed to the website) vs shown, so it
@@ -55,11 +56,18 @@ export default function Demos() {
     }
     doorRef.current = door;
     introRef.current = intro;
+    // Track the door's playback with our OWN flag, not door.paused/ended: on a
+    // fast (cached) load the viewerReady message can arrive before the media
+    // element has flipped paused→false, so the state read is racy. The 'ended'
+    // event, by contrast, is reliable.
+    door.addEventListener("ended", () => {
+      doorPlayingRef.current = false;
+    });
 
-    // The viewer (same-origin iframe) posts this once the scene is on screen.
-    // On a CACHED scan the reveal fires almost instantly, well before the door
-    // "unlock" (~2.9s) has finished — so don't stomp the intro over it: if the
-    // door is still playing, wait for it to end, then play the intro.
+    // The viewer posts this once the scene is on screen (the loader now holds
+    // the reveal until at least the door "unlock" length, so on a cached scan
+    // the room appears AS the door finishes — not 1.5s into it). If the door is
+    // somehow still going, defer the intro until it ends so they never overlap.
     const onMessage = (e: MessageEvent) => {
       if (e.origin !== window.location.origin) return;
       if (e.data?.type !== "stepinside:viewerReady") return;
@@ -68,7 +76,7 @@ export default function Demos() {
         intro.volume = SFX_VOLUME;
         intro.play().catch(() => {});
       };
-      if (!door.paused && !door.ended) {
+      if (doorPlayingRef.current) {
         let done = false;
         const go = () => {
           if (done) return;
@@ -100,7 +108,10 @@ export default function Demos() {
       if (door) {
         door.currentTime = 0;
         door.volume = SFX_VOLUME;
-        door.play().catch(() => {});
+        doorPlayingRef.current = true;
+        door.play().catch(() => {
+          doorPlayingRef.current = false;
+        });
       }
       if (intro) {
         intro.volume = 0;
