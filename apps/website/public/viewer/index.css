@@ -2712,5 +2712,20 @@ body.staging-open #surveyCard {
     -webkit-backdrop-filter: none;
   }
 }
+/* ================================================================
+   MOBILE / TOUCH: DECLUTTER THE TOP
+   ----------------------------------------------------------------
+   On a phone the StepInside brand pill and the highlights pill sat
+   stacked at the top — too crowded. Drop the brand pill and lift the
+   highlights pill into its (top-centre) slot. Desktop keeps both.
+   ================================================================ */
+@media (pointer: coarse) {
+  #brandDome {
+    display: none;
+  }
+  #annotationNav {
+    top: max(14px, env(safe-area-inset-top));
+  }
+}
 
 /*# sourceMappingURL=index.css.map */
