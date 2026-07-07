@@ -703,6 +703,38 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
         });
     }
 
+    // Drone view-switch polish — a subtle AUTOFOCUS HUNT. On a view change the
+    // camera briefly loses focus and quickly hunts to lock it (defocus → rack in
+    // → small overshoot → settle sharp), like a real drone camera refocusing.
+    // Short (~0.5s) and scene-only via the Web Animations API — fill defaults to
+    // 'none', so nothing lingers on the canvas afterwards.
+    {
+        const sceneCanvas = app.graphicsDevice.canvas as HTMLCanvasElement;
+        let focusAnim: Animation | null = null;
+        const refocus = () => {
+            focusAnim?.cancel();
+            focusAnim = sceneCanvas.animate([
+                { filter: 'blur(6px)' },            // lost focus as the shot changes
+                { filter: 'blur(0.4px)', offset: 0.42 }, // racks in fast
+                { filter: 'blur(2.4px)', offset: 0.58 }, // overshoots — the "hunt"
+                { filter: 'blur(0.3px)', offset: 0.78 }, // back toward sharp
+                { filter: 'blur(1px)', offset: 0.88 },   // tiny second pump
+                { filter: 'blur(0px)' }              // locks sharp
+            ], { duration: 520, easing: 'ease-out' });
+        };
+        events.on('inputEvent', (name: string) => {
+            if ((name === 'aerialNext' || name === 'aerialPrev') && state.cameraMode === 'aerial') {
+                refocus();
+            }
+        });
+        events.on('cameraMode:changed', () => {
+            if (state.cameraMode !== 'aerial') {
+                focusAnim?.cancel();
+                focusAnim = null;
+            }
+        });
+    }
+
     // "Möbliert" staging reveal SFX: plays as the furnished room is unveiled
     // after the loader (staging.ts fires 'stagingReveal'). The reveal is async
     // (post-loader), so it isn't inside a gesture — prime the element on
