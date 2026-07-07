@@ -595,52 +595,21 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
         events.on('measureComplete', () => mEnd?.play());
     }
 
-    // Drone (aerial) mode SFX. A CONSTANT hum is fatiguing no matter how quiet,
-    // so the drone is tied to ACTION instead: a soft take-off swoosh when you
-    // enter aerial and on every view switch, plus a brief ambient swell on entry
-    // that then decays fully to silence (~2.2s) — a spool-up that settles, never
-    // a persistent bed.
-    const droneAmbientUrl = sfx?.droneAmbient;
+    // Drone (aerial) SFX: just the take-off swoosh — the SAME sound on entering
+    // aerial and on every view switch. No separate ambient bed/swell (any
+    // constant or trailing tone read as laggy/nagging); one crisp action sound
+    // everywhere is tighter.
     const droneSwitchUrl = sfx?.droneSwitch;
-    if (droneAmbientUrl || droneSwitchUrl) {
-        const ambVol = clamp01(sfx?.droneAmbientVolume ?? 0.5);
+    if (droneSwitchUrl) {
         const swVol = clamp01(sfx?.droneSwitchVolume ?? 0.5);
-        const ambient = droneAmbientUrl ? new Howl({ src: [droneAmbientUrl], loop: false, volume: 0, preload: true }) : null;
-        const sw = droneSwitchUrl ? new Howl({ src: [droneSwitchUrl], volume: swVol, preload: true }) : null;
-        let ambId: number | null = null;
-
-        const stopAmbient = () => {
-            if (ambient && ambId !== null) { ambient.stop(ambId); ambId = null; }
-        };
-
-        // Spool up on entry, then settle to silence — not a bed you have to endure.
-        const swellAmbient = () => {
-            if (!ambient) return;
-            stopAmbient();
-            const id = ambient.play();
-            ambId = id;
-            ambient.volume(0, id);
-            ambient.fade(0, ambVol, 250, id); // snappy spool up
-            ambient.once('fade', () => {
-                if (ambId !== id || state.cameraMode !== 'aerial') { ambient.stop(id); return; }
-                ambient.fade(ambVol, 0, 800, id); // short decay — stays tied to the press
-                ambient.once('fade', () => { if (ambId === id) stopAmbient(); }, id);
-            }, id);
-        };
+        const sw = new Howl({ src: [droneSwitchUrl], volume: swVol, preload: true });
 
         events.on('cameraMode:changed', () => {
-            if (state.cameraMode === 'aerial') {
-                if (sw) sw.play();  // take-off swoosh on entering aerial
-                swellAmbient();
-            } else if (ambient && ambId !== null) {
-                const id = ambId; // leaving aerial mid-swell: kill it quickly
-                ambient.fade(ambient.volume(id) as number, 0, 150, id);
-                ambient.once('fade', () => { if (ambId === id) stopAmbient(); }, id);
-            }
+            if (state.cameraMode === 'aerial') sw.play(); // take-off on entering aerial
         });
 
         events.on('inputEvent', (name: string) => {
-            if (sw && (name === 'aerialNext' || name === 'aerialPrev') && state.cameraMode === 'aerial') {
+            if ((name === 'aerialNext' || name === 'aerialPrev') && state.cameraMode === 'aerial') {
                 sw.play();
             }
         });
