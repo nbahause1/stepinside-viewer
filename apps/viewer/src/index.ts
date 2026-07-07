@@ -547,6 +547,70 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
     // the parent's visibility message near the end of main().
     const suspendable: HTMLAudioElement[] = [];
 
+    // --- iOS-safe audio via Web Audio ---------------------------------------
+    // HTMLMediaElement.volume (and volume-based fades) are FROZEN on iOS Safari,
+    // which made sounds play full-volume, un-stoppable, and clicky on pause.
+    // Route every element through a GainNode: the gain sets the level AND ramps
+    // for click-free fades — both work on iOS. The shared context is created/
+    // resumed on the first user gesture. Falls back to element.volume where Web
+    // Audio is unavailable.
+    const AudioCtor = (window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext);
+    let actx: AudioContext | null = null;
+    const ensureCtx = (): AudioContext | null => {
+        if (!actx && AudioCtor) {
+            try {
+                actx = new AudioCtor();
+            } catch (e) {
+                actx = null;
+            }
+        }
+        if (actx && actx.state === 'suspended') actx.resume().catch(() => {});
+        return actx;
+    };
+    window.addEventListener('pointerdown', () => ensureCtx(), { capture: true });
+    window.addEventListener('touchstart', () => ensureCtx(), { capture: true, passive: true });
+
+    type Snd = { el: HTMLAudioElement, to: (v: number, ramp?: number) => void, vol: number };
+    const makeSound = (url: string, vol: number, loop: boolean, preload: 'auto' | 'none' = 'auto'): Snd => {
+        const el = new Audio(url);
+        el.crossOrigin = 'anonymous';
+        el.preload = preload;
+        el.loop = loop;
+        let gain: GainNode | null = null;
+        let connected = false;
+        const connect = () => {
+            if (connected) return;
+            const ctx = ensureCtx();
+            if (!ctx) return;
+            connected = true;
+            try {
+                const src = ctx.createMediaElementSource(el);
+                gain = ctx.createGain();
+                gain.gain.value = 0; // silent until ramped up on play
+                src.connect(gain).connect(ctx.destination);
+            } catch (e) { /* already connected / unsupported */ }
+        };
+        // Ramp the level to v over `ramp` seconds (click-free). Connect lazily so
+        // createMediaElementSource happens BEFORE the first play() — otherwise the
+        // element would briefly play un-gated at full volume.
+        const to = (v: number, ramp = 0.02) => {
+            connect();
+            if (gain && actx) {
+                const t = actx.currentTime;
+                try {
+                    gain.gain.cancelScheduledValues(t);
+                    gain.gain.setValueAtTime(gain.gain.value, t);
+                    gain.gain.linearRampToValueAtTime(v, t + Math.max(0.005, ramp));
+                } catch (e) {
+                    gain.gain.value = v;
+                }
+            } else {
+                el.volume = Math.max(0, Math.min(1, v)); // desktop fallback
+            }
+        };
+        return { el, to, vol };
+    };
+
     // Footstep audio while auto-walking to a clicked point. Starts when a walk
     // actually begins (navTarget:set — fired only past the onboarding move-lock)
     // and stops the instant the walker arrives or the walk is cancelled
@@ -555,27 +619,22 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
     // this runs in the viewer document, so it works embedded AND standalone.
     const footstepsUrl = sfx?.footsteps;
     if (footstepsUrl) {
-        const steps = new Audio(footstepsUrl);
-        steps.crossOrigin = 'anonymous';
-        steps.preload = 'auto';
-        steps.loop = true; // cover the rare walk longer than the clip
-        suspendable.push(steps);
-        steps.volume = Math.max(0, Math.min(1, sfx?.footstepsVolume ?? 0.5));
+        const steps = makeSound(footstepsUrl, Math.max(0, Math.min(1, sfx?.footstepsVolume ?? 0.5)), true);
+        suspendable.push(steps.el);
 
         events.on('navTarget:set', () => {
             // Only in walk mode — navTarget:set also fires for click-to-fly.
             if (state.cameraMode !== 'walk') return;
-            // RESUME from where it paused (never reset to 0) so the long track
-            // advances across walks — the footsteps vary instead of repeating.
-            if (steps.paused) steps.play().catch(() => {});
+            // Keep the element LOOPING throughout; gate audibility with a gain
+            // ramp instead of pause/play. That's click-free and far more reliable
+            // on iOS (where rapid play/pause dropped out). The position keeps
+            // advancing, so the steps still vary from walk to walk.
+            steps.to(steps.vol, 0.03);          // fade in (connects first)
+            if (steps.el.paused) steps.el.play().catch(() => {});
         });
 
         events.on('navTarget:clear', () => {
-            // Pause the INSTANT the walk ends. A volume fade must NOT be used:
-            // iOS Safari freezes HTMLMediaElement.volume, so a fade never reaches
-            // 0 and the sound would never stop (and thus never resume from
-            // position on the next walk). A direct pause works everywhere.
-            if (!steps.paused) steps.pause();
+            steps.to(0, 0.05);                  // fade to silence; keep looping
         });
     }
 
@@ -587,23 +646,15 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
     const measureEndUrl = sfx?.measureEnd;
     if (measureStartUrl || measureEndUrl) {
         const mVol = Math.max(0, Math.min(1, sfx?.measureVolume ?? 0.4));
-        const mkOneShot = (url?: string) => {
-            if (!url) return null;
-            const a = new Audio(url);
-            a.crossOrigin = 'anonymous';
-            a.preload = 'auto';
-            a.volume = mVol;
-            return a;
-        };
-        const mStart = mkOneShot(measureStartUrl);
-        const mEnd = mkOneShot(measureEndUrl);
-        if (mStart) suspendable.push(mStart);
-        if (mEnd) suspendable.push(mEnd);
-        const playOneShot = (a: HTMLAudioElement | null) => {
-            if (!a) return;
-            a.currentTime = 0;
-            a.volume = mVol;
-            a.play().catch(() => {});
+        const mStart = measureStartUrl ? makeSound(measureStartUrl, mVol, false) : null;
+        const mEnd = measureEndUrl ? makeSound(measureEndUrl, mVol, false) : null;
+        if (mStart) suspendable.push(mStart.el);
+        if (mEnd) suspendable.push(mEnd.el);
+        const playOneShot = (s: Snd | null) => {
+            if (!s) return;
+            s.el.currentTime = 0;
+            s.to(s.vol, 0.006);   // quick ramp-in avoids the start click
+            s.el.play().catch(() => {});
         };
         events.on('measureFirst', () => playOneShot(mStart));
         events.on('measureComplete', () => playOneShot(mEnd));
@@ -620,46 +671,38 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
         const ambVol = Math.max(0, Math.min(1, sfx?.droneAmbientVolume ?? 0.5));
         const swVol = Math.max(0, Math.min(1, sfx?.droneSwitchVolume ?? 0.5));
 
-        const ambient = droneAmbientUrl ? new Audio(droneAmbientUrl) : null;
-        if (ambient) {
-            ambient.crossOrigin = 'anonymous';
-            // Lazy: the full ambient clip is a few MB — don't fetch it for the
-            // many visitors who never open the drone. play() streams it on the
-            // first aerial entry (a continuous hum tolerates the tiny start lag).
-            ambient.preload = 'none';
-            ambient.loop = true;
-            ambient.volume = ambVol;
-        }
-        const sw = droneSwitchUrl ? new Audio(droneSwitchUrl) : null;
-        if (sw) {
-            sw.crossOrigin = 'anonymous';
-            sw.preload = 'auto';
-            sw.volume = swVol;
-        }
-        if (ambient) suspendable.push(ambient);
-        if (sw) suspendable.push(sw);
+        // Lazy preload for the ambient: the full clip is a few MB, don't fetch
+        // it for visitors who never open the drone.
+        const ambient = droneAmbientUrl ? makeSound(droneAmbientUrl, ambVol, true, 'none') : null;
+        const sw = droneSwitchUrl ? makeSound(droneSwitchUrl, swVol, false) : null;
+        if (ambient) suspendable.push(ambient.el);
+        if (sw) suspendable.push(sw.el);
 
         events.on('cameraMode:changed', () => {
             if (!ambient) return;
             if (state.cameraMode === 'aerial') {
-                ambient.volume = ambVol;
-                if (ambient.paused) ambient.play().catch(() => {});
-            } else if (!ambient.paused) {
-                // Stop the INSTANT you leave the drone. No volume fade — iOS
-                // freezes .volume, so a fade never completes and the hum would
-                // keep playing after the mode change. Reset so the next entry
-                // starts from the top.
-                ambient.pause();
-                ambient.currentTime = 0;
+                if (ambient.el.paused) ambient.el.play().catch(() => {});
+                ambient.to(ambient.vol, 0.08);          // fade the hum in
+            } else {
+                // Fade the hum out, then stop the stream once silent. The gain
+                // ramp works on iOS (unlike a volume fade), so it actually stops
+                // and doesn't click.
+                ambient.to(0, 0.08);
+                window.setTimeout(() => {
+                    if (state.cameraMode !== 'aerial') {
+                        ambient.el.pause();
+                        ambient.el.currentTime = 0;
+                    }
+                }, 130);
             }
         });
 
         events.on('inputEvent', (name: string) => {
             if (!sw) return;
             if ((name === 'aerialNext' || name === 'aerialPrev') && state.cameraMode === 'aerial') {
-                sw.currentTime = 0;
-                sw.volume = swVol;
-                sw.play().catch(() => {});
+                sw.el.currentTime = 0;
+                sw.to(sw.vol, 0.006);
+                sw.el.play().catch(() => {});
             }
         });
     }
@@ -698,37 +741,16 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
 
     // "Möbliert" staging reveal SFX: plays as the furnished room is unveiled
     // after the loader (staging.ts fires 'stagingReveal'). The reveal is async
-    // (post-loader), so it isn't inside a gesture — prime the element on
-    // 'stagingStart' (fired within the pill click) so iOS lets it play later.
+    // (post-loader), but the Web Audio context was already resumed on an earlier
+    // tap, so it plays promptly without the old (iOS-broken) volume=0 priming.
     const stagingRevealUrl = sfx?.stagingReveal;
     if (stagingRevealUrl) {
-        const reveal = new Audio(stagingRevealUrl);
-        reveal.crossOrigin = 'anonymous';
-        reveal.preload = 'auto';
-        const revVol = Math.max(0, Math.min(1, sfx?.stagingRevealVolume ?? 0.4));
-        reveal.volume = revVol;
-        suspendable.push(reveal);
-
-        let primed = false;
-        events.on('stagingStart', () => {
-            if (primed) return;
-            primed = true;
-            // Warm the element MUTED within the click (muted IS honoured on iOS,
-            // volume is not) so the later async reveal starts promptly instead of
-            // lagging — and without an audible blip from the warm-up itself.
-            reveal.muted = true;
-            reveal.play().then(() => {
-                reveal.pause();
-                reveal.currentTime = 0;
-                reveal.muted = false;
-            }).catch(() => {
-                reveal.muted = false;
-            });
-        });
+        const reveal = makeSound(stagingRevealUrl, Math.max(0, Math.min(1, sfx?.stagingRevealVolume ?? 0.4)), false);
+        suspendable.push(reveal.el);
         events.on('stagingReveal', () => {
-            reveal.currentTime = 0;
-            reveal.volume = revVol;
-            reveal.play().catch(() => {});
+            reveal.el.currentTime = 0;
+            reveal.to(reveal.vol, 0.006);
+            reveal.el.play().catch(() => {});
         });
     }
 
