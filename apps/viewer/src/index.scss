@@ -1868,9 +1868,14 @@ body.measure-active #controlDome {
         display: flex;
         align-items: center;
         justify-content: center;
-        padding: 0 10px;
+        padding: 0 8px;
         white-space: nowrap;
-        max-width: min(280px, calc(100vw - 200px));
+        // FIXED title width so the pill stays one consistent size no matter the
+        // room title — short titles centre, long ones ellipsise. The pill no
+        // longer grows/shrinks (and jumps) as you page through the highlights.
+        // Only shrinks on very narrow phones so it can't overflow the screen.
+        width: 210px;
+        max-width: calc(100vw - 132px);
 
         > #annotationNavTitle {
             font-family: 'Inter', sans-serif;
@@ -1883,6 +1888,8 @@ body.measure-active #controlDome {
             line-height: 1.3;
             letter-spacing: 0.01em;
             color: #fff;
+            text-align: center;
+            max-width: 100%;
             overflow: hidden;
             text-overflow: ellipsis;
         }
@@ -3214,6 +3221,15 @@ body.staging-open {
     // was: brand-pill bottom + 10px (the +50px offset). With the brand
     // pill gone, take its top-centre position instead.
     top: max(14px, env(safe-area-inset-top));
+
+    // The share (top-left) and inquiry (top-right) controls sit at this same
+    // height. Keep the highlights pill a uniform width that fits cleanly
+    // BETWEEN them (with breathing room) rather than crowding into them —
+    // still fixed per screen (independent of the title), just narrower than
+    // the desktop 210px. Long room titles ellipsise.
+    > #annotationInfo {
+      width: min(156px, calc(100vw - 236px));
+    }
   }
 }
 
