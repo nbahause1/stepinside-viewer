@@ -560,44 +560,22 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
         steps.preload = 'auto';
         steps.loop = true; // cover the rare walk longer than the clip
         suspendable.push(steps);
-        const stepsVol = Math.max(0, Math.min(1, sfx?.footstepsVolume ?? 0.5));
-        let fadeTimer = 0;
-        const clearFade = () => {
-            if (fadeTimer) {
-                clearInterval(fadeTimer);
-                fadeTimer = 0;
-            }
-        };
+        steps.volume = Math.max(0, Math.min(1, sfx?.footstepsVolume ?? 0.5));
 
         events.on('navTarget:set', () => {
-            // Only in walk mode — navTarget:set also fires for click-to-fly, and
-            // footsteps while flying would be wrong.
+            // Only in walk mode — navTarget:set also fires for click-to-fly.
             if (state.cameraMode !== 'walk') return;
-            clearFade();
-            steps.volume = stepsVol;
             // RESUME from where it paused (never reset to 0) so the long track
-            // advances across walks — the footsteps vary instead of repeating the
-            // same opening steps. `loop` wraps it round at the end.
-            if (steps.paused) {
-                steps.play().catch(() => {});
-            }
+            // advances across walks — the footsteps vary instead of repeating.
+            if (steps.paused) steps.play().catch(() => {});
         });
 
         events.on('navTarget:clear', () => {
-            clearFade();
-            if (steps.paused) return;
-            // ~100 ms fade to silence, then PAUSE (keep the position) — reads as
-            // "stops when you stop" without hard-clipping, and the next walk picks
-            // up from here.
-            const dec = stepsVol / 6;
-            fadeTimer = window.setInterval(() => {
-                steps.volume = Math.max(0, steps.volume - dec);
-                if (steps.volume <= 0.001) {
-                    clearFade();
-                    steps.pause();
-                    steps.volume = stepsVol;
-                }
-            }, 16);
+            // Pause the INSTANT the walk ends. A volume fade must NOT be used:
+            // iOS Safari freezes HTMLMediaElement.volume, so a fade never reaches
+            // 0 and the sound would never stop (and thus never resume from
+            // position on the next walk). A direct pause works everywhere.
+            if (!steps.paused) steps.pause();
         });
     }
 
@@ -661,35 +639,18 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
         if (ambient) suspendable.push(ambient);
         if (sw) suspendable.push(sw);
 
-        let ambFade = 0;
-        const clearAmbFade = () => {
-            if (ambFade) {
-                clearInterval(ambFade);
-                ambFade = 0;
-            }
-        };
-
         events.on('cameraMode:changed', () => {
             if (!ambient) return;
             if (state.cameraMode === 'aerial') {
-                clearAmbFade();
                 ambient.volume = ambVol;
-                if (ambient.paused) {
-                    ambient.play().catch(() => {});
-                }
+                if (ambient.paused) ambient.play().catch(() => {});
             } else if (!ambient.paused) {
-                // fade the hum out over ~300ms when leaving the drone
-                clearAmbFade();
-                const dec = ambVol / 10;
-                ambFade = window.setInterval(() => {
-                    ambient.volume = Math.max(0, ambient.volume - dec);
-                    if (ambient.volume <= 0.001) {
-                        clearAmbFade();
-                        ambient.pause();
-                        ambient.currentTime = 0;
-                        ambient.volume = ambVol;
-                    }
-                }, 30);
+                // Stop the INSTANT you leave the drone. No volume fade — iOS
+                // freezes .volume, so a fade never completes and the hum would
+                // keep playing after the mode change. Reset so the next entry
+                // starts from the top.
+                ambient.pause();
+                ambient.currentTime = 0;
             }
         });
 
@@ -752,14 +713,16 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
         events.on('stagingStart', () => {
             if (primed) return;
             primed = true;
-            // silent real play → unlocks the element for the later async reveal
-            reveal.volume = 0;
+            // Warm the element MUTED within the click (muted IS honoured on iOS,
+            // volume is not) so the later async reveal starts promptly instead of
+            // lagging — and without an audible blip from the warm-up itself.
+            reveal.muted = true;
             reveal.play().then(() => {
                 reveal.pause();
                 reveal.currentTime = 0;
-                reveal.volume = revVol;
+                reveal.muted = false;
             }).catch(() => {
-                reveal.volume = revVol;
+                reveal.muted = false;
             });
         });
         events.on('stagingReveal', () => {
