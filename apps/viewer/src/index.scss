@@ -2829,9 +2829,14 @@ body.staging-open {
     .stageArrow--prev > svg { animation: stageNudgeL 2.6s ease-in-out infinite; }
     .stageArrow--next > svg { animation: stageNudgeR 2.6s ease-in-out infinite; }
 
-    #stageToggle {
+    // single "Home" action: leave the furnished view, back to the walkable scan
+    #stageClose {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
         height: 38px;
-        padding: 0 16px;
+        padding: 0 15px 0 12px;
+        flex-shrink: 0;
         border: 1px solid rgba(255, 255, 255, 0.12);
         border-radius: 12px;
         cursor: pointer;
@@ -2839,42 +2844,58 @@ body.staging-open {
         font-family: 'Inter', sans-serif;
         font-weight: 600;
         font-size: 13px;
-        white-space: nowrap;
         background: rgba(255, 255, 255, 0.08);
-        transition: background 140ms var(--ease-out);
-
-        @media (hover: hover) and (pointer: fine) {
-            &:hover { background: rgba(255, 255, 255, 0.16); }
-        }
-        &:active { transform: scale(0.97); }
-    }
-
-    #stageClose {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        width: 38px;
-        height: 38px;
-        flex-shrink: 0;
-        padding: 0;
-        border: 1px solid rgba(255, 255, 255, 0.12);
-        border-radius: 12px;
-        cursor: pointer;
-        color: #fff;
-        background: rgba(255, 255, 255, 0.08);
-        transition: background 140ms var(--ease-out);
+        transition: background 140ms var(--ease-out), transform 140ms var(--ease-out);
 
         > svg {
             fill: none;
             stroke: #fff;
-            stroke-width: 1.9;
+            stroke-width: 1.8;
             stroke-linecap: round;
+            stroke-linejoin: round;
         }
 
         @media (hover: hover) and (pointer: fine) {
             &:hover { background: rgba(255, 255, 255, 0.16); }
         }
-        &:active { transform: scale(0.94); }
+        &:active { transform: scale(0.96); }
+    }
+
+    // press-and-hold coach hint — a glass pill just above the Home bar that
+    // fades softly in and out (opacity + slight rise). Starts display:none via
+    // .hidden; becomes visible via .is-visible (see staging.ts showHintOnce).
+    #stageHint {
+        position: absolute;
+        left: 50%;
+        bottom: calc(max(20px, env(safe-area-inset-bottom)) + 66px);
+        transform: translate(-50%, 6px);
+        z-index: 2;
+        max-width: calc(100vw - 40px);
+        padding: 8px 16px;
+        text-align: center;
+        white-space: nowrap;
+        font-family: 'Inter', sans-serif;
+        font-weight: 500;
+        font-size: 13px;
+        letter-spacing: 0.01em;
+        color: rgba(255, 255, 255, 0.96);
+        border-radius: 999px;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        background: linear-gradient(180deg, rgba(30, 30, 32, 0.5), rgba(18, 18, 20, 0.42));
+        backdrop-filter: blur(20px) saturate(150%);
+        -webkit-backdrop-filter: blur(20px) saturate(150%);
+        box-shadow:
+            0 12px 30px -14px rgba(0, 0, 0, 0.5),
+            inset 0 1px 0 0 rgba(255, 255, 255, 0.12);
+        pointer-events: none;
+        opacity: 0;
+        transition: opacity 600ms var(--ease-out), transform 600ms var(--ease-out);
+
+        &.is-visible {
+            opacity: 1;
+            transform: translate(-50%, 0);
+        }
+        &.hidden { display: none; }
     }
 }
 
@@ -3218,13 +3239,18 @@ body.staging-open {
   }
 
   #annotationNav {
-    // Brand pill gone, so the top-CENTRE is now empty — but the share
-    // (top-left) and inquiry (top-right) controls still sit in the very top
-    // row. Rather than squeeze the (wide) highlights pill between them (three
-    // mismatched sizes crammed on one line), drop it just BELOW that row so it
-    // gets the full width to itself: clean, centred, its own line, lots of air
-    // to the corners. Keeps its fixed uniform width (fits full titles).
-    top: calc(max(14px, env(safe-area-inset-top)) + 52px);
+    // Sit in the SAME top row as the share (left) / inquiry (right) controls,
+    // matched to them: same height (buttons fill the pill, no vertical
+    // padding -> 44px like the corner circles) and a compact fixed width with
+    // generous gaps to the corners. The title is deliberately short — long
+    // room names ellipsise — so the pill stays small and the row breathes.
+    top: max(14px, env(safe-area-inset-top));
+    padding: 0 3px;
+
+    > #annotationInfo {
+      width: 132px;
+      padding: 0 6px;
+    }
   }
 }
 

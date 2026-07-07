@@ -78,13 +78,13 @@ const initStaging = (global: Global) => {
     const overlay = document.getElementById('stageOverlay');
     const img = document.getElementById('stageImage') as HTMLImageElement | null;
     const closeBtn = document.getElementById('stageClose');
-    const toggleBtn = document.getElementById('stageToggle');
     const statusEl = document.getElementById('stageStatus');
     const statusText = document.getElementById('stageStatusText');
     const prevBtn = document.getElementById('stagePrev');
     const nextBtn = document.getElementById('stageNext');
     const nameEl = document.getElementById('stageStyleName');
-    if (!pill || !trigger || !label || !overlay || !img || !closeBtn || !toggleBtn || !statusEl || !statusText || !prevBtn || !nextBtn || !nameEl) return;
+    const hintEl = document.getElementById('stageHint');   // optional press-and-hold coach hint
+    if (!pill || !trigger || !label || !overlay || !img || !closeBtn || !statusEl || !statusText || !prevBtn || !nextBtn || !nameEl) return;
 
     // The pill stays hidden until it is actually usable. In demo mode that is
     // immediately (images are local). In live mode we keep it hidden until the
@@ -125,12 +125,38 @@ const initStaging = (global: Global) => {
     const setShowing = (furnished: boolean) => {
         showingFurnished = furnished;
         overlay.classList.toggle('is-scan', !furnished);
-        toggleBtn.textContent = furnished ? 'Original zeigen' : 'Möbliert zeigen';
     };
 
     // The furnished image currently on screen (for reverting after a failed
     // style switch without losing the good result behind it).
     let shownUrl: string | undefined;
+
+    // Transient coach hint teaching the press-and-hold-for-original gesture:
+    // shown ONCE, a couple of seconds after the first reveal, fading softly in
+    // then out — or dismissed the instant the visitor presses the image.
+    let hintShown = false;
+    const hintTimers: number[] = [];
+    const clearHintTimers = () => {
+        while (hintTimers.length) window.clearTimeout(hintTimers.pop());
+    };
+    const hideHint = () => {
+        if (!hintEl) return;
+        clearHintTimers();
+        hintEl.classList.remove('is-visible');
+        hintTimers.push(window.setTimeout(() => hintEl.classList.add('hidden'), 600));
+    };
+    const showHintOnce = () => {
+        if (!hintEl || hintShown) return;
+        hintShown = true;
+        hintTimers.push(window.setTimeout(() => {
+            // only if the furnished room is still on screen
+            if (overlay.classList.contains('hidden') || !showingFurnished) return;
+            hintEl.classList.remove('hidden');
+            void hintEl.offsetWidth;            // restart the fade transition
+            hintEl.classList.add('is-visible');
+            hintTimers.push(window.setTimeout(hideHint, 3200));
+        }, 2000));
+    };
 
     // Show the finished furnished image (no loading state); soft-reveal it.
     const showResult = (dataUrl: string) => {
@@ -144,6 +170,7 @@ const initStaging = (global: Global) => {
         void img.offsetWidth;
         img.classList.add('is-revealed');
         setShowing(true);
+        showHintOnce();
     };
 
     // Open the overlay in its generating state IMMEDIATELY (so the logo loader
@@ -165,6 +192,7 @@ const initStaging = (global: Global) => {
         img.classList.remove('is-revealed');
         img.removeAttribute('src');
         shownUrl = undefined;
+        hideHint();
         setLabel('Möbliert sehen');
         state.controlsHidden = false;   // bring the viewer chrome back
         document.body.classList.remove('staging-open');
@@ -420,11 +448,6 @@ const initStaging = (global: Global) => {
     // Overlay controls. Stop pointer/wheel from reaching the canvas/camera.
     overlay.addEventListener('wheel', event => event.stopPropagation());
 
-    toggleBtn.addEventListener('click', (event) => {
-        event.stopPropagation();
-        setShowing(!showingFurnished);
-    });
-
     closeBtn.addEventListener('click', (event) => {
         event.stopPropagation();
         closeOverlay();
@@ -436,6 +459,7 @@ const initStaging = (global: Global) => {
         // ignore presses that start on a control (toggle/close/style chips)
         if ((event.target as HTMLElement).closest('button')) return;
         if (!showingFurnished) return;
+        hideHint();             // they found the gesture — drop the coach hint
         overlay.classList.add('is-scan');
     };
     const peekEnd = () => {
