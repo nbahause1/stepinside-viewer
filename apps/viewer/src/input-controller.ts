@@ -90,6 +90,7 @@ class InputController {
         const isOrbit = state.cameraMode === 'orbit';
         const isFly = state.cameraMode === 'fly';
         const isWalk = state.cameraMode === 'walk';
+        const isAerial = state.cameraMode === 'aerial';
         const isFirstPerson = isFly || isWalk;
 
         const ctx: UpdateContext = {
@@ -100,6 +101,7 @@ class InputController {
             isOrbit,
             isFly,
             isWalk,
+            isAerial,
             isFirstPerson,
             gamingControls: state.gamingControls,
             // Touch must update first so the count is current; the running

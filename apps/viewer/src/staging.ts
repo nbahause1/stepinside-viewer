@@ -81,6 +81,33 @@ const initStaging = (global: Global) => {
     };
     const wait = (ms: number) => new Promise<void>(resolve => window.setTimeout(resolve, ms));
 
+    // Fully prefetch a furnishing clip into memory and hand back an object URL
+    // that plays INSTANTLY — no range-request buffering, no frozen empty first
+    // frame. This is the reliable way to preload video on iOS, where <video
+    // preload> is ignored until a real play() gesture, so a just-switched src
+    // would otherwise show the empty room while it buffers. Falls back to the
+    // network URL until the blob is ready, so nothing ever depends on it.
+    const clipBlobUrls = new Map<string, string>();
+    const warmClip = async (url: string | undefined): Promise<void> => {
+        if (!url || clipBlobUrls.has(url)) return;
+        clipBlobUrls.set(url, url);   // reserve (network URL) so we fetch each clip once
+        try {
+            const res = await fetch(url);
+            if (!res.ok) { clipBlobUrls.delete(url); return; }
+            const blob = await res.blob();
+            clipBlobUrls.set(url, URL.createObjectURL(blob));
+        } catch {
+            clipBlobUrls.delete(url);
+        }
+    };
+    // The source to actually play: the in-memory blob once warmed, else the
+    // network URL (still plays, just with the browser's own buffering).
+    const playableClip = (url: string | undefined): string | undefined =>
+        url ? (clipBlobUrls.get(url) ?? url) : undefined;
+    // Prefetch every style's orientation-matched clip so arrow-switching between
+    // styles is as instant as the first open — no frozen empty room, no delay.
+    const warmAllClips = () => { for (const s of styles) void warmClip(styleVideo(s.id)); };
+
     const pill = document.getElementById('stagePill');
     const trigger = document.getElementById('stageTrigger');
     const label = document.getElementById('stageLabel');
@@ -121,6 +148,13 @@ const initStaging = (global: Global) => {
         if (video) {
             const firstClip = styleVideo(styles[0]?.id);
             if (firstClip) { video.src = firstClip; video.load(); }
+            void warmClip(firstClip);
+            // Prefetch the OTHER styles' clips into memory once the scene is ready
+            // (so it doesn't compete with the scan load), and a timeout fallback in
+            // case firstFrame already fired. warmClip() dedups, so double-calling is
+            // safe. This is what makes arrow-switching instant instead of cold.
+            events.on('firstFrame', warmAllClips);
+            window.setTimeout(warmAllClips, 5000);
         }
     }
 
@@ -210,8 +244,8 @@ const initStaging = (global: Global) => {
     // is ignored until playback, so revealing an unbuffered clip would show a
     // frozen empty room; instead the dark loader scrim holds until the first
     // frame renders, so the furnishing motion starts the instant the clip appears.
-    // A reveal cap uncovers it anyway on a slow network, and a safety cap resolves
-    // if the clip stalls, so nothing ever hangs.
+    // The fallback cap only uncovers it once a real frame exists, and a safety cap
+    // resolves if the clip stalls, so it never flashes empty and never hangs.
     const playStagingVideoTimed = (): Promise<void> => new Promise((resolve) => {
         if (!video) { resolve(); return; }
         let done = false;
@@ -236,10 +270,19 @@ const initStaging = (global: Global) => {
         video.addEventListener('error', finish);
         const safety = window.setTimeout(finish, 15000);
         // Reveal as soon as frames are rendering ('playing'), with 'timeupdate' as
-        // a fallback and a hard cap so a slow buffer never leaves the loader stuck.
+        // a fallback. The fallback cap uncovers the clip ONLY once it actually has
+        // a frame to show — never the frozen empty first frame of a still-buffering
+        // clip (the bug when arrow-switching to a not-yet-warmed style). If there's
+        // no frame yet, keep the branded loader up and re-check; the 15s safety
+        // still ends the wait and falls back to the still, so nothing hangs.
         video.addEventListener('playing', reveal);
         video.addEventListener('timeupdate', reveal);
-        const revealCap = window.setTimeout(reveal, 2500);
+        let revealCap: number;
+        const capCheck = () => {
+            if (video.readyState >= 2 /* HAVE_CURRENT_DATA */ && video.currentTime > 0) reveal();
+            else revealCap = window.setTimeout(capCheck, 300);
+        };
+        revealCap = window.setTimeout(capCheck, 2500);
         try {
             video.currentTime = 0;
             const p = video.play();
@@ -432,6 +475,15 @@ const initStaging = (global: Global) => {
         const videoUrl = demoMode ? styleVideo(styleId) : undefined;
         const useVideo = !!(videoUrl && video);
 
+        // Drop the dark loader scrim in FIRST — before removing the previous still
+        // or calling video.load() below. is-generating's opaque background is the
+        // only layer that covers the live scan during a switch; applying it AFTER
+        // img.removeAttribute('src') (which display:none's the still) and after the
+        // video.load() reflow left a one-frame transparent window where the scan
+        // canvas showed through (the arrow-switch flash). Order-only change: the
+        // final class set is identical, so first-open/reveal behaviour is unchanged.
+        openGenerating('Der Raum wird eingerichtet');
+
         if (useVideo && videoUrl && video) {
             // Prime the clip BEFORE the overlay opens and start it buffering. We
             // mark the video stage NOW (so the dark loader scrim covers the scan)
@@ -442,13 +494,12 @@ const initStaging = (global: Global) => {
             // concurrently (the scrim covers the canvas), so nothing waits on it.
             img.removeAttribute('src');                                   // still stays hidden until the reveal
             window.clearTimeout(stillRevealTimer);                        // don't let a prior reveal's cleanup pause this clip
-            if (video.getAttribute('src') !== videoUrl) { video.src = videoUrl; video.load(); }
+            void warmClip(videoUrl);                                      // warm for next time if this switch was cold
+            const playSrc = playableClip(videoUrl) ?? videoUrl;           // in-memory blob if warmed (plays instantly), else network
+            if (video.getAttribute('src') !== playSrc) { video.src = playSrc; video.load(); }
             overlay.classList.add('is-videostage');
             overlay.classList.remove('is-filling');                       // re-arm the gate: keep the new clip hidden until it actually plays
         }
-
-        // Drop the loader in immediately.
-        openGenerating('Der Raum wird eingerichtet');
 
         // Demo mode: no capture, no API call.
         if (demoMode) {

@@ -84,6 +84,7 @@ type UpdateContext = {
     isOrbit: boolean;
     isFly: boolean;
     isWalk: boolean;
+    isAerial: boolean;
     isFirstPerson: boolean;
     gamingControls: boolean;
     /** Number of touches currently active (read by mouse pan flag). */

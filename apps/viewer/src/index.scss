@@ -2735,6 +2735,11 @@ body.staging-open {
         inset: 0;
         color: #fff;
         clip-path: inset(0 100% 0 0);   // hidden until the fill animates
+        // No shadow on the FILL copy: the clip-path cuts its text-shadow into a
+        // hard vertical dark edge that sweeps across during the fill — the faint
+        // "black box" seen over the brighter portrait clip on phones. The base
+        // copy underneath keeps its shadow, so legibility is unchanged.
+        text-shadow: none;
     }
 
     // Loader is logo-only: the filling logo already signals progress, so the
@@ -3001,6 +3006,17 @@ body.staging-open {
 
     // (the furnished image uses cover/full-bleed everywhere — on phones it shows
     // the native 9:16 portrait variant, so no cropping hack is needed)
+
+    // Furnishing loader on a phone: darken the whole overlay a notch beyond the
+    // desktop look. The branded logo's fill sweep has a fine dark edge (its
+    // text-shadow cut by the clip-path) that is invisible on desktop but reads as
+    // a faint black box over the brighter portrait clip. A darker, slightly
+    // blurrier clip + denser scrim swallows that edge while the furnishing motion
+    // stays perceptible. Placed after the base staging rules so it wins.
+    #stageOverlay.is-generating { background: rgba(18, 17, 16, 0.97); }
+    #stageOverlay.is-generating.is-videostage.is-filling #stageVideo {
+        filter: brightness(0.45) blur(5px);
+    }
 }
 
 

@@ -2240,6 +2240,7 @@ body.staging-open #surveyCard {
   inset: 0;
   color: #fff;
   clip-path: inset(0 100% 0 0);
+  text-shadow: none;
 }
 #stageOverlay #stageStatusText {
   display: none;
@@ -2509,6 +2510,12 @@ body.staging-open #surveyCard {
     max-width: 0;
     margin-left: 0;
     opacity: 0;
+  }
+  #stageOverlay.is-generating {
+    background: rgba(18, 17, 16, 0.97);
+  }
+  #stageOverlay.is-generating.is-videostage.is-filling #stageVideo {
+    filter: brightness(0.45) blur(5px);
   }
 }
 /* ================================================================
