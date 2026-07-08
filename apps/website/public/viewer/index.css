@@ -2182,14 +2182,15 @@ body.staging-open #surveyCard {
   -o-object-fit: cover;
      object-fit: cover;
   opacity: 0;
-  transition: opacity 300ms var(--ease-out), filter 450ms var(--ease-out);
+  transition: opacity 300ms var(--ease-out), filter 450ms var(--ease-out), transform 450ms var(--ease-out);
   pointer-events: none;
 }
 #stageOverlay.is-videostage.is-filling #stageVideo {
   opacity: 1;
 }
 #stageOverlay.is-generating.is-videostage.is-filling #stageVideo {
-  filter: brightness(0.85);
+  filter: brightness(0.55) blur(6px);
+  transform: scale(1.08);
 }
 #stageOverlay #stageStatus {
   position: absolute;
@@ -2717,18 +2718,25 @@ body.staging-open #surveyCard {
   }
 }
 /* ================================================================
-   MOBILE / TOUCH: DECLUTTER THE TOP
+   DECLUTTER THE TOP (all viewports)
    ----------------------------------------------------------------
-   On a phone the StepInside brand pill and the highlights pill sat
-   stacked at the top — too crowded. Drop the brand pill and lift the
-   highlights pill into its (top-centre) slot. Desktop keeps both.
+   The StepInside brand pill and the highlights pill sat stacked at the
+   top. Drop the brand pill and lift the highlights pill into its
+   (top-centre) slot. Now applied on EVERY viewport (was mobile-only).
    ================================================================ */
+#brandDome {
+  display: none;
+}
+
+#annotationNav {
+  top: max(14px, env(safe-area-inset-top));
+}
+
+/* Mobile/touch: additionally compact the highlights pill so it sits in the
+   SAME top row as the share (left) / inquiry (right) corner controls —
+   compact fixed width, generous gaps to the corners, short ellipsised title. */
 @media (pointer: coarse) {
-  #brandDome {
-    display: none;
-  }
   #annotationNav {
-    top: max(14px, env(safe-area-inset-top));
     padding: 0 3px;
   }
   #annotationNav > #annotationInfo {
