@@ -70,6 +70,11 @@ const initStaging = (global: Global) => {
         if (!s) return undefined;
         return resolveImg((isPortrait() && s.imagePortrait) ? s.imagePortrait : s.image);
     };
+    // Per-style furnishing clip (landscape / desktop only — the clips are 16:9).
+    const styleVideo = (id: string | undefined): string | undefined => {
+        const s = styles.find(s => s.id === id) as (undefined | { video?: string });
+        return resolveImg(s?.video);
+    };
     const wait = (ms: number) => new Promise<void>(resolve => window.setTimeout(resolve, ms));
 
     const pill = document.getElementById('stagePill');
@@ -77,6 +82,9 @@ const initStaging = (global: Global) => {
     const label = document.getElementById('stageLabel');
     const overlay = document.getElementById('stageOverlay');
     const img = document.getElementById('stageImage') as HTMLImageElement | null;
+    // Hidden playback element for the DESKTOP furnishing timelapse. Absent-safe:
+    // everything degrades to the plain still-image reveal if it or a clip is missing.
+    const video = document.getElementById('stageVideo') as HTMLVideoElement | null;
     const closeBtn = document.getElementById('stageClose');
     const statusEl = document.getElementById('stageStatus');
     const statusText = document.getElementById('stageStatusText');
@@ -100,7 +108,16 @@ const initStaging = (global: Global) => {
         trigger.classList.add('is-revealing');
         window.setTimeout(() => trigger.classList.remove('is-revealing'), 600);
     };
-    if (demoMode) revealPill();
+    if (demoMode) {
+        revealPill();
+        // Warm the default style's clip so the first reveal plays without a
+        // buffering stall behind the loader. Desktop/landscape only — the clips
+        // are 16:9 and phones (portrait) use the still-image flow instead.
+        if (video && !isPortrait()) {
+            const firstClip = styleVideo(styles[0]?.id);
+            if (firstClip) { video.src = firstClip; video.load(); }
+        }
+    }
 
     let loading = false;
     let styleIndex = 0;
@@ -163,7 +180,9 @@ const initStaging = (global: Global) => {
 
     // Show the finished furnished image (no loading state); soft-reveal it.
     const showResult = (dataUrl: string) => {
-        overlay.classList.remove('hidden', 'is-scan', 'is-generating');
+        overlay.classList.remove('hidden', 'is-scan', 'is-generating', 'is-videostage', 'is-filling');
+        overlay.style.removeProperty('--stage-loader-dur');
+        if (video) { video.pause(); }
         state.controlsHidden = true;   // get the chrome out of the way
         document.body.classList.add('staging-open');   // fully hide normal chrome
         img.src = dataUrl;
@@ -174,6 +193,54 @@ const initStaging = (global: Global) => {
         img.classList.add('is-revealed');
         setShowing(true);
         maybeShowHint();
+    };
+
+    // Start the timelapse (its src + the loader fill are already set upfront, so its
+    // first frame and the logo motion appear immediately — no standstill) and
+    // resolve once it reaches its endframe. A safety cap resolves anyway if the
+    // clip stalls, so the reveal never hangs.
+    const playStagingVideoTimed = (): Promise<void> => new Promise((resolve) => {
+        if (!video) { resolve(); return; }
+        let done = false;
+        const finish = () => {
+            if (done) return;
+            done = true;
+            video.removeEventListener('ended', finish);
+            video.removeEventListener('error', finish);
+            window.clearTimeout(safety);
+            resolve();
+        };
+        video.addEventListener('ended', finish);
+        video.addEventListener('error', finish);
+        const safety = window.setTimeout(finish, 15000);
+        try {
+            video.currentTime = 0;
+            const p = video.play();
+            if (p && typeof p.catch === 'function') p.catch(() => { /* ignore autoplay quirk */ });
+        } catch {
+            finish();
+        }
+    });
+
+    // Reveal: the crisp still fades in ON TOP of the clip's last furnished frame
+    // (the clip stays behind as the backdrop, so the room is never seen empty),
+    // then the clip is dropped once the still is fully up. Same reveal animation as
+    // the plain still path; the caller fires the SFX.
+    const revealStillOverVideo = (dataUrl: string) => {
+        overlay.classList.remove('hidden', 'is-scan', 'is-generating');
+        img.src = dataUrl;                  // warmed beforehand → paints instantly
+        img.classList.remove('is-revealed');
+        void img.offsetWidth;
+        img.classList.add('is-revealed');   // fades in over the furnished clip frame
+        state.controlsHidden = true;
+        document.body.classList.add('staging-open');
+        shownUrl = dataUrl;
+        setShowing(true);
+        maybeShowHint();
+        window.setTimeout(() => {
+            overlay.classList.remove('is-videostage', 'is-filling');
+            if (video) video.pause();
+        }, 560);
     };
 
     // Open the overlay in its generating state IMMEDIATELY (so the logo loader
@@ -191,7 +258,9 @@ const initStaging = (global: Global) => {
 
     const closeOverlay = () => {
         overlay.classList.add('hidden');
-        overlay.classList.remove('is-scan', 'is-generating');
+        overlay.classList.remove('is-scan', 'is-generating', 'is-videostage', 'is-filling');
+        overlay.style.removeProperty('--stage-loader-dur');
+        if (video) { video.pause(); }
         img.classList.remove('is-revealed');
         img.removeAttribute('src');
         shownUrl = undefined;
@@ -325,27 +394,58 @@ const initStaging = (global: Global) => {
 
         setLoading(true);
 
-        // Drop the loader in immediately so there is no dead time before the
-        // logo appears. The fly-to-drone-view + frame capture happen hidden
-        // behind it.
+        // Desktop/landscape only: a per-style furnishing timelapse plays visibly
+        // with the loader logo on top; phones (portrait) keep the plain still.
+        const videoUrl = (demoMode && !isPortrait()) ? styleVideo(styleId) : undefined;
+        const useVideo = !!(videoUrl && video);
+
+        if (useVideo && videoUrl && video) {
+            // Prime the clip + loader BEFORE the overlay opens, so the first frame
+            // and the logo fill appear the instant the loader drops in — no
+            // standstill. The drone fly runs concurrently (the clip covers the
+            // canvas), so nothing waits on it.
+            img.removeAttribute('src');                                   // still stays hidden until the reveal
+            if (video.getAttribute('src') !== videoUrl) video.src = videoUrl;
+            overlay.classList.add('is-videostage', 'is-filling');
+        }
+
+        // Drop the loader in immediately.
         openGenerating('Der Raum wird eingerichtet');
 
-        // Always stage from the one fixed drone overview (works from any mode).
-        await goToStagingAerial();
-
-        // Demo mode: no capture, no API call. Warm the image, let the loader run
-        // for a realistic beat, then reveal the pre-generated picture.
+        // Demo mode: no capture, no API call.
         if (demoMode) {
             const image = styleImage(styleId);
+
+            // Desktop, FIRST view of a style: the timelapse plays (motion starts
+            // immediately), the drone fly runs CONCURRENTLY, then the crisp still
+            // fades in over the final furnished frame — the room is never seen empty.
+            // Cached afterwards → later skips between styles show the plain stills.
+            if (useVideo && videoUrl) {
+                if (image) { const pre = new Image(); pre.src = image; }  // warm the still so it paints instantly
+                void goToStagingAerial();                                  // concurrent — no dead wait on the fly
+                await playStagingVideoTimed();
+                if (image) {
+                    if (key) cache.set(key, image);
+                    revealStillOverVideo(image);
+                    events.fire('stagingReveal');   // still fades in → SFX
+                    setLabel('Möbliert sehen');
+                } else {
+                    failBack('Kein Bild hinterlegt');
+                }
+                setLoading(false);
+                return;
+            }
+
+            // Still path (portrait / no clip): fly, warm the image, hold the loader
+            // for a realistic beat, then reveal the pre-generated picture.
+            await goToStagingAerial();
             if (image) {
                 const pre = new Image();
                 pre.src = image;
-            }
-            await wait(DEMO_DELAY_MS);
-            if (image) {
+                await wait(DEMO_DELAY_MS);
                 if (key) cache.set(key, image);
                 showResult(image);
-                events.fire('stagingReveal');   // reveal after the loader → SFX
+                events.fire('stagingReveal');
                 setLabel('Möbliert sehen');
             } else {
                 failBack('Kein Bild hinterlegt');
@@ -353,6 +453,9 @@ const initStaging = (global: Global) => {
             setLoading(false);
             return;
         }
+
+        // Live path: fly to the fixed drone overview, then capture.
+        await goToStagingAerial();
 
         let dataUrl: string;
         try {

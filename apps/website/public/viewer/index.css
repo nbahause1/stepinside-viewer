@@ -2174,6 +2174,23 @@ body.staging-open #surveyCard {
 #stageOverlay #stageImage.is-revealed {
   animation: stageReveal 480ms var(--ease-out);
 }
+#stageOverlay #stageVideo {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  -o-object-fit: cover;
+     object-fit: cover;
+  opacity: 0;
+  transition: opacity 300ms var(--ease-out), filter 450ms var(--ease-out);
+  pointer-events: none;
+}
+#stageOverlay.is-videostage.is-filling #stageVideo {
+  opacity: 1;
+}
+#stageOverlay.is-generating.is-videostage.is-filling #stageVideo {
+  filter: brightness(0.85);
+}
 #stageOverlay #stageStatus {
   position: absolute;
   inset: 0;
@@ -2250,6 +2267,9 @@ body.staging-open #surveyCard {
 #stageOverlay.is-generating .stageArrow {
   opacity: 0;
   pointer-events: none;
+}
+#stageOverlay.is-generating.is-videostage.is-filling .stageLoader__mark--fill {
+  animation: stageLoaderFill 5.04s linear forwards;
 }
 #stageOverlay #stageBar {
   position: absolute;
