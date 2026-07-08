@@ -772,11 +772,14 @@
                     <!-- current style name (label) + actions -->
                     <span id="stageStyleName" class="hidden">Warm</span>
                     <div class="stageBar__actions">
-                        <button id="stageToggle" type="button">Original zeigen</button>
-                        <button id="stageClose" type="button" aria-label="Schließen" title="Zurück zum Rundgang">
-                            <svg width="20" height="20" viewBox="0 0 22 22" aria-hidden="true">
-                                <path d="M6 6 L16 16 M16 6 L6 16" />
+                        <!-- single Home action: leave the furnished view, back to
+                             the walkable scan. (The old "Original zeigen" toggle is
+                             now a press-and-hold on the image.) -->
+                        <button id="stageClose" type="button" aria-label="Zurück zum Rundgang" title="Zurück zum Rundgang">
+                            <svg width="19" height="19" viewBox="0 0 24 24" aria-hidden="true">
+                                <path d="M3.5 11.4 L12 4.5 L20.5 11.4 M5.8 9.7 V19.5 H18.2 V9.7" />
                             </svg>
+                            <span>Home</span>
                         </button>
                     </div>
                 </div>
@@ -1210,11 +1213,14 @@
 
             // "Living" arrival. The CSS fill creeps toward ~96% on its own (never
             // freezing). We reveal the scene when the first frame is ready — but
-            // never before a short MIN_MS, so on a fast load the wordmark still
-            // gets a beat instead of flashing. On reveal we snap to 100%, fade the
-            // splash, and post 'stepinside:viewerReady' so the embedding page
-            // lands its intro sting on the actual arrival (any load time).
-            const MIN_MS = 1200;
+            // never before MIN_MS. That minimum is set to the parent's door
+            // "unlock" SFX length (2.9s): on a CACHED scan the frame is ready in
+            // ~1s, but revealing then would drop the room mid-door and stack the
+            // intro sting on top. Holding to ~door-length means the room appears
+            // AS the door finishes and the intro lands on that reveal — the
+            // designed two-part arrival — regardless of load speed. On reveal we
+            // snap to 100%, fade the splash, and post 'stepinside:viewerReady'.
+            const MIN_MS = 2600;
             const SNAP_MS = 350;
             const loaderStart = Date.now();
 

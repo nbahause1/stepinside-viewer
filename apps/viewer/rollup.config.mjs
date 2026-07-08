@@ -1,5 +1,6 @@
 import { readFileSync } from 'fs';
 
+import commonjs from '@rollup/plugin-commonjs';
 import json from '@rollup/plugin-json';
 import resolve from '@rollup/plugin-node-resolve';
 import terser from '@rollup/plugin-terser';
@@ -68,6 +69,7 @@ const buildPublic = {
     },
     plugins: [
         resolve(),
+        commonjs(),   // Howler (and any CJS dep) → ES so named imports resolve
         typescript(),
         json(),
         htmlPlugin(),

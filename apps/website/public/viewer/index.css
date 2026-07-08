@@ -1512,9 +1512,10 @@ body.measure-active #controlDome #domeMeasureAerial .domeIcon--measureExit {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 0 10px;
+  padding: 0 8px;
   white-space: nowrap;
-  max-width: min(280px, 100vw - 200px);
+  width: 210px;
+  max-width: calc(100vw - 132px);
 }
 #annotationNav > #annotationInfo > #annotationNavTitle {
   font-family: "Inter", sans-serif;
@@ -1523,6 +1524,8 @@ body.measure-active #controlDome #domeMeasureAerial .domeIcon--measureExit {
   line-height: 1.3;
   letter-spacing: 0.01em;
   color: #fff;
+  text-align: center;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -2341,9 +2344,13 @@ body.staging-open #surveyCard {
 #stageOverlay .stageArrow--next > svg {
   animation: stageNudgeR 2.6s ease-in-out infinite;
 }
-#stageOverlay #stageToggle {
+#stageOverlay #stageClose {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
   height: 38px;
-  padding: 0 16px;
+  padding: 0 15px 0 12px;
+  flex-shrink: 0;
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 12px;
   cursor: pointer;
@@ -2351,38 +2358,15 @@ body.staging-open #surveyCard {
   font-family: "Inter", sans-serif;
   font-weight: 600;
   font-size: 13px;
-  white-space: nowrap;
   background: rgba(255, 255, 255, 0.08);
-  transition: background 140ms var(--ease-out);
-}
-@media (hover: hover) and (pointer: fine) {
-  #stageOverlay #stageToggle:hover {
-    background: rgba(255, 255, 255, 0.16);
-  }
-}
-#stageOverlay #stageToggle:active {
-  transform: scale(0.97);
-}
-#stageOverlay #stageClose {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 38px;
-  height: 38px;
-  flex-shrink: 0;
-  padding: 0;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 12px;
-  cursor: pointer;
-  color: #fff;
-  background: rgba(255, 255, 255, 0.08);
-  transition: background 140ms var(--ease-out);
+  transition: background 140ms var(--ease-out), transform 140ms var(--ease-out);
 }
 #stageOverlay #stageClose > svg {
   fill: none;
   stroke: #fff;
-  stroke-width: 1.9;
+  stroke-width: 1.8;
   stroke-linecap: round;
+  stroke-linejoin: round;
 }
 @media (hover: hover) and (pointer: fine) {
   #stageOverlay #stageClose:hover {
@@ -2390,7 +2374,7 @@ body.staging-open #surveyCard {
   }
 }
 #stageOverlay #stageClose:active {
-  transform: scale(0.94);
+  transform: scale(0.96);
 }
 
 @keyframes stageFadeIn {
@@ -2710,6 +2694,26 @@ body.staging-open #surveyCard {
   body::after {
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
+  }
+}
+/* ================================================================
+   MOBILE / TOUCH: DECLUTTER THE TOP
+   ----------------------------------------------------------------
+   On a phone the StepInside brand pill and the highlights pill sat
+   stacked at the top — too crowded. Drop the brand pill and lift the
+   highlights pill into its (top-centre) slot. Desktop keeps both.
+   ================================================================ */
+@media (pointer: coarse) {
+  #brandDome {
+    display: none;
+  }
+  #annotationNav {
+    top: max(14px, env(safe-area-inset-top));
+    padding: 0 3px;
+  }
+  #annotationNav > #annotationInfo {
+    width: 132px;
+    padding: 0 6px;
   }
 }
 

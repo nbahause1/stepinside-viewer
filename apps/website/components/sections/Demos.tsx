@@ -31,6 +31,7 @@ export default function Demos() {
   const [expanded, setExpanded] = useState(false);
   const doorRef = useRef<HTMLAudioElement | null>(null);
   const introRef = useRef<HTMLAudioElement | null>(null);
+  const doorPlayingRef = useRef(false);
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
   // Tell the viewer when it's hidden (collapsed to the website) vs shown, so it
@@ -55,16 +56,40 @@ export default function Demos() {
     }
     doorRef.current = door;
     introRef.current = intro;
+    // Track the door's playback with our OWN flag, not door.paused/ended: on a
+    // fast (cached) load the viewerReady message can arrive before the media
+    // element has flipped paused→false, so the state read is racy. The 'ended'
+    // event, by contrast, is reliable.
+    door.addEventListener("ended", () => {
+      doorPlayingRef.current = false;
+    });
 
-    // The viewer (same-origin iframe) posts this once the scene is on screen —
-    // i.e. as the loader's "e" completes and the loading SFX resolves. Let that
-    // resolve ring out (don't cut it) and layer the intro sting on top.
+    // The viewer posts this once the scene is on screen (the loader now holds
+    // the reveal until at least the door "unlock" length, so on a cached scan
+    // the room appears AS the door finishes — not 1.5s into it). If the door is
+    // somehow still going, defer the intro until it ends so they never overlap.
     const onMessage = (e: MessageEvent) => {
       if (e.origin !== window.location.origin) return;
       if (e.data?.type !== "stepinside:viewerReady") return;
-      intro.currentTime = 0;
-      intro.volume = SFX_VOLUME;
-      intro.play().catch(() => {});
+      const playIntro = () => {
+        intro.currentTime = 0;
+        intro.muted = false;
+        intro.volume = SFX_VOLUME;
+        intro.play().catch(() => {});
+      };
+      if (doorPlayingRef.current) {
+        let done = false;
+        const go = () => {
+          if (done) return;
+          done = true;
+          door.removeEventListener("ended", go);
+          playIntro();
+        };
+        door.addEventListener("ended", go, { once: true });
+        window.setTimeout(go, 3500); // fallback if 'ended' never fires
+      } else {
+        playIntro();
+      }
     };
     window.addEventListener("message", onMessage);
     return () => {
@@ -84,19 +109,29 @@ export default function Demos() {
       if (door) {
         door.currentTime = 0;
         door.volume = SFX_VOLUME;
-        door.play().catch(() => {});
+        doorPlayingRef.current = true;
+        door.play().catch(() => {
+          doorPlayingRef.current = false;
+        });
       }
       if (intro) {
-        intro.volume = 0;
+        // Prime the intro within the gesture so it can play later from the async
+        // viewerReady message. MUTED, not volume=0: iOS freezes .volume, so a
+        // volume=0 prime actually plays a blip of the intro at full volume during
+        // loading — exactly the "intro over the door" the door bed should own.
+        // muted IS honoured on iOS, so this warms/unlocks it silently; we unmute
+        // before the real deferred play.
+        intro.muted = true;
+        intro.volume = SFX_VOLUME;
         intro
           .play()
           .then(() => {
             intro.pause();
             intro.currentTime = 0;
-            intro.volume = SFX_VOLUME;
+            intro.muted = false;
           })
           .catch(() => {
-            intro.volume = SFX_VOLUME;
+            intro.muted = false;
           });
       }
     }

@@ -14,6 +14,7 @@ import {
     revision as engineRevision,
     version as engineVersion
 } from 'playcanvas';
+import { Howl, Howler } from 'howler';
 
 import { initAnalytics } from './analytics';
 import { App } from './app';
@@ -541,11 +542,17 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
         }
     }
 
-    // Audio elements that must fall silent when the embedding page HIDES the
-    // viewer (collapsed back to the website — the iframe stays mounted and would
-    // otherwise keep playing off-screen). Collected here; suspended/resumed by
-    // the parent's visibility message near the end of main().
-    const suspendable: HTMLAudioElement[] = [];
+    // --- Audio via Howler.js -------------------------------------------------
+    // iOS Safari makes native audio painful: HTMLMediaElement.volume is frozen,
+    // and createMediaElementSource is broken (WebKit bug #211394) — so both the
+    // levels and reliable playback failed with hand-rolled Web Audio. Howler
+    // decodes each clip into an AudioBuffer and drives it through a GainNode (the
+    // pattern that DOES work on iOS: volume + fades actually apply) and
+    // auto-unlocks the context on the first tap.
+    const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
+    // "Suspend" when the site collapses the viewer iframe: mute everything (loops
+    // keep advancing silently; one-shots are brief) and unmute on show.
+    const setAudioSuspended = (suspended: boolean) => Howler.mute(suspended);
 
     // Footstep audio while auto-walking to a clicked point. Starts when a walk
     // actually begins (navTarget:set — fired only past the onboarding move-lock)
@@ -555,150 +562,55 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
     // this runs in the viewer document, so it works embedded AND standalone.
     const footstepsUrl = sfx?.footsteps;
     if (footstepsUrl) {
-        const steps = new Audio(footstepsUrl);
-        steps.crossOrigin = 'anonymous';
-        steps.preload = 'auto';
-        steps.loop = true; // cover the rare walk longer than the clip
-        suspendable.push(steps);
-        const stepsVol = Math.max(0, Math.min(1, sfx?.footstepsVolume ?? 0.5));
-        let fadeTimer = 0;
-        const clearFade = () => {
-            if (fadeTimer) {
-                clearInterval(fadeTimer);
-                fadeTimer = 0;
-            }
-        };
+        const vol = clamp01(sfx?.footstepsVolume ?? 0.5);
+        const steps = new Howl({ src: [footstepsUrl], loop: true, volume: 0, preload: true });
+        let id: number | null = null;
 
         events.on('navTarget:set', () => {
-            // Only in walk mode — navTarget:set also fires for click-to-fly, and
-            // footsteps while flying would be wrong.
+            // Only in walk mode — navTarget:set also fires for click-to-fly.
             if (state.cameraMode !== 'walk') return;
-            clearFade();
-            steps.volume = stepsVol;
-            // RESUME from where it paused (never reset to 0) so the long track
-            // advances across walks — the footsteps vary instead of repeating the
-            // same opening steps. `loop` wraps it round at the end.
-            if (steps.paused) {
-                steps.play().catch(() => {});
-            }
+            // Keep the loop RUNNING throughout; gate audibility with a Howler
+            // fade instead of stop/play (click-free + reliable on iOS). The
+            // position keeps advancing, so the steps still vary from walk to walk.
+            if (id === null || !steps.playing(id)) id = steps.play();
+            steps.fade(steps.volume(id) as number, vol, 60, id);
         });
 
         events.on('navTarget:clear', () => {
-            clearFade();
-            if (steps.paused) return;
-            // ~100 ms fade to silence, then PAUSE (keep the position) — reads as
-            // "stops when you stop" without hard-clipping, and the next walk picks
-            // up from here.
-            const dec = stepsVol / 6;
-            fadeTimer = window.setInterval(() => {
-                steps.volume = Math.max(0, steps.volume - dec);
-                if (steps.volume <= 0.001) {
-                    clearFade();
-                    steps.pause();
-                    steps.volume = stepsVol;
-                }
-            }, 16);
+            if (id !== null && steps.playing(id)) {
+                steps.fade(steps.volume(id) as number, 0, 90, id); // silence; keep looping
+            }
         });
     }
 
     // Measurement SFX: a tick when the first point is placed (measureFirst) and a
     // confirmation when the second point finalises the measure (measureComplete).
-    // Both fire from a tap, so audio is already unlocked; viewer-side, so it works
-    // embedded and standalone.
     const measureStartUrl = sfx?.measureStart;
     const measureEndUrl = sfx?.measureEnd;
     if (measureStartUrl || measureEndUrl) {
-        const mVol = Math.max(0, Math.min(1, sfx?.measureVolume ?? 0.4));
-        const mkOneShot = (url?: string) => {
-            if (!url) return null;
-            const a = new Audio(url);
-            a.crossOrigin = 'anonymous';
-            a.preload = 'auto';
-            a.volume = mVol;
-            return a;
-        };
-        const mStart = mkOneShot(measureStartUrl);
-        const mEnd = mkOneShot(measureEndUrl);
-        if (mStart) suspendable.push(mStart);
-        if (mEnd) suspendable.push(mEnd);
-        const playOneShot = (a: HTMLAudioElement | null) => {
-            if (!a) return;
-            a.currentTime = 0;
-            a.volume = mVol;
-            a.play().catch(() => {});
-        };
-        events.on('measureFirst', () => playOneShot(mStart));
-        events.on('measureComplete', () => playOneShot(mEnd));
+        const mVol = clamp01(sfx?.measureVolume ?? 0.4);
+        const mStart = measureStartUrl ? new Howl({ src: [measureStartUrl], volume: mVol, preload: true }) : null;
+        const mEnd = measureEndUrl ? new Howl({ src: [measureEndUrl], volume: mVol, preload: true }) : null;
+        events.on('measureFirst', () => mStart?.play());
+        events.on('measureComplete', () => mEnd?.play());
     }
 
-    // Drone (aerial) mode SFX: a looping ambient hum WHILE in aerial mode — it
-    // starts on entering the drone and stops (fades) when leaving back to
-    // walk/etc. — plus a take-off/fly-away one-shot each time the view is
-    // switched (aerialNext / aerialPrev). Both are entered via a tap, so audio
-    // is already unlocked.
-    const droneAmbientUrl = sfx?.droneAmbient;
+    // Drone (aerial) SFX: just the take-off swoosh — the SAME sound on entering
+    // aerial and on every view switch. No separate ambient bed/swell (any
+    // constant or trailing tone read as laggy/nagging); one crisp action sound
+    // everywhere is tighter.
     const droneSwitchUrl = sfx?.droneSwitch;
-    if (droneAmbientUrl || droneSwitchUrl) {
-        const ambVol = Math.max(0, Math.min(1, sfx?.droneAmbientVolume ?? 0.5));
-        const swVol = Math.max(0, Math.min(1, sfx?.droneSwitchVolume ?? 0.5));
-
-        const ambient = droneAmbientUrl ? new Audio(droneAmbientUrl) : null;
-        if (ambient) {
-            ambient.crossOrigin = 'anonymous';
-            // Lazy: the full ambient clip is a few MB — don't fetch it for the
-            // many visitors who never open the drone. play() streams it on the
-            // first aerial entry (a continuous hum tolerates the tiny start lag).
-            ambient.preload = 'none';
-            ambient.loop = true;
-            ambient.volume = ambVol;
-        }
-        const sw = droneSwitchUrl ? new Audio(droneSwitchUrl) : null;
-        if (sw) {
-            sw.crossOrigin = 'anonymous';
-            sw.preload = 'auto';
-            sw.volume = swVol;
-        }
-        if (ambient) suspendable.push(ambient);
-        if (sw) suspendable.push(sw);
-
-        let ambFade = 0;
-        const clearAmbFade = () => {
-            if (ambFade) {
-                clearInterval(ambFade);
-                ambFade = 0;
-            }
-        };
+    if (droneSwitchUrl) {
+        const swVol = clamp01(sfx?.droneSwitchVolume ?? 0.5);
+        const sw = new Howl({ src: [droneSwitchUrl], volume: swVol, preload: true });
 
         events.on('cameraMode:changed', () => {
-            if (!ambient) return;
-            if (state.cameraMode === 'aerial') {
-                clearAmbFade();
-                ambient.volume = ambVol;
-                if (ambient.paused) {
-                    ambient.play().catch(() => {});
-                }
-            } else if (!ambient.paused) {
-                // fade the hum out over ~300ms when leaving the drone
-                clearAmbFade();
-                const dec = ambVol / 10;
-                ambFade = window.setInterval(() => {
-                    ambient.volume = Math.max(0, ambient.volume - dec);
-                    if (ambient.volume <= 0.001) {
-                        clearAmbFade();
-                        ambient.pause();
-                        ambient.currentTime = 0;
-                        ambient.volume = ambVol;
-                    }
-                }, 30);
-            }
+            if (state.cameraMode === 'aerial') sw.play(); // take-off on entering aerial
         });
 
         events.on('inputEvent', (name: string) => {
-            if (!sw) return;
             if ((name === 'aerialNext' || name === 'aerialPrev') && state.cameraMode === 'aerial') {
-                sw.currentTime = 0;
-                sw.volume = swVol;
-                sw.play().catch(() => {});
+                sw.play();
             }
         });
     }
@@ -736,56 +648,24 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
     }
 
     // "Möbliert" staging reveal SFX: plays as the furnished room is unveiled
-    // after the loader (staging.ts fires 'stagingReveal'). The reveal is async
-    // (post-loader), so it isn't inside a gesture — prime the element on
-    // 'stagingStart' (fired within the pill click) so iOS lets it play later.
+    // after the loader (staging.ts fires 'stagingReveal'). Howler auto-unlocked
+    // the context on an earlier tap, so the async play is reliable — no priming.
     const stagingRevealUrl = sfx?.stagingReveal;
     if (stagingRevealUrl) {
-        const reveal = new Audio(stagingRevealUrl);
-        reveal.crossOrigin = 'anonymous';
-        reveal.preload = 'auto';
-        const revVol = Math.max(0, Math.min(1, sfx?.stagingRevealVolume ?? 0.4));
-        reveal.volume = revVol;
-        suspendable.push(reveal);
-
-        let primed = false;
-        events.on('stagingStart', () => {
-            if (primed) return;
-            primed = true;
-            // silent real play → unlocks the element for the later async reveal
-            reveal.volume = 0;
-            reveal.play().then(() => {
-                reveal.pause();
-                reveal.currentTime = 0;
-                reveal.volume = revVol;
-            }).catch(() => {
-                reveal.volume = revVol;
-            });
-        });
-        events.on('stagingReveal', () => {
-            reveal.currentTime = 0;
-            reveal.volume = revVol;
-            reveal.play().catch(() => {});
-        });
+        const reveal = new Howl({ src: [stagingRevealUrl], volume: clamp01(sfx?.stagingRevealVolume ?? 0.4), preload: true });
+        events.on('stagingReveal', () => reveal.play());
     }
 
-    // Suspend all viewer audio when the embedding page hides the viewer (the
-    // "close"/collapse on the website keeps the iframe mounted, so a loop like
-    // the drone hum would otherwise keep playing off-screen). Resume whatever was
-    // playing when it's shown again. Message is posted by the parent (Demos.tsx).
+    // Mute all viewer audio when the embedding page hides the viewer (the
+    // "close"/collapse on the website keeps the iframe mounted, so the drone hum
+    // would otherwise keep playing off-screen). Unmute on show. Message is posted
+    // by the parent (Demos.tsx).
     if (window.parent && window.parent !== window) {
-        let suspendedPlaying: HTMLAudioElement[] = [];
         window.addEventListener('message', (e: MessageEvent) => {
             if (e.source !== window.parent) return;
             const data = e.data as { type?: string, visible?: boolean } | null;
             if (data?.type !== 'stepinside:visibility') return;
-            if (data.visible === false) {
-                suspendedPlaying = suspendable.filter(a => !a.paused);
-                suspendedPlaying.forEach(a => a.pause());
-            } else {
-                suspendedPlaying.forEach(a => a.play().catch(() => {}));
-                suspendedPlaying = [];
-            }
+            setAudioSuspended(data.visible === false);
         });
     }
 
