@@ -2669,14 +2669,14 @@ body.staging-open {
     // still (above it) is hidden meanwhile by the existing is-generating rule, and
     // fades in ON TOP of the clip's last furnished frame at the reveal.
     &.is-videostage.is-filling #stageVideo { opacity: 1; }
-    // Keep the clip SUBTLE in the background while the branded loader is up:
-    // dimmed + softly blurred so it reads as a premium ambient backdrop, not a
-    // full-attention video. The slight scale hides the blur's transparent edges.
-    // At the reveal (is-generating removed) it briefly clears as the crisp still
+    // Keep the clip subtle in the background while the branded loader is up, but
+    // still clearly readable: gently dimmed + a light blur so the furnishing is
+    // recognisable, not smeared. The slight scale hides the blur's transparent
+    // edges. At the reveal (is-generating removed) it clears as the crisp still
     // fades in over it.
     &.is-generating.is-videostage.is-filling #stageVideo {
-        filter: brightness(0.55) blur(6px);
-        transform: scale(1.08);
+        filter: brightness(0.62) blur(3px);
+        transform: scale(1.05);
     }
 
     // ---- generating state: the StepInside logo glides in from the top, grows
@@ -2754,16 +2754,20 @@ body.staging-open {
         background: rgba(20, 19, 18, 0.92);
         #stageImage { opacity: 0; }
         #stageStatus { opacity: 1; }
-        // fill the logo over the generation; eases toward full, the result then
-        // replaces it (no need to ever reach exactly 100%)
-        .stageLoader__mark--fill { animation: stageLoaderFill 13s var(--ease-out) forwards; }
         #stageBar { opacity: 0; pointer-events: none; }
         .stageArrow { opacity: 0; pointer-events: none; }
     }
 
-    // Video (timelapse) path: the logo fills over EXACTLY the clip's length (5.04s)
-    // from the moment the loader appears, so it completes right as the endframe
-    // lands and there's no frozen/standstill phase before the motion starts.
+    // Still path (no clip): fill the logo over the generation wait; eases toward
+    // full, the result then replaces it (no need to ever reach exactly 100%).
+    &.is-generating:not(.is-videostage) .stageLoader__mark--fill {
+        animation: stageLoaderFill 13s var(--ease-out) forwards;
+    }
+
+    // Video (timelapse) path: the logo fills over EXACTLY the clip's length (5.04s),
+    // started only once the clip is actually playing (is-filling) — so it stays
+    // put during the buffering hold and then runs in lockstep with the motion,
+    // completing right as the endframe lands. No frozen/standstill phase.
     &.is-generating.is-videostage.is-filling .stageLoader__mark--fill {
         animation: stageLoaderFill 5.04s linear forwards;
     }

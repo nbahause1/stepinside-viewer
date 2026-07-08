@@ -153,6 +153,10 @@ const initStaging = (global: Global) => {
     // style switch without losing the good result behind it).
     let shownUrl: string | undefined;
 
+    // Pending "drop the clip after the still reveal" timer (see revealStillOverVideo),
+    // cancelled if a new generation starts before it fires.
+    let stillRevealTimer: number | undefined;
+
     // Coach hint teaching the press-and-hold-for-original gesture. It fades in a
     // couple of seconds after the reveal, then PULSES and STAYS until the visitor
     // has performed the gesture once (`peekedOnce`); after that it never returns.
@@ -200,10 +204,14 @@ const initStaging = (global: Global) => {
         maybeShowHint();
     };
 
-    // Start the timelapse (its src + the loader fill are already set upfront, so its
-    // first frame and the logo motion appear immediately — no standstill) and
-    // resolve once it reaches its endframe. A safety cap resolves anyway if the
-    // clip stalls, so the reveal never hangs.
+    // Play the timelapse and resolve once it reaches its endframe. The clip is
+    // faded in (is-filling, which also starts the logo fill) only once it is
+    // ACTUALLY playing frames — not the moment its src is set. On iOS `preload`
+    // is ignored until playback, so revealing an unbuffered clip would show a
+    // frozen empty room; instead the dark loader scrim holds until the first
+    // frame renders, so the furnishing motion starts the instant the clip appears.
+    // A reveal cap uncovers it anyway on a slow network, and a safety cap resolves
+    // if the clip stalls, so nothing ever hangs.
     const playStagingVideoTimed = (): Promise<void> => new Promise((resolve) => {
         if (!video) { resolve(); return; }
         let done = false;
@@ -215,9 +223,23 @@ const initStaging = (global: Global) => {
             window.clearTimeout(safety);
             resolve();
         };
+        let revealed = false;
+        const reveal = () => {
+            if (revealed) return;
+            revealed = true;
+            video.removeEventListener('playing', reveal);
+            video.removeEventListener('timeupdate', reveal);
+            window.clearTimeout(revealCap);
+            overlay.classList.add('is-filling');   // fade the clip in + start the 5.04s logo fill, in sync with real playback
+        };
         video.addEventListener('ended', finish);
         video.addEventListener('error', finish);
         const safety = window.setTimeout(finish, 15000);
+        // Reveal as soon as frames are rendering ('playing'), with 'timeupdate' as
+        // a fallback and a hard cap so a slow buffer never leaves the loader stuck.
+        video.addEventListener('playing', reveal);
+        video.addEventListener('timeupdate', reveal);
+        const revealCap = window.setTimeout(reveal, 2500);
         try {
             video.currentTime = 0;
             const p = video.play();
@@ -242,7 +264,11 @@ const initStaging = (global: Global) => {
         shownUrl = dataUrl;
         setShowing(true);
         maybeShowHint();
-        window.setTimeout(() => {
+        // Drop the clip once the still is fully up. Tracked so a fast style switch
+        // (a new generation started within this window) can cancel it — otherwise
+        // it would pause the NEW clip and strip its stage classes mid-play.
+        window.clearTimeout(stillRevealTimer);
+        stillRevealTimer = window.setTimeout(() => {
             overlay.classList.remove('is-videostage', 'is-filling');
             if (video) video.pause();
         }, 560);
@@ -407,13 +433,18 @@ const initStaging = (global: Global) => {
         const useVideo = !!(videoUrl && video);
 
         if (useVideo && videoUrl && video) {
-            // Prime the clip + loader BEFORE the overlay opens, so the first frame
-            // and the logo fill appear the instant the loader drops in — no
-            // standstill. The drone fly runs concurrently (the clip covers the
-            // canvas), so nothing waits on it.
+            // Prime the clip BEFORE the overlay opens and start it buffering. We
+            // mark the video stage NOW (so the dark loader scrim covers the scan)
+            // but DON'T fade the clip in yet: on iOS `preload` is ignored until
+            // playback, so a fresh/just-switched src has no decoded frame and would
+            // show a frozen empty room. playStagingVideoTimed() reveals it (adds
+            // is-filling) only once it's actually playing. The drone fly runs
+            // concurrently (the scrim covers the canvas), so nothing waits on it.
             img.removeAttribute('src');                                   // still stays hidden until the reveal
-            if (video.getAttribute('src') !== videoUrl) video.src = videoUrl;
-            overlay.classList.add('is-videostage', 'is-filling');
+            window.clearTimeout(stillRevealTimer);                        // don't let a prior reveal's cleanup pause this clip
+            if (video.getAttribute('src') !== videoUrl) { video.src = videoUrl; video.load(); }
+            overlay.classList.add('is-videostage');
+            overlay.classList.remove('is-filling');                       // re-arm the gate: keep the new clip hidden until it actually plays
         }
 
         // Drop the loader in immediately.
