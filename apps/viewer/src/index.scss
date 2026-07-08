@@ -2861,42 +2861,6 @@ body.staging-open {
         &:active { transform: scale(0.96); }
     }
 
-    // press-and-hold coach hint — plain WHITE TEXT (no box), just above the Home
-    // bar. Fades softly in, then PULSES ("pocht") to draw the eye and STAYS until
-    // the visitor performs the gesture once (staging.ts clears it on first press).
-    #stageHint {
-        position: absolute;
-        left: 50%;
-        bottom: calc(max(20px, env(safe-area-inset-bottom)) + 72px);
-        transform: translateX(-50%);
-        z-index: 2;
-        max-width: calc(100vw - 40px);
-        text-align: center;
-        white-space: nowrap;
-        font-family: 'Inter', sans-serif;
-        font-weight: 600;
-        font-size: 14px;
-        letter-spacing: 0.01em;
-        color: #fff;
-        // legibility over any image without a box behind it
-        text-shadow: 0 1px 10px rgba(0, 0, 0, 0.6), 0 0 3px rgba(0, 0, 0, 0.45);
-        pointer-events: none;
-        opacity: 0;
-        transition: opacity 500ms var(--ease-out);
-
-        &.is-visible { opacity: 1; }              // soft fade-in
-        &.is-pulsing { animation: stageHintPulse 1.35s ease-in-out infinite; }
-        &.hidden { display: none; }
-    }
-}
-
-// gentle throb so the hint keeps drawing the eye until the gesture is performed
-@keyframes stageHintPulse {
-    0%, 100% { opacity: 0.5; }
-    50%      { opacity: 1; }
-}
-@media (prefers-reduced-motion: reduce) {
-    #stageHint.is-pulsing { animation: none; opacity: 1; }
 }
 
 @keyframes stageFadeIn {

@@ -11,10 +11,10 @@
     "footstepsVolume": 0.28,
     "measureStart": "sfx/measure-start.mp3",
     "measureEnd": "sfx/measure-end.mp3",
-    "measureVolume": 0.4,
+    "measureVolume": 0.18,
     "droneAmbient": "sfx/drone-ambient.mp3?v=3",
     "droneSwitch": "sfx/drone-switch.mp3",
-    "droneAmbientVolume": 0.04,
+    "droneAmbientVolume": 0.1,
     "droneSwitchVolume": 0.05,
     "stagingReveal": "sfx/staging-reveal.mp3",
     "stagingRevealVolume": 0.4
