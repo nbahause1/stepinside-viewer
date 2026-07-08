@@ -2651,6 +2651,34 @@ body.staging-open {
     // soft reveal when the furnished result lands
     #stageImage.is-revealed { animation: stageReveal 480ms var(--ease-out); }
 
+    // Desktop furnishing timelapse — a VISIBLE layer under the loader logo. While
+    // generating it plays dimmed with the branded logo overlaid on top (fill timed
+    // to the clip); on reveal it brightens to full and holds its final furnished
+    // frame. Peek (is-scan) fades it out to the live scan, like the still.
+    #stageVideo {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        opacity: 0;
+        transition: opacity 300ms var(--ease-out), filter 450ms var(--ease-out), transform 450ms var(--ease-out);
+        pointer-events: none;
+    }
+    // The clip is the bottom layer (DOM order); it's visible while it plays. The
+    // still (above it) is hidden meanwhile by the existing is-generating rule, and
+    // fades in ON TOP of the clip's last furnished frame at the reveal.
+    &.is-videostage.is-filling #stageVideo { opacity: 1; }
+    // Keep the clip SUBTLE in the background while the branded loader is up:
+    // dimmed + softly blurred so it reads as a premium ambient backdrop, not a
+    // full-attention video. The slight scale hides the blur's transparent edges.
+    // At the reveal (is-generating removed) it briefly clears as the crisp still
+    // fades in over it.
+    &.is-generating.is-videostage.is-filling #stageVideo {
+        filter: brightness(0.55) blur(6px);
+        transform: scale(1.08);
+    }
+
     // ---- generating state: the StepInside logo glides in from the top, grows
     // to the centre and fills up (dim base + bright fill revealed left to right)
     // while the room is furnished. Shown only under .is-generating. ----
@@ -2731,6 +2759,13 @@ body.staging-open {
         .stageLoader__mark--fill { animation: stageLoaderFill 13s var(--ease-out) forwards; }
         #stageBar { opacity: 0; pointer-events: none; }
         .stageArrow { opacity: 0; pointer-events: none; }
+    }
+
+    // Video (timelapse) path: the logo fills over EXACTLY the clip's length (5.04s)
+    // from the moment the loader appears, so it completes right as the endframe
+    // lands and there's no frozen/standstill phase before the motion starts.
+    &.is-generating.is-videostage.is-filling .stageLoader__mark--fill {
+        animation: stageLoaderFill 5.04s linear forwards;
     }
 
     #stageBar {
@@ -3191,24 +3226,26 @@ body.staging-open {
 }
 
 /* ================================================================
-   MOBILE / TOUCH: DECLUTTER THE TOP
+   DECLUTTER THE TOP (all viewports)
    ----------------------------------------------------------------
-   On a phone the StepInside brand pill and the highlights pill sat
-   stacked at the top — too crowded. Drop the brand pill and lift the
-   highlights pill into its (top-centre) slot. Desktop keeps both.
+   The StepInside brand pill and the highlights pill sat stacked at the
+   top. Drop the brand pill and lift the highlights pill into its
+   (top-centre) slot. Now applied on EVERY viewport (was mobile-only).
    ================================================================ */
-@media (pointer: coarse) {
-  #brandDome {
-    display: none;
-  }
+#brandDome {
+  display: none;
+}
 
+#annotationNav {
+  // take the brand pill's old top-centre slot
+  top: max(14px, env(safe-area-inset-top));
+}
+
+/* Mobile/touch: additionally compact the highlights pill so it sits in the
+   SAME top row as the share (left) / inquiry (right) corner controls —
+   compact fixed width, generous gaps to the corners, short ellipsised title. */
+@media (pointer: coarse) {
   #annotationNav {
-    // Sit in the SAME top row as the share (left) / inquiry (right) controls,
-    // matched to them: same height (buttons fill the pill, no vertical
-    // padding -> 44px like the corner circles) and a compact fixed width with
-    // generous gaps to the corners. The title is deliberately short — long
-    // room names ellipsise — so the pill stays small and the row breathes.
-    top: max(14px, env(safe-area-inset-top));
     padding: 0 3px;
 
     > #annotationInfo {

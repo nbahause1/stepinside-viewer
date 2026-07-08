@@ -739,6 +739,12 @@
                  returns to walking. `.is-scan` fades the image out to reveal the
                  live canvas underneath. Driven by staging.ts. -->
             <div id="stageOverlay" class="hidden">
+                <!-- Desktop furnishing timelapse. It sits UNDER the still (DOM order
+                     = z-order): it plays visibly with the loader logo on top, and on
+                     its endframe the crisp still fades in ON TOP of the last furnished
+                     frame — so the room is never seen empty. muted + playsinline so it
+                     plays inline. -->
+                <video id="stageVideo" muted playsinline preload="auto" aria-hidden="true"></video>
                 <img id="stageImage" alt="Möblierte Ansicht des Raums" />
                 <!-- Branded loader, shown only while generating (.is-generating):
                      the StepInside logo glides in from the top, grows to the
