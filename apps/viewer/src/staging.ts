@@ -70,10 +70,14 @@ const initStaging = (global: Global) => {
         if (!s) return undefined;
         return resolveImg((isPortrait() && s.imagePortrait) ? s.imagePortrait : s.image);
     };
-    // Per-style furnishing clip (landscape / desktop only — the clips are 16:9).
+    // Per-style furnishing clip, orientation-matched: landscape (desktop) plays
+    // the 16:9 `video`, portrait (phones) the 9:16 `videoPortrait`. If the
+    // matching orientation has no clip, returns undefined so staging degrades to
+    // the plain still reveal — never a wrong-aspect clip cropped by object-fit.
     const styleVideo = (id: string | undefined): string | undefined => {
-        const s = styles.find(s => s.id === id) as (undefined | { video?: string });
-        return resolveImg(s?.video);
+        const s = styles.find(s => s.id === id) as (undefined | { video?: string, videoPortrait?: string });
+        if (!s) return undefined;
+        return resolveImg(isPortrait() ? s.videoPortrait : s.video);
     };
     const wait = (ms: number) => new Promise<void>(resolve => window.setTimeout(resolve, ms));
 
@@ -110,10 +114,11 @@ const initStaging = (global: Global) => {
     };
     if (demoMode) {
         revealPill();
-        // Warm the default style's clip so the first reveal plays without a
-        // buffering stall behind the loader. Desktop/landscape only — the clips
-        // are 16:9 and phones (portrait) use the still-image flow instead.
-        if (video && !isPortrait()) {
+        // Warm the default style's orientation-matched clip so the first reveal
+        // plays without a buffering stall behind the loader. styleVideo() returns
+        // the landscape (desktop) or portrait (phone) clip, or undefined if the
+        // current orientation has none — in which case nothing is warmed.
+        if (video) {
             const firstClip = styleVideo(styles[0]?.id);
             if (firstClip) { video.src = firstClip; video.load(); }
         }
@@ -394,9 +399,11 @@ const initStaging = (global: Global) => {
 
         setLoading(true);
 
-        // Desktop/landscape only: a per-style furnishing timelapse plays visibly
-        // with the loader logo on top; phones (portrait) keep the plain still.
-        const videoUrl = (demoMode && !isPortrait()) ? styleVideo(styleId) : undefined;
+        // A per-style furnishing timelapse plays visibly with the loader logo on
+        // top. styleVideo() hands back the orientation-matched clip (landscape on
+        // desktop, portrait on phones) or undefined when this orientation has no
+        // clip, in which case staging falls back to the plain still reveal below.
+        const videoUrl = demoMode ? styleVideo(styleId) : undefined;
         const useVideo = !!(videoUrl && video);
 
         if (useVideo && videoUrl && video) {
@@ -416,10 +423,11 @@ const initStaging = (global: Global) => {
         if (demoMode) {
             const image = styleImage(styleId);
 
-            // Desktop, FIRST view of a style: the timelapse plays (motion starts
-            // immediately), the drone fly runs CONCURRENTLY, then the crisp still
-            // fades in over the final furnished frame — the room is never seen empty.
-            // Cached afterwards → later skips between styles show the plain stills.
+            // FIRST view of a style (desktop or phone): the orientation-matched
+            // timelapse plays (motion starts immediately), the drone fly runs
+            // CONCURRENTLY, then the crisp still fades in over the final furnished
+            // frame — the room is never seen empty. Cached afterwards → later skips
+            // between styles show the plain stills.
             if (useVideo && videoUrl) {
                 if (image) { const pre = new Image(); pre.src = image; }  // warm the still so it paints instantly
                 void goToStagingAerial();                                  // concurrent — no dead wait on the fly
