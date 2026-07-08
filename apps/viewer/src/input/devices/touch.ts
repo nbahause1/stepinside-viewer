@@ -73,7 +73,7 @@ class TouchDevice implements InputDevice {
 
     update(ctx: UpdateContext, frame: CameraInputFrame): void {
         const { touch, pinch, count } = this._source.read();
-        const { isFly, isWalk, isFirstPerson, isOrbit, gamingControls, dt, distance, cameraComponent } = ctx;
+        const { isFly, isWalk, isFirstPerson, isOrbit, isAerial, gamingControls, dt, distance, cameraComponent } = ctx;
 
         // running touch count
         this._touchCount += count[0];
@@ -131,9 +131,18 @@ class TouchDevice implements InputDevice {
 
         const orbit = isOrbit ? 1 : 0;
         const fly = isFirstPerson ? 1 : 0;
+        // Bird's-eye (drone) mode: the camera holds its position; one-finger drag
+        // looks around and pinch drives optical FOV zoom. On desktop this "just
+        // works" because the mouse device emits rotate/wheel mode-agnostically;
+        // touch gates rotate/pinch by mode, so aerial got neither — hence no
+        // rotation on mobile. It steers through the SAME first-person look path as
+        // walk/fly below (inverted drag + FOV-proportional sensitivity), so the
+        // drone view feels identical to walking — not the orbit mapping, which is
+        // mirrored and slightly more sensitive.
+        const aerial = isAerial ? 1 : 0;
         const double = this._touchCount > 1 ? 1 : 0;
-        const orbitFactor = isFirstPerson ? cameraComponent.fov / 120 : 1;
-        const dragInvert = (isFirstPerson && !gamingControls) ? -1 : 1;
+        const orbitFactor = (isFirstPerson || isAerial) ? cameraComponent.fov / 120 : 1;
+        const dragInvert = ((isFirstPerson && !gamingControls) || isAerial) ? -1 : 1;
         // First-person modes (fly and walk) opt into the direct two-finger
         // model only outside gaming controls (gaming uses the joystick).
         const directFirstPerson = fly * (gamingControls ? 0 : 1);
@@ -158,8 +167,10 @@ class TouchDevice implements InputDevice {
             v.add(flyMoveTmp.mulScalar(fly * this.moveSpeed * dt));
         }
         // Two-finger pinch z in orbit: +z = "farther from target" (close-pinch
-        // = +pinch[0] = zoom out).
-        pinchMoveTmp.set(0, 0, orbit * pinch[0]);
+        // = +pinch[0] = zoom out). Aerial maps the SAME pinch to optical FOV zoom
+        // via move.z (AerialController does fov -= move.z * k), sign-inverted so
+        // spreading the fingers zooms IN — the natural pinch-to-zoom direction.
+        pinchMoveTmp.set(0, 0, (orbit - aerial) * pinch[0]);
         v.add(pinchMoveTmp.mulScalar(double * this.pinchSpeed * DISPLACEMENT_SCALE));
         // First-person pinch is OPTICAL zoom (like pinching a photo), not a
         // dolly: spreading the fingers (pinch[0] < 0) magnifies the view.
@@ -180,9 +191,11 @@ class TouchDevice implements InputDevice {
         // single-touch orbit rotate (masked when there are 2+ touches)
         orbitRotate.set(touch[0], touch[1], 0);
         v.add(orbitRotate.mulScalar(orbit * (1 - double) * this.orbitSpeed * this.touchRotateSensitivity * DISPLACEMENT_SCALE));
-        // single-touch fly look (inverted in non-gaming first-person)
+        // single-touch fly / aerial look — aerial goes through this SAME path as
+        // walk/fly (inverted drag + FOV-proportional sensitivity via orbitFactor)
+        // so the drone view steers identically to walking.
         flyRotate.set(touch[0] * dragInvert, touch[1] * dragInvert, 0);
-        v.add(flyRotate.mulScalar(fly * (1 - double) * this.orbitSpeed * orbitFactor * this.touchRotateSensitivity * DISPLACEMENT_SCALE));
+        v.add(flyRotate.mulScalar((fly + aerial) * (1 - double) * this.orbitSpeed * orbitFactor * this.touchRotateSensitivity * DISPLACEMENT_SCALE));
         deltas.rotate.append([v.x, v.y, v.z]);
     }
 }

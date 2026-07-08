@@ -2669,14 +2669,14 @@ body.staging-open {
     // still (above it) is hidden meanwhile by the existing is-generating rule, and
     // fades in ON TOP of the clip's last furnished frame at the reveal.
     &.is-videostage.is-filling #stageVideo { opacity: 1; }
-    // Keep the clip SUBTLE in the background while the branded loader is up:
-    // dimmed + softly blurred so it reads as a premium ambient backdrop, not a
-    // full-attention video. The slight scale hides the blur's transparent edges.
-    // At the reveal (is-generating removed) it briefly clears as the crisp still
+    // Keep the clip subtle in the background while the branded loader is up, but
+    // still clearly readable: gently dimmed + a light blur so the furnishing is
+    // recognisable, not smeared. The slight scale hides the blur's transparent
+    // edges. At the reveal (is-generating removed) it clears as the crisp still
     // fades in over it.
     &.is-generating.is-videostage.is-filling #stageVideo {
-        filter: brightness(0.55) blur(6px);
-        transform: scale(1.08);
+        filter: brightness(0.62) blur(3px);
+        transform: scale(1.05);
     }
 
     // ---- generating state: the StepInside logo glides in from the top, grows
@@ -2735,6 +2735,11 @@ body.staging-open {
         inset: 0;
         color: #fff;
         clip-path: inset(0 100% 0 0);   // hidden until the fill animates
+        // No shadow on the FILL copy: the clip-path cuts its text-shadow into a
+        // hard vertical dark edge that sweeps across during the fill — the faint
+        // "black box" seen over the brighter portrait clip on phones. The base
+        // copy underneath keeps its shadow, so legibility is unchanged.
+        text-shadow: none;
     }
 
     // Loader is logo-only: the filling logo already signals progress, so the
@@ -2754,16 +2759,20 @@ body.staging-open {
         background: rgba(20, 19, 18, 0.92);
         #stageImage { opacity: 0; }
         #stageStatus { opacity: 1; }
-        // fill the logo over the generation; eases toward full, the result then
-        // replaces it (no need to ever reach exactly 100%)
-        .stageLoader__mark--fill { animation: stageLoaderFill 13s var(--ease-out) forwards; }
         #stageBar { opacity: 0; pointer-events: none; }
         .stageArrow { opacity: 0; pointer-events: none; }
     }
 
-    // Video (timelapse) path: the logo fills over EXACTLY the clip's length (5.04s)
-    // from the moment the loader appears, so it completes right as the endframe
-    // lands and there's no frozen/standstill phase before the motion starts.
+    // Still path (no clip): fill the logo over the generation wait; eases toward
+    // full, the result then replaces it (no need to ever reach exactly 100%).
+    &.is-generating:not(.is-videostage) .stageLoader__mark--fill {
+        animation: stageLoaderFill 13s var(--ease-out) forwards;
+    }
+
+    // Video (timelapse) path: the logo fills over EXACTLY the clip's length (5.04s),
+    // started only once the clip is actually playing (is-filling) — so it stays
+    // put during the buffering hold and then runs in lockstep with the motion,
+    // completing right as the endframe lands. No frozen/standstill phase.
     &.is-generating.is-videostage.is-filling .stageLoader__mark--fill {
         animation: stageLoaderFill 5.04s linear forwards;
     }
@@ -2997,6 +3006,17 @@ body.staging-open {
 
     // (the furnished image uses cover/full-bleed everywhere — on phones it shows
     // the native 9:16 portrait variant, so no cropping hack is needed)
+
+    // Furnishing loader on a phone: darken the whole overlay a notch beyond the
+    // desktop look. The branded logo's fill sweep has a fine dark edge (its
+    // text-shadow cut by the clip-path) that is invisible on desktop but reads as
+    // a faint black box over the brighter portrait clip. A darker, slightly
+    // blurrier clip + denser scrim swallows that edge while the furnishing motion
+    // stays perceptible. Placed after the base staging rules so it wins.
+    #stageOverlay.is-generating { background: rgba(18, 17, 16, 0.97); }
+    #stageOverlay.is-generating.is-videostage.is-filling #stageVideo {
+        filter: brightness(0.45) blur(5px);
+    }
 }
 
 

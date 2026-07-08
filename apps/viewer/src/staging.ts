@@ -70,12 +70,43 @@ const initStaging = (global: Global) => {
         if (!s) return undefined;
         return resolveImg((isPortrait() && s.imagePortrait) ? s.imagePortrait : s.image);
     };
-    // Per-style furnishing clip (landscape / desktop only — the clips are 16:9).
+    // Per-style furnishing clip, orientation-matched: landscape (desktop) plays
+    // the 16:9 `video`, portrait (phones) the 9:16 `videoPortrait`. If the
+    // matching orientation has no clip, returns undefined so staging degrades to
+    // the plain still reveal — never a wrong-aspect clip cropped by object-fit.
     const styleVideo = (id: string | undefined): string | undefined => {
-        const s = styles.find(s => s.id === id) as (undefined | { video?: string });
-        return resolveImg(s?.video);
+        const s = styles.find(s => s.id === id) as (undefined | { video?: string, videoPortrait?: string });
+        if (!s) return undefined;
+        return resolveImg(isPortrait() ? s.videoPortrait : s.video);
     };
     const wait = (ms: number) => new Promise<void>(resolve => window.setTimeout(resolve, ms));
+
+    // Fully prefetch a furnishing clip into memory and hand back an object URL
+    // that plays INSTANTLY — no range-request buffering, no frozen empty first
+    // frame. This is the reliable way to preload video on iOS, where <video
+    // preload> is ignored until a real play() gesture, so a just-switched src
+    // would otherwise show the empty room while it buffers. Falls back to the
+    // network URL until the blob is ready, so nothing ever depends on it.
+    const clipBlobUrls = new Map<string, string>();
+    const warmClip = async (url: string | undefined): Promise<void> => {
+        if (!url || clipBlobUrls.has(url)) return;
+        clipBlobUrls.set(url, url);   // reserve (network URL) so we fetch each clip once
+        try {
+            const res = await fetch(url);
+            if (!res.ok) { clipBlobUrls.delete(url); return; }
+            const blob = await res.blob();
+            clipBlobUrls.set(url, URL.createObjectURL(blob));
+        } catch {
+            clipBlobUrls.delete(url);
+        }
+    };
+    // The source to actually play: the in-memory blob once warmed, else the
+    // network URL (still plays, just with the browser's own buffering).
+    const playableClip = (url: string | undefined): string | undefined =>
+        url ? (clipBlobUrls.get(url) ?? url) : undefined;
+    // Prefetch every style's orientation-matched clip so arrow-switching between
+    // styles is as instant as the first open — no frozen empty room, no delay.
+    const warmAllClips = () => { for (const s of styles) void warmClip(styleVideo(s.id)); };
 
     const pill = document.getElementById('stagePill');
     const trigger = document.getElementById('stageTrigger');
@@ -110,12 +141,20 @@ const initStaging = (global: Global) => {
     };
     if (demoMode) {
         revealPill();
-        // Warm the default style's clip so the first reveal plays without a
-        // buffering stall behind the loader. Desktop/landscape only — the clips
-        // are 16:9 and phones (portrait) use the still-image flow instead.
-        if (video && !isPortrait()) {
+        // Warm the default style's orientation-matched clip so the first reveal
+        // plays without a buffering stall behind the loader. styleVideo() returns
+        // the landscape (desktop) or portrait (phone) clip, or undefined if the
+        // current orientation has none — in which case nothing is warmed.
+        if (video) {
             const firstClip = styleVideo(styles[0]?.id);
             if (firstClip) { video.src = firstClip; video.load(); }
+            void warmClip(firstClip);
+            // Prefetch the OTHER styles' clips into memory once the scene is ready
+            // (so it doesn't compete with the scan load), and a timeout fallback in
+            // case firstFrame already fired. warmClip() dedups, so double-calling is
+            // safe. This is what makes arrow-switching instant instead of cold.
+            events.on('firstFrame', warmAllClips);
+            window.setTimeout(warmAllClips, 5000);
         }
     }
 
@@ -147,6 +186,10 @@ const initStaging = (global: Global) => {
     // The furnished image currently on screen (for reverting after a failed
     // style switch without losing the good result behind it).
     let shownUrl: string | undefined;
+
+    // Pending "drop the clip after the still reveal" timer (see revealStillOverVideo),
+    // cancelled if a new generation starts before it fires.
+    let stillRevealTimer: number | undefined;
 
     // Coach hint teaching the press-and-hold-for-original gesture. It fades in a
     // couple of seconds after the reveal, then PULSES and STAYS until the visitor
@@ -195,10 +238,14 @@ const initStaging = (global: Global) => {
         maybeShowHint();
     };
 
-    // Start the timelapse (its src + the loader fill are already set upfront, so its
-    // first frame and the logo motion appear immediately — no standstill) and
-    // resolve once it reaches its endframe. A safety cap resolves anyway if the
-    // clip stalls, so the reveal never hangs.
+    // Play the timelapse and resolve once it reaches its endframe. The clip is
+    // faded in (is-filling, which also starts the logo fill) only once it is
+    // ACTUALLY playing frames — not the moment its src is set. On iOS `preload`
+    // is ignored until playback, so revealing an unbuffered clip would show a
+    // frozen empty room; instead the dark loader scrim holds until the first
+    // frame renders, so the furnishing motion starts the instant the clip appears.
+    // The fallback cap only uncovers it once a real frame exists, and a safety cap
+    // resolves if the clip stalls, so it never flashes empty and never hangs.
     const playStagingVideoTimed = (): Promise<void> => new Promise((resolve) => {
         if (!video) { resolve(); return; }
         let done = false;
@@ -210,9 +257,32 @@ const initStaging = (global: Global) => {
             window.clearTimeout(safety);
             resolve();
         };
+        let revealed = false;
+        const reveal = () => {
+            if (revealed) return;
+            revealed = true;
+            video.removeEventListener('playing', reveal);
+            video.removeEventListener('timeupdate', reveal);
+            window.clearTimeout(revealCap);
+            overlay.classList.add('is-filling');   // fade the clip in + start the 5.04s logo fill, in sync with real playback
+        };
         video.addEventListener('ended', finish);
         video.addEventListener('error', finish);
         const safety = window.setTimeout(finish, 15000);
+        // Reveal as soon as frames are rendering ('playing'), with 'timeupdate' as
+        // a fallback. The fallback cap uncovers the clip ONLY once it actually has
+        // a frame to show — never the frozen empty first frame of a still-buffering
+        // clip (the bug when arrow-switching to a not-yet-warmed style). If there's
+        // no frame yet, keep the branded loader up and re-check; the 15s safety
+        // still ends the wait and falls back to the still, so nothing hangs.
+        video.addEventListener('playing', reveal);
+        video.addEventListener('timeupdate', reveal);
+        let revealCap: number;
+        const capCheck = () => {
+            if (video.readyState >= 2 /* HAVE_CURRENT_DATA */ && video.currentTime > 0) reveal();
+            else revealCap = window.setTimeout(capCheck, 300);
+        };
+        revealCap = window.setTimeout(capCheck, 2500);
         try {
             video.currentTime = 0;
             const p = video.play();
@@ -237,7 +307,11 @@ const initStaging = (global: Global) => {
         shownUrl = dataUrl;
         setShowing(true);
         maybeShowHint();
-        window.setTimeout(() => {
+        // Drop the clip once the still is fully up. Tracked so a fast style switch
+        // (a new generation started within this window) can cancel it — otherwise
+        // it would pause the NEW clip and strip its stage classes mid-play.
+        window.clearTimeout(stillRevealTimer);
+        stillRevealTimer = window.setTimeout(() => {
             overlay.classList.remove('is-videostage', 'is-filling');
             if (video) video.pause();
         }, 560);
@@ -394,32 +468,48 @@ const initStaging = (global: Global) => {
 
         setLoading(true);
 
-        // Desktop/landscape only: a per-style furnishing timelapse plays visibly
-        // with the loader logo on top; phones (portrait) keep the plain still.
-        const videoUrl = (demoMode && !isPortrait()) ? styleVideo(styleId) : undefined;
+        // A per-style furnishing timelapse plays visibly with the loader logo on
+        // top. styleVideo() hands back the orientation-matched clip (landscape on
+        // desktop, portrait on phones) or undefined when this orientation has no
+        // clip, in which case staging falls back to the plain still reveal below.
+        const videoUrl = demoMode ? styleVideo(styleId) : undefined;
         const useVideo = !!(videoUrl && video);
 
-        if (useVideo && videoUrl && video) {
-            // Prime the clip + loader BEFORE the overlay opens, so the first frame
-            // and the logo fill appear the instant the loader drops in — no
-            // standstill. The drone fly runs concurrently (the clip covers the
-            // canvas), so nothing waits on it.
-            img.removeAttribute('src');                                   // still stays hidden until the reveal
-            if (video.getAttribute('src') !== videoUrl) video.src = videoUrl;
-            overlay.classList.add('is-videostage', 'is-filling');
-        }
-
-        // Drop the loader in immediately.
+        // Drop the dark loader scrim in FIRST — before removing the previous still
+        // or calling video.load() below. is-generating's opaque background is the
+        // only layer that covers the live scan during a switch; applying it AFTER
+        // img.removeAttribute('src') (which display:none's the still) and after the
+        // video.load() reflow left a one-frame transparent window where the scan
+        // canvas showed through (the arrow-switch flash). Order-only change: the
+        // final class set is identical, so first-open/reveal behaviour is unchanged.
         openGenerating('Der Raum wird eingerichtet');
+
+        if (useVideo && videoUrl && video) {
+            // Prime the clip BEFORE the overlay opens and start it buffering. We
+            // mark the video stage NOW (so the dark loader scrim covers the scan)
+            // but DON'T fade the clip in yet: on iOS `preload` is ignored until
+            // playback, so a fresh/just-switched src has no decoded frame and would
+            // show a frozen empty room. playStagingVideoTimed() reveals it (adds
+            // is-filling) only once it's actually playing. The drone fly runs
+            // concurrently (the scrim covers the canvas), so nothing waits on it.
+            img.removeAttribute('src');                                   // still stays hidden until the reveal
+            window.clearTimeout(stillRevealTimer);                        // don't let a prior reveal's cleanup pause this clip
+            void warmClip(videoUrl);                                      // warm for next time if this switch was cold
+            const playSrc = playableClip(videoUrl) ?? videoUrl;           // in-memory blob if warmed (plays instantly), else network
+            if (video.getAttribute('src') !== playSrc) { video.src = playSrc; video.load(); }
+            overlay.classList.add('is-videostage');
+            overlay.classList.remove('is-filling');                       // re-arm the gate: keep the new clip hidden until it actually plays
+        }
 
         // Demo mode: no capture, no API call.
         if (demoMode) {
             const image = styleImage(styleId);
 
-            // Desktop, FIRST view of a style: the timelapse plays (motion starts
-            // immediately), the drone fly runs CONCURRENTLY, then the crisp still
-            // fades in over the final furnished frame — the room is never seen empty.
-            // Cached afterwards → later skips between styles show the plain stills.
+            // FIRST view of a style (desktop or phone): the orientation-matched
+            // timelapse plays (motion starts immediately), the drone fly runs
+            // CONCURRENTLY, then the crisp still fades in over the final furnished
+            // frame — the room is never seen empty. Cached afterwards → later skips
+            // between styles show the plain stills.
             if (useVideo && videoUrl) {
                 if (image) { const pre = new Image(); pre.src = image; }  // warm the still so it paints instantly
                 void goToStagingAerial();                                  // concurrent — no dead wait on the fly

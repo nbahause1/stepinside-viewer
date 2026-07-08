@@ -164,21 +164,24 @@
         "label": "Designklassiker",
         "image": "staged/classic.jpg?v=2",
         "imagePortrait": "staged/classic-portrait.jpg?v=2",
-        "video": "staged/classic.mp4?v=1"
+        "video": "staged/classic.mp4?v=1",
+        "videoPortrait": "staged/classic-portrait.mp4?v=1"
       },
       {
         "id": "warm",
         "label": "Colour-Pop",
         "image": "staged/warm.jpg?v=2",
         "imagePortrait": "staged/warm-portrait.jpg?v=2",
-        "video": "staged/warm.mp4?v=1"
+        "video": "staged/warm.mp4?v=1",
+        "videoPortrait": "staged/warm-portrait.mp4?v=1"
       },
       {
         "id": "scandi",
         "label": "Minimal",
         "image": "staged/scandi.jpg?v=2",
         "imagePortrait": "staged/scandi-portrait.jpg?v=2",
-        "video": "staged/scandi.mp4?v=1"
+        "video": "staged/scandi.mp4?v=1",
+        "videoPortrait": "staged/scandi-portrait.mp4?v=1"
       }
     ]
   },

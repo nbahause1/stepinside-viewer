@@ -2189,8 +2189,8 @@ body.staging-open #surveyCard {
   opacity: 1;
 }
 #stageOverlay.is-generating.is-videostage.is-filling #stageVideo {
-  filter: brightness(0.55) blur(6px);
-  transform: scale(1.08);
+  filter: brightness(0.62) blur(3px);
+  transform: scale(1.05);
 }
 #stageOverlay #stageStatus {
   position: absolute;
@@ -2240,6 +2240,7 @@ body.staging-open #surveyCard {
   inset: 0;
   color: #fff;
   clip-path: inset(0 100% 0 0);
+  text-shadow: none;
 }
 #stageOverlay #stageStatusText {
   display: none;
@@ -2258,9 +2259,6 @@ body.staging-open #surveyCard {
 #stageOverlay.is-generating #stageStatus {
   opacity: 1;
 }
-#stageOverlay.is-generating .stageLoader__mark--fill {
-  animation: stageLoaderFill 13s var(--ease-out) forwards;
-}
 #stageOverlay.is-generating #stageBar {
   opacity: 0;
   pointer-events: none;
@@ -2268,6 +2266,9 @@ body.staging-open #surveyCard {
 #stageOverlay.is-generating .stageArrow {
   opacity: 0;
   pointer-events: none;
+}
+#stageOverlay.is-generating:not(.is-videostage) .stageLoader__mark--fill {
+  animation: stageLoaderFill 13s var(--ease-out) forwards;
 }
 #stageOverlay.is-generating.is-videostage.is-filling .stageLoader__mark--fill {
   animation: stageLoaderFill 5.04s linear forwards;
@@ -2509,6 +2510,12 @@ body.staging-open #surveyCard {
     max-width: 0;
     margin-left: 0;
     opacity: 0;
+  }
+  #stageOverlay.is-generating {
+    background: rgba(18, 17, 16, 0.97);
+  }
+  #stageOverlay.is-generating.is-videostage.is-filling #stageVideo {
+    filter: brightness(0.45) blur(5px);
   }
 }
 /* ================================================================
