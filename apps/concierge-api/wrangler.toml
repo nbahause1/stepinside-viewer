@@ -44,15 +44,14 @@ fallthrough = true
 # Provision once (needs account access), then uncomment with the printed id:
 #   npx wrangler kv namespace create RATE_LIMIT_KV
 
-# KONSOLIDIERUNG OFFEN: Diese KV-/D1-IDs stammen aus einem ZWEITEN
-# Cloudflare-Account (workers.dev-Subdomain "stepinside"); im Account
-# haukecux19@gmail.com ("stepinside-eu", aktuelles Deploy-Ziel) existieren sie
-# nicht — ein Deploy mit aktiven Bindings schlägt dort fehl. Bis die Accounts
-# konsolidiert sind, bleiben die Bindings auskommentiert; der Worker läuft
-# dann mit In-Memory-Limits, /events + /lead droppen still (202).
-# [[kv_namespaces]]
-# binding = "RATE_LIMIT_KV"
-# id = "40014ed55db54b6ebcb6c85154069e01"
+# KV im Account haukecux19@gmail.com ("stepinside-eu", aktuelles Deploy-Ziel)
+# — aktiviert die harten Cross-Isolate-Limits UND die globalen Tages-Not-Aus-
+# Budgets (CONCIERGE_DAILY_LIMIT etc.). Der ZWEITE Cloudflare-Account
+# (Subdomain "stepinside") hat ein eigenes Namespace 40014ed5…; bei der
+# Account-Konsolidierung die ID des Gewinner-Accounts eintragen.
+[[kv_namespaces]]
+binding = "RATE_LIMIT_KV"
+id = "90ab5895edcb416fa9283bbcba6d4eca"
 
 # --- Anonymous analytics + leads (D1) ----------------------------------------
 # /events, /lead and /report/{propertyId} require a D1 database bound as
