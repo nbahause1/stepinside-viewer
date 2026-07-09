@@ -425,8 +425,18 @@ const initConcierge = (global: Global) => {
         }
     };
 
+    // Tapping the send button must NOT blur the input. On iOS a blur closes the
+    // on-screen keyboard, and the post-response input.focus() can't reopen it
+    // (reopening the keyboard requires a user gesture — the async callback isn't
+    // one). Preventing default on pointer/mouse-down keeps focus on the input,
+    // so the keyboard stays up across sends and you can immediately type again.
+    // (preventDefault here blocks only the focus shift, not the click event.)
+    const keepFocus = (event: Event) => event.preventDefault();
+    sendBtn.addEventListener('pointerdown', keepFocus);
+    sendBtn.addEventListener('mousedown', keepFocus);
     sendBtn.addEventListener('click', () => {
         send();
+        input.focus();  // synchronous, inside the click gesture — keeps iOS keyboard up
     });
     // Keyboard inside the chat must NOT reach the viewer's global shortcuts
     // (1/2/3 switch camera mode, r resets, h toggles help, space play/pause, …).
