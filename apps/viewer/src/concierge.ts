@@ -167,6 +167,44 @@ const initConcierge = (global: Global) => {
         }
     });
 
+    // Mobile keyboard handling. The panel is position:fixed/inset:0 against the
+    // LAYOUT viewport, but iOS Safari doesn't shrink that when the on-screen
+    // keyboard opens — it pans the VISUAL viewport instead. Untreated, the
+    // input row disappears behind the keyboard (you type blind) and the page
+    // appears to scroll. Fix: while the chat is open, glue the panel to the
+    // visual viewport (top offset + height), so the input always sits right
+    // above the keyboard. height/top are not in the panel's transition list,
+    // so these updates apply instantly without fighting the open animation.
+    const vv = window.visualViewport;
+    if (vv) {
+        const applyViewport = () => {
+            if (!state.chatOpen) {
+                panel.style.top = '';
+                panel.style.height = '';
+                panel.style.bottom = '';
+                panel.style.transform = '';
+                return;
+            }
+            panel.style.top = `${vv.offsetTop}px`;
+            panel.style.height = `${vv.height}px`;
+            panel.style.bottom = 'auto';
+            // While the keyboard is up, pixel-exact placement beats the entrance
+            // polish: pin the transform so no (possibly interrupted) transition
+            // can offset the panel against the keyboard math above.
+            const keyboardOpen = vv.height < window.innerHeight - 80;
+            panel.style.transform = keyboardOpen ? 'none' : '';
+            messages.scrollTop = messages.scrollHeight;
+        };
+        vv.addEventListener('resize', applyViewport);
+        vv.addEventListener('scroll', applyViewport);
+        events.on('chatOpen:changed', applyViewport);
+        // iOS also auto-scrolls the document to "reveal" the focused input,
+        // which fights the fixed panel — pin the page back while chatting.
+        window.addEventListener('scroll', () => {
+            if (state.chatOpen) window.scrollTo(0, 0);
+        });
+    }
+
     // Type-anywhere: while the chat is open, every printable key lands in the
     // input no matter what currently holds focus. Focus is fragile here — the
     // deferred focus() can lag seconds behind while the scene streams in, and

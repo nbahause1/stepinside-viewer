@@ -3,7 +3,10 @@
     <head>
         <title>StepInside</title>
         <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+        <!-- interactive-widget=resizes-content: Android Chrome shrinks the layout
+             viewport when the on-screen keyboard opens, so the chat input stays
+             visible. iOS ignores it (handled via visualViewport in concierge.ts). -->
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content">
         <base href="">
         <!-- Inter self-hosted (latin subset, variable → one file covers all
              weights): no render-blocking Google roundtrip, no visitor-IP leak to
