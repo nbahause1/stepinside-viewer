@@ -176,13 +176,19 @@ const initConcierge = (global: Global) => {
     // panel's last flex child, so the padding pushes it up while the messages
     // list shrinks. keyboardH = layout height − visible height − any top pan.
     const vv = window.visualViewport;
+    // Whether the on-screen keyboard is currently raised (derived from the
+    // visual viewport being shorter than the layout viewport). Drives the
+    // tap-to-reopen fix further down. Assumed down when we can't measure.
+    let keyboardUp = false;
     if (vv) {
         const applyViewport = () => {
             if (!state.chatOpen) {
                 panel.style.paddingBottom = '';
+                keyboardUp = false;
                 return;
             }
             const keyboardH = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+            keyboardUp = keyboardH > 0;
             panel.style.paddingBottom = keyboardH > 0 ? `${keyboardH}px` : '';
             messages.scrollTop = messages.scrollHeight;
         };
@@ -190,6 +196,22 @@ const initConcierge = (global: Global) => {
         vv.addEventListener('scroll', applyViewport);
         events.on('chatOpen:changed', applyViewport);
     }
+
+    // iOS raises the on-screen keyboard ONLY on a focus CHANGE. After the first
+    // answer the field usually still holds focus (we keep it there on purpose so
+    // the guest can keep typing), yet iOS has dismissed the keyboard — so tapping
+    // the already-focused field is a no-op and no keyboard comes up. That is the
+    // "can't type the second message, tapping the bar does nothing" symptom.
+    // Force a real focus change inside the tap gesture: blur, then refocus. Only
+    // when we can see the keyboard is down, so a normal tap while it's already up
+    // never flickers it. touchend is a genuine user gesture, so the refocus is
+    // allowed to summon the keyboard.
+    input.addEventListener('touchend', () => {
+        if (keyboardUp) return;
+        if (document.activeElement !== input) return; // first tap: iOS focuses it itself
+        input.blur();
+        input.focus();
+    });
 
     // Lock body scroll while the fullscreen chat is open. The panel already
     // covers everything (position:fixed inset:0), so we only need to stop the
