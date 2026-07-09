@@ -265,36 +265,68 @@ const initConcierge = (global: Global) => {
             panelShift = 0;
         };
 
+        // Fit the panel to exactly the VISIBLE area, so the header stays on
+        // screen and the input row sits right on the keyboard. iOS displaces
+        // fixed elements in more than one way while the keyboard is up
+        // (visual-viewport pan, focus-scroll, the notorious fixed-acts-like-
+        // absolute conversion) — predicting which one happened is a losing
+        // game. So measure where the panel's top edge actually ended up and
+        // shift by the delta to the visible top (vv.offsetTop in client
+        // coords — true under every mechanism). The entrance transition
+        // animates transform, so it must be off while we correct — otherwise
+        // the corrections lag behind the measurements and oscillate.
+        const fitPanel = () => {
+            panel.style.transition = 'none';
+            panel.style.height = `${vv.height}px`;
+            const delta = vv.offsetTop - panel.getBoundingClientRect().top;
+            if (delta !== 0) {
+                panelShift += delta;
+                panel.style.transform = panelShift !== 0 ? `translateY(${panelShift}px)` : '';
+                if (Math.abs(delta) > 2) debugHud?.(`pin Δ${Math.round(delta)} shift=${Math.round(panelShift)}`);
+            }
+        };
+
+        // ACTIVE pinning while the keyboard is up. The re-focus displacement
+        // (tap the field for message 2 → iOS shoves the whole page up to
+        // "reveal" the input) fires NO visualViewport event at all — measured
+        // on-device: the panel, header and even the debug HUD slid off-screen
+        // while resize/scroll stayed silent. Event listeners alone therefore
+        // can't hold the layout. This rAF loop re-measures every frame and
+        // pins the panel to the visible area no matter what iOS does; it runs
+        // only while chat is open AND the keyboard is up (the scene render
+        // loop is idle then — IdleLook is suppressed — so this is cheap).
+        let pinRaf = 0;
+        const pinLoop = () => {
+            pinRaf = 0;
+            if (!state.chatOpen || keyboardHeight() <= KEYBOARD_MIN) return;
+            fitPanel();
+            pinRaf = requestAnimationFrame(pinLoop);
+        };
+        const stopPin = () => {
+            if (pinRaf !== 0) {
+                cancelAnimationFrame(pinRaf);
+                pinRaf = 0;
+            }
+        };
+
         const applyViewport = () => {
             if (!state.chatOpen) {
                 releasePanel();
+                stopPin();
                 keyboardWasUp = false;
                 cancelDismiss();
                 return;
             }
             const keyboardUp = keyboardHeight() > KEYBOARD_MIN;
             if (keyboardUp) {
-                // Fit the panel to exactly the VISIBLE area, so the header
-                // stays on screen and the input row sits right on the keyboard.
-                // iOS displaces fixed elements in more than one way while the
-                // keyboard is up (visual-viewport pan, focus-scroll, the
-                // notorious fixed-acts-like-absolute conversion) — predicting
-                // which one happened is a losing game. So measure where the
-                // panel's top edge actually ended up and shift by the delta to
-                // the visible top (vv.offsetTop in client coords — true under
-                // every mechanism). Re-runs on every vv event; delta becomes 0
-                // once settled. The entrance transition animates transform, so
-                // it must be off while we correct — otherwise the corrections
-                // lag behind the measurements and oscillate.
-                panel.style.transition = 'none';
-                panel.style.height = `${vv.height}px`;
-                panelShift += vv.offsetTop - panel.getBoundingClientRect().top;
-                panel.style.transform = panelShift !== 0 ? `translateY(${panelShift}px)` : '';
+                fitPanel();
                 messages.scrollTop = messages.scrollHeight;
+                if (pinRaf === 0) pinRaf = requestAnimationFrame(pinLoop);
                 cancelDismiss();
                 debugHud?.(`fit kbH=${Math.round(keyboardHeight())} shift=${Math.round(panelShift)}`);
             } else {
                 releasePanel();
+                stopPin();
                 debugHud?.(`release kbH=${Math.round(keyboardHeight())}`);
                 if (keyboardWasUp && dismissTimer === null && touchDevice.matches &&
                     document.activeElement === input) {
