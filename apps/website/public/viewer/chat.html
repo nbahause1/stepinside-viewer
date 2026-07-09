@@ -9,6 +9,9 @@
          the keyboard is native form behavior and simply works. -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <meta name="color-scheme" content="dark">
+    <!-- Tints Safari's status-bar/toolbar zones dark — without it they render
+         as white bars around the dark page. -->
+    <meta name="theme-color" content="#0b0b0d">
     <title>Concierge</title>
     <style>
         :root { color-scheme: dark; }
@@ -18,7 +21,13 @@
             background: #0b0b0d;
             color: #f0f0f2;
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-            min-height: 100vh;
+            /* svh, not vh: on iOS 100vh includes the collapsed-toolbar height,
+               which makes a short page scrollable — after keyboard use the
+               content ended up shifted half under the sticky header. svh is
+               the small (toolbar visible) height, so a short chat never
+               scrolls; long chats scroll naturally. */
+            min-height: 100vh; /* fallback for pre-svh browsers */
+            min-height: 100svh;
             display: flex;
             flex-direction: column;
         }

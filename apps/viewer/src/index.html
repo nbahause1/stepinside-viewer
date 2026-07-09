@@ -7,6 +7,10 @@
              viewport when the on-screen keyboard opens, so the chat input stays
              visible. iOS ignores it (handled via visualViewport in concierge.ts). -->
         <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content">
+        <!-- Dark page, dark browser chrome: without these, iOS Safari paints its
+             status-bar and toolbar zones white around the dark viewer. -->
+        <meta name="color-scheme" content="dark">
+        <meta name="theme-color" content="#0b0b0d">
         <base href="">
         <!-- Inter self-hosted (latin subset, variable → one file covers all
              weights): no render-blocking Google roundtrip, no visitor-IP leak to
