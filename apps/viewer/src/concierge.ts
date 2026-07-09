@@ -168,31 +168,22 @@ const initConcierge = (global: Global) => {
     });
 
     // Mobile keyboard handling. The panel is position:fixed/inset:0 against the
-    // LAYOUT viewport, but iOS Safari doesn't shrink that when the on-screen
-    // keyboard opens — it pans the VISUAL viewport instead. Untreated, the
-    // input row disappears behind the keyboard (you type blind) and the page
-    // appears to scroll. Fix: while the chat is open, glue the panel to the
-    // visual viewport (top offset + height), so the input always sits right
-    // above the keyboard. height/top are not in the panel's transition list,
-    // so these updates apply instantly without fighting the open animation.
+    // LAYOUT viewport, which iOS Safari does NOT shrink when the on-screen
+    // keyboard opens — it pans the VISUAL viewport instead. So the panel stays
+    // full-screen (its black surface always covers the whole scene — nothing
+    // ever peeks through), and we only lift the input row above the keyboard by
+    // padding the panel's bottom by the keyboard's height. The input row is the
+    // panel's last flex child, so the padding pushes it up while the messages
+    // list shrinks. keyboardH = layout height − visible height − any top pan.
     const vv = window.visualViewport;
     if (vv) {
         const applyViewport = () => {
             if (!state.chatOpen) {
-                panel.style.top = '';
-                panel.style.height = '';
-                panel.style.bottom = '';
-                panel.style.transform = '';
+                panel.style.paddingBottom = '';
                 return;
             }
-            panel.style.top = `${vv.offsetTop}px`;
-            panel.style.height = `${vv.height}px`;
-            panel.style.bottom = 'auto';
-            // While the keyboard is up, pixel-exact placement beats the entrance
-            // polish: pin the transform so no (possibly interrupted) transition
-            // can offset the panel against the keyboard math above.
-            const keyboardOpen = vv.height < window.innerHeight - 80;
-            panel.style.transform = keyboardOpen ? 'none' : '';
+            const keyboardH = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+            panel.style.paddingBottom = keyboardH > 0 ? `${keyboardH}px` : '';
             messages.scrollTop = messages.scrollHeight;
         };
         vv.addEventListener('resize', applyViewport);
