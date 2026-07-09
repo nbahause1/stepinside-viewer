@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import Image from "next/image";
 import { ArrowsOut, X } from "@phosphor-icons/react";
 import { useLang } from "@/components/i18n/LanguageProvider";
 import Reveal from "@/components/ui/Reveal";
@@ -169,31 +168,13 @@ export default function Demos() {
           </p>
         </Reveal>
 
-        {/* Static cover in the page flow — no iframe here, so the heavy scan is
-            never loaded or rendered while scrolling the page. */}
+        {/* Unlit cover in the page flow — no iframe here, so the heavy scan is
+            never loaded or rendered while scrolling the page. The plate stays
+            deliberately empty: the room is revealed on entry, not before. */}
         <div
           id={SECTION_IDS.gate}
           className="relative mx-auto mt-12 aspect-[3/4] w-full max-w-[1100px] scroll-mt-20 overflow-hidden rounded-[12px] border border-ink/10 bg-ink shadow-[0_24px_70px_-30px_rgba(0,0,0,0.5)] sm:aspect-[4/3] md:aspect-video"
         >
-          {/* Still frame from the scan as the cover preview — the visitor sees
-              the space before the heavy viewer is ever loaded. */}
-          <Image
-            src="/scan-1.jpg"
-            alt=""
-            fill
-            sizes="(max-width: 1148px) 100vw, 1100px"
-            className="object-cover"
-          />
-          {/* Subtle dark gradient so the launch button and hint stay readable
-              over the photograph. */}
-          <div
-            aria-hidden
-            className="absolute inset-0"
-            style={{
-              background:
-                "linear-gradient(to bottom, rgba(10,10,10,0.25), rgba(10,10,10,0.15) 40%, rgba(10,10,10,0.55))",
-            }}
-          />
           <button
             type="button"
             onClick={open}
