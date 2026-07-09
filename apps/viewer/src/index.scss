@@ -1073,6 +1073,28 @@ body.tutorial-active #walkHint {
 #chatPill.chatPill--full {
     z-index: 40; // above brandDome (20) while the app-like chat is open
 
+    // Full-screen blackout BEHIND the panel. With the on-screen keyboard open,
+    // the panel is shrunk to the visual viewport (see concierge.ts) — without
+    // this layer the 3D scene would peek out below/above it. Oversized by 50vh
+    // in both directions so iOS viewport panning can never expose the scene.
+    // Fades with the same timing as the panel so the entrance stays coherent.
+    &::before {
+        content: '';
+        position: fixed;
+        inset: -50vh 0;
+        background: #0b0b0d;
+        opacity: 0;
+        visibility: hidden;
+        pointer-events: none;
+        transition: opacity 0.3s var(--ease-out), visibility 0s linear 0.3s;
+    }
+
+    &.is-open::before {
+        opacity: 1;
+        visibility: visible;
+        transition: opacity 0.3s var(--ease-out), visibility 0s;
+    }
+
     #chatPanel {
         position: fixed;
         inset: 0;

@@ -864,6 +864,21 @@ body.tutorial-active #walkHint {
 #chatPill.chatPill--full {
   z-index: 40;
 }
+#chatPill.chatPill--full::before {
+  content: "";
+  position: fixed;
+  inset: -50vh 0;
+  background: #0b0b0d;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.3s var(--ease-out), visibility 0s linear 0.3s;
+}
+#chatPill.chatPill--full.is-open::before {
+  opacity: 1;
+  visibility: visible;
+  transition: opacity 0.3s var(--ease-out), visibility 0s;
+}
 #chatPill.chatPill--full #chatPanel {
   position: fixed;
   inset: 0;
