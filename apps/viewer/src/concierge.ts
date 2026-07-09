@@ -269,11 +269,22 @@ const initConcierge = (global: Global) => {
         // ACTIVE pinning while the keyboard is up: a rAF loop re-measures
         // every frame, so silent displacements can't move the chat off the
         // keyboard. Runs only while chat is open AND the keyboard is up.
+        //
+        // CRITICAL: corrections must WAIT until the viewport has settled.
+        // While the keyboard is still animating in, iOS is mid-way through
+        // its own reveal-scroll of the focused field; moving the field around
+        // in that window makes iOS abort the keyboard ("slides up, slides
+        // straight back down, works on the 3rd try"). So while vv events are
+        // still streaming (animation running), iOS drives alone — we only
+        // correct after SETTLE_MS of silence. The silent no-event shove is
+        // still caught: no events IS the settled state.
+        const SETTLE_MS = 250;
+        let lastVvEvent = 0;
         let pinRaf = 0;
         const pinLoop = () => {
             pinRaf = 0;
             if (!state.chatOpen || keyboardHeight() <= KEYBOARD_MIN) return;
-            fitPill();
+            if (performance.now() - lastVvEvent >= SETTLE_MS) fitPill();
             pinRaf = requestAnimationFrame(pinLoop);
         };
         const stopPin = () => {
@@ -293,11 +304,10 @@ const initConcierge = (global: Global) => {
             }
             const keyboardUp = keyboardHeight() > KEYBOARD_MIN;
             if (keyboardUp) {
-                fitPill();
                 messages.scrollTop = messages.scrollHeight;
                 if (pinRaf === 0) pinRaf = requestAnimationFrame(pinLoop);
                 cancelDismiss();
-                debugHud?.(`fit kbH=${Math.round(keyboardHeight())} shift=${Math.round(pillShift)}`);
+                debugHud?.(`kb up kbH=${Math.round(keyboardHeight())} shift=${Math.round(pillShift)}`);
             } else {
                 releasePill();
                 stopPin();
@@ -317,8 +327,14 @@ const initConcierge = (global: Global) => {
             }
             keyboardWasUp = keyboardUp;
         };
-        vv.addEventListener('resize', applyViewport);
-        vv.addEventListener('scroll', applyViewport);
+        // vv events stamp the settle clock: as long as they stream (keyboard
+        // animation, iOS reveal-scroll), pin corrections stay on hold.
+        const onVvChange = () => {
+            lastVvEvent = performance.now();
+            applyViewport();
+        };
+        vv.addEventListener('resize', onVvChange);
+        vv.addEventListener('scroll', onVvChange);
         events.on('chatOpen:changed', applyViewport);
     }
 
