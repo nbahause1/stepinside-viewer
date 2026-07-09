@@ -63,10 +63,17 @@
   "annotations": [],
   "startMode": "default",
   "concierge": {
-    "mode": "scripted",
+    "mode": "ai",
     "greeting": "Frag mich etwas zur Wohnung.",
-    "endpoint": "http://localhost:8787/concierge",
-    "propertyId": "example-fewo"
+    "endpoint": "https://concierge-api.stepinside-eu.workers.dev/concierge",
+    "propertyId": "altbau-eppendorf",
+    "softLimit": 8,
+    "contact": {
+      "name": "Thomas Bergmann",
+      "phone": "040 555 123 45",
+      "email": "t.bergmann@bergmann-immobilien.de",
+      "exposeUrl": "expose-altbau-eppendorf.html"
+    }
   },
   "staging": {
     "enabled": true,

@@ -102,7 +102,22 @@ type ExperienceSettings = {
         mode?: 'ai' | 'scripted',
         greeting?: string,
         endpoint?: string,
-        propertyId?: string
+        propertyId?: string,
+        // AI mode: after this many sent questions the chat offers the broker
+        // contact card (soft UX nudge; the server enforces the hard cost caps
+        // separately). Default 8.
+        softLimit?: number,
+        // Broker/host contact shown by the soft-limit card and when the daily
+        // question cap is reached. Display data only, no secrets.
+        contact?: {
+            name?: string,
+            phone?: string,
+            email?: string,
+            // Booking/appointment URL ("Termin vereinbaren").
+            url?: string,
+            // Listing PDF/page URL ("Exposé ansehen"); relative to the viewer or absolute.
+            exposeUrl?: string
+        }
     },
 
     // Curated points of interest the concierge can jump the camera to (e.g. the
@@ -144,6 +159,21 @@ type ExperienceSettings = {
         // pictures (URLs relative to the viewer) shown instead of a live result.
         // Omit styles for a single default style.
         styles?: { id: string, label: string, image?: string, imagePortrait?: string }[]
+    },
+
+    // Optional scale verification (cast-through like `staging`). Authored once per
+    // scan: pick a feature of KNOWN real length in the viewer (with config.debug on
+    // the measure tool logs the two endpoints + length, ready to paste here), then
+    // set `meters` to that feature's true real-world length. On load the viewer
+    // recomputes the distance between `points` and compares it to `meters`; a
+    // deviation beyond `tolerance` (default 0.02 = 2%) means the splat is NOT at
+    // true metric scale, so every measurement and floor-plan dimension would be
+    // wrong. Verification only: it warns, it does not rescale (scale is baked at
+    // export). See `calibration.ts`.
+    calibration?: {
+        points: [[number, number, number], [number, number, number]],
+        meters: number,
+        tolerance?: number
     }
 };
 

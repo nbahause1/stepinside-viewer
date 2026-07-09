@@ -81854,6 +81854,77 @@ const initControls = (global) => {
     });
 };
 
+// Organic idle look-around: after the viewer sits still for a moment, the
+// camera gently lets its gaze wander around the direction the user last left it
+// — imitating a person standing in the room and slowly looking about. This
+// keeps the experience feeling alive and effortless for non-technical visitors
+// without requiring any input. Any real input (drag / move / tap-navigation)
+// instantly cancels it and re-arms the timer.
+//
+// The motion is built from a pair of slow, incommensurate sine waves per axis
+// so it never settles into an obvious mechanical loop, and it eases in from the
+// resting orientation so the transition out of stillness is imperceptible.
+/** Seconds of stillness before the gaze begins to wander. */
+const IDLE_DELAY = 3;
+/** Seconds to ease the wander in from zero to full amplitude. */
+const IDLE_RAMP = 3;
+/** Degrees of horizontal (yaw) wander. */
+const YAW_AMP = 13;
+/** Degrees of vertical (pitch) wander. */
+const PITCH_AMP = 5;
+class IdleLook {
+    // Global suppression: while true (e.g. measuring) the gaze never wanders —
+    // the camera holds perfectly still so placing points isn't disturbed.
+    static suppressed = false;
+    // True on frames where the gaze is actively wandering (i.e. the camera is
+    // moving *only* because of this idle animation, not the user). Mobile dynamic
+    // resolution reads this so the idle look-around still renders at full, sharp
+    // resolution instead of being treated as user movement. Reset each frame by
+    // CameraManager before the active controller runs.
+    static wandering = false;
+    _idleTime = 0;
+    _phase = 0;
+    _rest = new Vec3();
+    /**
+     * Update the idle look-around. Call once per frame from a controller's
+     * update, AFTER the user's own rotation has been applied to `targetAngles`
+     * and BEFORE it is damped.
+     *
+     * @param dt - Frame delta time in seconds.
+     * @param active - True if the user is currently providing input (drag,
+     * movement, or active tap-navigation). Resets the idle timer.
+     * @param targetAngles - The controller's target euler angles (x = pitch,
+     * y = yaw). Mutated in place when wandering.
+     */
+    update(dt, active, targetAngles) {
+        if (active || IdleLook.suppressed) {
+            this._idleTime = 0;
+            this._phase = 0;
+            this._rest.copy(targetAngles);
+            return;
+        }
+        this._idleTime += dt;
+        // still within the grace period: keep tracking the user's resting gaze
+        if (this._idleTime <= IDLE_DELAY) {
+            this._rest.copy(targetAngles);
+            return;
+        }
+        this._phase += dt;
+        const t = this._phase;
+        const ramp = Math.min(1, (this._idleTime - IDLE_DELAY) / IDLE_RAMP);
+        const yaw = (Math.sin(t * 0.40) * 0.6 + Math.sin(t * 0.19 + 1.3) * 0.4) * YAW_AMP * ramp;
+        const pitch = (Math.sin(t * 0.31 + 0.5) * 0.7 + Math.sin(t * 0.14) * 0.3) * PITCH_AMP * ramp;
+        targetAngles.y = this._rest.y + yaw;
+        targetAngles.x = this._rest.x + pitch;
+        IdleLook.wandering = true;
+    }
+    /** Cancel any wander and re-arm the timer (e.g. on controller enter). */
+    reset() {
+        this._idleTime = 0;
+        this._phase = 0;
+    }
+}
+
 // Keep at most this many turns of history so the request body stays small and
 // the server's per-request cap (12) is never exceeded.
 const MAX_HISTORY = 12;
@@ -81909,9 +81980,12 @@ const initConcierge = (global) => {
     events.on('chatOpen:changed', (open) => {
         panel.classList.toggle('is-open', open);
         pill.classList.toggle('is-open', open);
-        // Focus the field after the entrance transition starts (AI mode only —
-        // scripted mode has no text field).
+        // Focus the field right away AND after the entrance transition starts
+        // (AI mode only — scripted mode has no text field). The immediate call
+        // matters: while the scene streams in, a queued rAF can lag seconds
+        // behind, and anything typed until then would miss the field.
         if (open && mode !== 'scripted') {
+            input.focus();
             window.requestAnimationFrame(() => input.focus());
         }
     });
@@ -81954,12 +82028,119 @@ const initConcierge = (global) => {
         return;
     }
     // -------------------------------------------------------------------- ai
+    // AI mode takes over the whole viewport like a native chat app (Claude /
+    // Gemini style): same DOM as the corner panel, restyled via this modifier.
+    // Scripted mode keeps the small corner panel above.
+    pill.classList.add('chatPill--full');
+    // While the fullscreen chat covers the scene, stop the idle camera drift —
+    // otherwise the splat keeps re-rendering behind the opaque panel and the
+    // wasted GPU/main-thread work makes typing feel laggy on weaker machines.
+    let idleWasSuppressed = false;
+    events.on('chatOpen:changed', (open) => {
+        if (open) {
+            idleWasSuppressed = IdleLook.suppressed;
+            IdleLook.suppressed = true;
+        }
+        else {
+            IdleLook.suppressed = idleWasSuppressed;
+        }
+    });
+    // Type-anywhere: while the chat is open, every printable key lands in the
+    // input no matter what currently holds focus. Focus is fragile here — the
+    // deferred focus() can lag seconds behind while the scene streams in, and
+    // a stray click on the panel background blurs the field — both read as
+    // "typing is broken". Capture phase so the keystroke is rerouted before
+    // the viewer's window-level camera/hotkey handlers can consume it.
+    const typeAnywhere = (event) => {
+        if (!state.chatOpen)
+            return;
+        if (event.target === input)
+            return;
+        if (event.metaKey || event.ctrlKey || event.altKey)
+            return;
+        if (event.key.length === 1 || event.key === 'Backspace') {
+            input.focus(); // the key's default action now inserts into the input
+            event.stopPropagation();
+        }
+    };
+    window.addEventListener('keydown', typeAnywhere, true);
     // Curated jump targets for this scan. The model only sees {id,label,keywords}
     // so it can pick a focus; the camera pose stays here and never goes server-side.
     const focusList = pois.map(p => ({ id: p.id, label: p.label, keywords: p.keywords }));
+    // Soft conversation limit: after this many sent questions the chat offers
+    // the broker contact card. Pure UX (leads a warm prospect to a human); the
+    // server's burst + daily buckets enforce the hard cost caps.
+    const softLimit = cfg?.softLimit ?? 8;
+    const contact = cfg?.contact;
+    const hasContact = !!(contact && (contact.phone || contact.email || contact.url || contact.exposeUrl));
+    let userTurns = 0;
+    let contactCardShown = false;
+    let fallbackCardShown = false;
     const history = [];
     let loading = false;
     let thinking = null;
+    // Broker contact card: a bot-side bubble with tap-able phone / mail /
+    // appointment links. Built via createElement + textContent so settings data
+    // is never interpreted as HTML.
+    const appendContactCard = (intro) => {
+        if (!hasContact || !contact)
+            return;
+        const el = document.createElement('div');
+        el.className = 'chatMsg chatMsg--bot chatMsg--contact';
+        const text = document.createElement('div');
+        text.textContent = intro;
+        el.appendChild(text);
+        const addLink = (href, label) => {
+            const a = document.createElement('a');
+            a.className = 'chatContactLink';
+            a.href = href;
+            a.textContent = label;
+            a.rel = 'noopener';
+            el.appendChild(a);
+        };
+        const addExternalLink = (href, label) => {
+            const a = document.createElement('a');
+            a.className = 'chatContactLink';
+            a.href = href;
+            a.target = '_blank';
+            a.rel = 'noopener noreferrer';
+            a.textContent = label;
+            el.appendChild(a);
+        };
+        if (contact.phone)
+            addLink(`tel:${contact.phone.replace(/\s+/g, '')}`, `Anrufen: ${contact.phone}`);
+        if (contact.url)
+            addExternalLink(contact.url, 'Termin vereinbaren');
+        if (contact.email)
+            addLink(`mailto:${contact.email}`, 'E-Mail schreiben');
+        if (contact.exposeUrl)
+            addExternalLink(contact.exposeUrl, 'Exposé ansehen');
+        messages.appendChild(el);
+        scrollToBottom();
+    };
+    // True when the last thing in the transcript is already a contact card —
+    // guards against stacking cards when several fallbacks come in a row.
+    const contactCardJustShown = () => messages.lastElementChild?.classList.contains('chatMsg--contact') === true;
+    // The fullscreen chat hides the 3D scene, so a focus answer must not fly
+    // the camera blind. Instead the answer gets a "show me" action that closes
+    // the chat and then jumps the camera.
+    const appendShowAction = (camera, label) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'chatChip chatAction';
+        btn.textContent = `Im Rundgang zeigen: ${label}`;
+        btn.addEventListener('click', () => {
+            state.chatOpen = false;
+            events.fire('focusPoi', camera);
+        });
+        messages.appendChild(btn);
+        scrollToBottom();
+    };
+    // Greeting as the first bot bubble, so the empty fullscreen app has a
+    // starting point (mirrors the scripted panel).
+    const greeting = cfg?.greeting;
+    if (greeting)
+        appendBubble('bot', greeting);
     // MVP: the room is just the loaded scene's name (or null). Phase 2 swaps in
     // camera-vs-bounding-box zone detection; the wire contract stays the same.
     const currentRoom = () => app.root.findByName('gsplat')?.name ?? null;
@@ -81983,9 +82164,11 @@ const initConcierge = (global) => {
             thinking = null;
         }
     };
+    // While the answer loads only the SEND path is blocked — the field itself
+    // stays editable so the guest can already type the next question (locking
+    // the input for the 3-5s round-trip reads as "typing is broken").
     const setLoading = (value) => {
         loading = value;
-        input.disabled = value;
         sendBtn.disabled = value;
     };
     const send = async () => {
@@ -82022,6 +82205,21 @@ const initConcierge = (global) => {
             });
             clearThinking();
             if (!res.ok) {
+                // The server's 429 carries `reason`: 'daily' is terminal for
+                // today (hard cost cap) -> hand over to the broker; 'burst'
+                // just means slow down.
+                let reason = '';
+                try {
+                    reason = (await res.json()).reason ?? '';
+                }
+                catch { /* body not JSON -> generic message below */ }
+                if (res.status === 429 && reason === 'daily') {
+                    appendBubble('bot', 'Das Fragen-Kontingent für heute ist aufgebraucht.');
+                    if (hasContact) {
+                        appendContactCard(`${contact?.name ?? 'Ihr Ansprechpartner'} beantwortet Ihre Fragen gern persönlich:`);
+                    }
+                    return;
+                }
                 const text = res.status === 429 ?
                     'Zu viele Anfragen. Bitte warte einen Moment und versuch es erneut.' :
                     'Da ist etwas schiefgelaufen. Bitte versuch es gleich nochmal.';
@@ -82035,10 +82233,25 @@ const initConcierge = (global) => {
                 if (history.length > MAX_HISTORY)
                     history.splice(0, history.length - MAX_HISTORY);
                 appendBubble('bot', answer);
-                // If the answer is about a locatable object, fly the camera there.
+                // If the answer is about a locatable object, offer to show it
+                // (the fullscreen chat covers the scene, so no blind camera fly).
                 const poi = data.focus ? pois.find(p => p.id === data.focus) : undefined;
                 if (poi)
-                    events.fire('focusPoi', poi.camera);
+                    appendShowAction(poi.camera, poi.label);
+                userTurns += 1;
+                if (data.fallback === true && hasContact && !fallbackCardShown && !contactCardJustShown()) {
+                    // The bot couldn't answer -> hand over with tap-able actions,
+                    // not just a "please contact the broker" sentence. Once per
+                    // conversation — repeating the card after every unanswered
+                    // question feels pushy; later answers still name the broker.
+                    fallbackCardShown = true;
+                    appendContactCard(`Am schnellsten hilft Ihnen ${contact?.name ?? 'Ihr Ansprechpartner'} direkt weiter:`);
+                }
+                else if (userTurns >= softLimit && !contactCardShown && hasContact && !contactCardJustShown()) {
+                    // Soft limit reached: once, after a real answer, offer the human.
+                    contactCardShown = true;
+                    appendContactCard(`Gern können Sie alles Weitere direkt mit ${contact?.name ?? 'Ihrem Ansprechpartner'} besprechen:`);
+                }
             }
             else {
                 appendBubble('bot', 'Da ist etwas schiefgelaufen. Bitte versuch es gleich nochmal.');
@@ -84159,6 +84372,33 @@ class Annotations {
     }
 }
 
+const verifyScale = (global) => {
+    const cal = global.settings.calibration;
+    if (!cal?.points || cal.points.length !== 2 || typeof cal.meters !== 'number') {
+        return null;
+    }
+    const [pa, pb] = cal.points;
+    const measured = new Vec3(pa[0], pa[1], pa[2]).distance(new Vec3(pb[0], pb[1], pb[2]));
+    const expected = cal.meters;
+    const tolerance = typeof cal.tolerance === 'number' ? cal.tolerance : 0.02;
+    const deviation = expected > 0 ? Math.abs(measured - expected) / expected : Infinity;
+    const ok = deviation <= tolerance;
+    const result = { ok, measured, expected, deviation, tolerance };
+    const pct = (deviation * 100).toFixed(1);
+    if (ok) {
+        console.log(`[scale] OK — reference reads ${measured.toFixed(3)}m vs ${expected}m real ` +
+            `(${pct}% off, within ${(tolerance * 100).toFixed(0)}%). Scan is metric; measurements are trustworthy.`);
+    }
+    else {
+        const factor = measured > 0 ? expected / measured : 0;
+        console.warn(`[scale] MIS-SCALED — reference reads ${measured.toFixed(3)}m but is ${expected}m in reality ` +
+            `(${pct}% off). Measurements and floor-plan dimensions will be WRONG. ` +
+            `Re-export the splat with its scale multiplied by ${factor.toFixed(4)}.`);
+    }
+    global.events.fire('scaleCheck', result);
+    return result;
+};
+
 /**
  * Damping function to smooth out transitions.
  *
@@ -84629,77 +84869,6 @@ class Camera {
             .transformVector(Vec3.FORWARD, result)
             .mulScalar(this.distance)
             .add(this.position);
-    }
-}
-
-// Organic idle look-around: after the viewer sits still for a moment, the
-// camera gently lets its gaze wander around the direction the user last left it
-// — imitating a person standing in the room and slowly looking about. This
-// keeps the experience feeling alive and effortless for non-technical visitors
-// without requiring any input. Any real input (drag / move / tap-navigation)
-// instantly cancels it and re-arms the timer.
-//
-// The motion is built from a pair of slow, incommensurate sine waves per axis
-// so it never settles into an obvious mechanical loop, and it eases in from the
-// resting orientation so the transition out of stillness is imperceptible.
-/** Seconds of stillness before the gaze begins to wander. */
-const IDLE_DELAY = 3;
-/** Seconds to ease the wander in from zero to full amplitude. */
-const IDLE_RAMP = 3;
-/** Degrees of horizontal (yaw) wander. */
-const YAW_AMP = 13;
-/** Degrees of vertical (pitch) wander. */
-const PITCH_AMP = 5;
-class IdleLook {
-    // Global suppression: while true (e.g. measuring) the gaze never wanders —
-    // the camera holds perfectly still so placing points isn't disturbed.
-    static suppressed = false;
-    // True on frames where the gaze is actively wandering (i.e. the camera is
-    // moving *only* because of this idle animation, not the user). Mobile dynamic
-    // resolution reads this so the idle look-around still renders at full, sharp
-    // resolution instead of being treated as user movement. Reset each frame by
-    // CameraManager before the active controller runs.
-    static wandering = false;
-    _idleTime = 0;
-    _phase = 0;
-    _rest = new Vec3();
-    /**
-     * Update the idle look-around. Call once per frame from a controller's
-     * update, AFTER the user's own rotation has been applied to `targetAngles`
-     * and BEFORE it is damped.
-     *
-     * @param dt - Frame delta time in seconds.
-     * @param active - True if the user is currently providing input (drag,
-     * movement, or active tap-navigation). Resets the idle timer.
-     * @param targetAngles - The controller's target euler angles (x = pitch,
-     * y = yaw). Mutated in place when wandering.
-     */
-    update(dt, active, targetAngles) {
-        if (active || IdleLook.suppressed) {
-            this._idleTime = 0;
-            this._phase = 0;
-            this._rest.copy(targetAngles);
-            return;
-        }
-        this._idleTime += dt;
-        // still within the grace period: keep tracking the user's resting gaze
-        if (this._idleTime <= IDLE_DELAY) {
-            this._rest.copy(targetAngles);
-            return;
-        }
-        this._phase += dt;
-        const t = this._phase;
-        const ramp = Math.min(1, (this._idleTime - IDLE_DELAY) / IDLE_RAMP);
-        const yaw = (Math.sin(t * 0.40) * 0.6 + Math.sin(t * 0.19 + 1.3) * 0.4) * YAW_AMP * ramp;
-        const pitch = (Math.sin(t * 0.31 + 0.5) * 0.7 + Math.sin(t * 0.14) * 0.3) * PITCH_AMP * ramp;
-        targetAngles.y = this._rest.y + yaw;
-        targetAngles.x = this._rest.x + pitch;
-        IdleLook.wandering = true;
-    }
-    /** Cancel any wander and re-arm the timer (e.g. on controller enter). */
-    reset() {
-        this._idleTime = 0;
-        this._phase = 0;
     }
 }
 
@@ -88044,6 +88213,12 @@ const initMeasure = (global, _picker, collision) => {
         }
         else {
             b = p; // second point -> complete the measurement
+            if (global.config.debug && a) {
+                // Authoring aid: log this pair ready to paste into settings.json
+                // `calibration` (then set `meters` to the feature's real length).
+                const r = (v) => [+v.x.toFixed(4), +v.y.toFixed(4), +v.z.toFixed(4)];
+                console.log('[measure] calibration reference:', JSON.stringify({ points: [r(a), r(b)], meters: +a.distance(b).toFixed(3) }));
+            }
             events.fire('measureComplete');
         }
     };
@@ -88074,6 +88249,50 @@ const initMeasure = (global, _picker, collision) => {
             setActive(false); // leave measure mode on any camera change
         }
     });
+    // Authoring aid (console): probe the room around the current camera
+    // position. Casts a horizontal ray fan at eye height plus one ray up and
+    // one down, and logs the hit distances — the fastest way to read the real
+    // room dimensions (spans through the camera) out of the calibrated scan
+    // for a property's knowledge base. Not wired to any UI.
+    window.probeRoom = (stepDeg = 5, origin) => {
+        if (!collision) {
+            console.log('probeRoom: no collision data loaded');
+            return null;
+        }
+        const cam = camera.camera;
+        const camPos = camera.getPosition();
+        const pos = origin ? new Vec3(origin[0], origin[1], origin[2]) : camPos;
+        const far = cam.farClip;
+        const ray = (dx, dy, dz) => {
+            const hit = collision.queryRay(pos.x, pos.y, pos.z, dx, dy, dz, far);
+            return hit ? +Math.hypot(hit.x - pos.x, hit.y - pos.y, hit.z - pos.z).toFixed(3) : null;
+        };
+        const fan = [];
+        for (let deg = 0; deg < 360; deg += stepDeg) {
+            const rad = (deg * Math.PI) / 180;
+            fan.push({ deg, dist: ray(Math.cos(rad), 0, Math.sin(rad)) });
+        }
+        // Opposite-ray pairs -> straight spans through the camera position.
+        const spans = fan
+            .filter(f => f.deg < 180 && f.dist !== null)
+            .map((f) => {
+            const opposite = fan.find(o => o.deg === f.deg + 180);
+            return opposite?.dist != null
+                ? { deg: f.deg, span: +(f.dist + opposite.dist).toFixed(3) }
+                : null;
+        })
+            .filter((s) => s !== null);
+        const up = ray(0, 1, 0);
+        const down = ray(0, -1, 0);
+        const result = {
+            position: [+pos.x.toFixed(3), +pos.y.toFixed(3), +pos.z.toFixed(3)],
+            floorToCeiling: up !== null && down !== null ? +(up + down).toFixed(3) : null,
+            spans,
+            fan
+        };
+        console.log(`probeRoom →\n${JSON.stringify(result)}`);
+        return result;
+    };
 };
 
 // Single-layer overlay rendered after the gaussians, three passes on a fresh
@@ -90308,6 +90527,9 @@ class Viewer {
             this.inputController.collision = collision ?? null;
             // distance measurement tool (uses the same picker + collision)
             initMeasure(global, this.picker, collision ?? null);
+            // verify the scan is at true metric scale (warns if mis-scaled, so a
+            // bad scan is caught before its measurements/floor plan mislead anyone)
+            verifyScale(global);
             // hasCollision = collision data exists (drives fly-mode collision
             // detection and the voxel/mesh debug overlay availability).
             // walkAllowed = walk mode is offered to the user; requires both

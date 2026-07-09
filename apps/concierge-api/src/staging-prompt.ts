@@ -29,6 +29,21 @@ export interface StagingStyle {
   placement: string;
 }
 
+/**
+ * Holistic home-staging methodology, prepended before the per-piece placement.
+ * Reference cutouts fix WHICH furniture and its quality; the model still has to
+ * decide HOW the room is composed, and left to itself it scatters pieces or
+ * clusters them in the centre. This block gives it the rules a real stager uses
+ * so the arrangement reads logical and intentional, not random.
+ */
+const METHODOLOGY = `Arrange the room like a professional home stager, not by scattering pieces around:
+- Anchor everything to the walls and corners. Nothing floats in the middle of the room; keep the centre of the floor open so the space reads large and the floor (such as the parquet) stays on show.
+- Build ONE clear seating group, oriented to the room's strongest architectural feature (the windows and the daylight, or a fireplace or feature wall if there is one). The sofa stands flat against the longest unbroken wall, facing that focal point.
+- Lay a rug under the seating group to tie it together: the front legs of the sofa and chairs rest on the rug, the coffee table centred on it.
+- Keep clear walkways of roughly 80cm along the natural path through the room and in front of every door. No piece blocks a window or a doorway.
+- Scale the furniture honestly to the room and its ceiling height; do not shrink the pieces or cram them in. When in doubt, UNDER-furnish: a few well-placed pieces look more expensive than a crowded room.
+- Give every piece a logical reason for where it sits (sideboard flat on a free wall, floor lamp in a corner beside the seating and switched on with a soft warm glow, side chairs angled into the group).`;
+
 /** Shared rule block appended to every style prompt. */
 const PRESERVE = `Keep the centre of the floor open and leave every door and window clear. Use only these few pieces; do not invent extra furniture. Ignore any logos, text or watermarks printed on the reference photos.
 
@@ -92,6 +107,8 @@ export function resolveStyle(id: string | undefined): StagingStyle {
  */
 export function buildStagingPrompt(style: StagingStyle): string {
   return `You are a professional real-estate home stager. Image 1 is the room to furnish, shot from a high angle. If it already contains any furniture, remove it first.
+
+${METHODOLOGY}
 
 ${style.placement}
 

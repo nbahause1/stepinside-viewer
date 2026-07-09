@@ -6,9 +6,10 @@
  * from the `cf-connecting-ip` header; secrets come from `env`.
  */
 import exampleFewo from '../knowledge/example-fewo.json';
+import altbauEppendorf from '../knowledge/altbau-eppendorf.json';
 import { validateKnowledge } from './knowledge.js';
 import type { KnowledgeBase } from './knowledge.js';
-import { MemoryRateLimiter } from './ratelimit.js';
+import { CompositeRateLimiter, MemoryRateLimiter } from './ratelimit.js';
 import { handleConcierge } from './core.js';
 import { handleStaging } from './staging.js';
 import { parseAllowedOrigins, resolveAllowOrigin, corsHeaders } from './cors.js';
@@ -22,15 +23,20 @@ interface Env {
 // Validate + freeze the bundled KB once per isolate.
 const KNOWLEDGE: Record<string, KnowledgeBase> = {
   'example-fewo': validateKnowledge(exampleFewo),
+  'altbau-eppendorf': validateKnowledge(altbauEppendorf),
 };
 
 function loadKnowledge(propertyId: string): KnowledgeBase | null {
   return KNOWLEDGE[propertyId] ?? null;
 }
 
-// One limiter per isolate. NOTE: isolates don't share memory; for real
-// production abuse-protection back this with KvRateLimiter (see ratelimit.ts).
-const rateLimiter = new MemoryRateLimiter();
+// One limiter per isolate: burst window + daily cost cap. NOTE: isolates don't
+// share memory; for real production abuse-protection back both buckets with
+// KvRateLimiter (see ratelimit.ts) before going live.
+const rateLimiter = new CompositeRateLimiter([
+  new MemoryRateLimiter(20, 5 * 60 * 1000, 'burst'),
+  new MemoryRateLimiter(40, 24 * 60 * 60 * 1000, 'daily'),
+]);
 // Image generation is far pricier than a chat turn, so it gets its own,
 // tighter bucket: 6 requests per 5 minutes per IP.
 const stagingRateLimiter = new MemoryRateLimiter(6, 5 * 60 * 1000);

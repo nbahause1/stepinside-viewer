@@ -133,6 +133,12 @@ const initMeasure = (global: Global, _picker: Picker, collision: Collision | nul
             preview = p;
         } else {
             b = p;          // second point -> complete the measurement
+            if (global.config.debug && a) {
+                // Authoring aid: log this pair ready to paste into settings.json
+                // `calibration` (then set `meters` to the feature's real length).
+                const r = (v: Vec3) => [+v.x.toFixed(4), +v.y.toFixed(4), +v.z.toFixed(4)];
+                console.log('[measure] calibration reference:', JSON.stringify({ points: [r(a), r(b)], meters: +a.distance(b).toFixed(3) }));
+            }
             events.fire('measureComplete');
         }
     };
@@ -164,6 +170,51 @@ const initMeasure = (global: Global, _picker: Picker, collision: Collision | nul
             setActive(false);       // leave measure mode on any camera change
         }
     });
+
+    // Authoring aid (console): probe the room around the current camera
+    // position. Casts a horizontal ray fan at eye height plus one ray up and
+    // one down, and logs the hit distances — the fastest way to read the real
+    // room dimensions (spans through the camera) out of the calibrated scan
+    // for a property's knowledge base. Not wired to any UI.
+    (window as unknown as { probeRoom: (stepDeg?: number, origin?: number[]) => unknown }).probeRoom = (stepDeg = 5, origin?: number[]) => {
+        if (!collision) {
+            console.log('probeRoom: no collision data loaded');
+            return null;
+        }
+        const cam = camera.camera!;
+        const camPos = camera.getPosition();
+        const pos = origin ? new Vec3(origin[0], origin[1], origin[2]) : camPos;
+        const far = cam.farClip;
+        const ray = (dx: number, dy: number, dz: number): number | null => {
+            const hit = collision.queryRay(pos.x, pos.y, pos.z, dx, dy, dz, far);
+            return hit ? +Math.hypot(hit.x - pos.x, hit.y - pos.y, hit.z - pos.z).toFixed(3) : null;
+        };
+        const fan: { deg: number; dist: number | null }[] = [];
+        for (let deg = 0; deg < 360; deg += stepDeg) {
+            const rad = (deg * Math.PI) / 180;
+            fan.push({ deg, dist: ray(Math.cos(rad), 0, Math.sin(rad)) });
+        }
+        // Opposite-ray pairs -> straight spans through the camera position.
+        const spans = fan
+            .filter(f => f.deg < 180 && f.dist !== null)
+            .map((f) => {
+                const opposite = fan.find(o => o.deg === f.deg + 180);
+                return opposite?.dist != null
+                    ? { deg: f.deg, span: +(f.dist! + opposite.dist).toFixed(3) }
+                    : null;
+            })
+            .filter((s): s is { deg: number; span: number } => s !== null);
+        const up = ray(0, 1, 0);
+        const down = ray(0, -1, 0);
+        const result = {
+            position: [+pos.x.toFixed(3), +pos.y.toFixed(3), +pos.z.toFixed(3)],
+            floorToCeiling: up !== null && down !== null ? +(up + down).toFixed(3) : null,
+            spans,
+            fan
+        };
+        console.log(`probeRoom →\n${JSON.stringify(result)}`);
+        return result;
+    };
 };
 
 export { initMeasure };

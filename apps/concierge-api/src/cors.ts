@@ -33,7 +33,17 @@ export function resolveAllowOrigin(
   requestOrigin: string | null,
   allowedOrigins: string[],
 ): string | null {
-  if (requestOrigin && allowedOrigins.includes(requestOrigin)) {
+  if (!requestOrigin) {
+    return null;
+  }
+  // '*' in the allowlist echoes any origin. DEV/TEST ONLY (e.g. a Vercel
+  // preview whose URL isn't known before the deploy) — never configure a
+  // production deployment with it; the per-IP rate limits are then the only
+  // thing bounding who can spend model budget.
+  if (allowedOrigins.includes('*')) {
+    return requestOrigin;
+  }
+  if (allowedOrigins.includes(requestOrigin)) {
     return requestOrigin;
   }
   return null;

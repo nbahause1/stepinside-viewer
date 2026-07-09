@@ -7,10 +7,19 @@
  * or a Durable Object — see the documented KvRateLimiter stub at the bottom.
  */
 
+/**
+ * Which bucket denied a request. 'burst' is the short anti-hammering window;
+ * 'daily' is the hard per-day cost cap. The frontend uses this to show either
+ * a "please wait" note (burst) or the broker contact card (daily).
+ */
+export type RateLimitScope = 'burst' | 'daily';
+
 export interface RateLimitResult {
   allowed: boolean;
   /** Seconds until the caller may retry (only meaningful when !allowed). */
   retryAfterSeconds: number;
+  /** Which bucket denied the request (only meaningful when !allowed). */
+  scope?: RateLimitScope;
 }
 
 export interface RateLimiter {
@@ -29,11 +38,17 @@ const DEFAULT_WINDOW_MS = 5 * 60 * 1000; // 5 minutes
 export class MemoryRateLimiter implements RateLimiter {
   private readonly limit: number;
   private readonly windowMs: number;
+  private readonly scope: RateLimitScope;
   private readonly hits = new Map<string, number[]>();
 
-  constructor(limit: number = DEFAULT_LIMIT, windowMs: number = DEFAULT_WINDOW_MS) {
+  constructor(
+    limit: number = DEFAULT_LIMIT,
+    windowMs: number = DEFAULT_WINDOW_MS,
+    scope: RateLimitScope = 'burst',
+  ) {
     this.limit = limit;
     this.windowMs = windowMs;
+    this.scope = scope;
   }
 
   check(key: string): Promise<RateLimitResult> {
@@ -49,7 +64,7 @@ export class MemoryRateLimiter implements RateLimiter {
       // Persist the pruned list so memory doesn't grow unbounded.
       this.hits.set(key, recent);
       this.pruneOccasionally(windowStart);
-      return Promise.resolve({ allowed: false, retryAfterSeconds });
+      return Promise.resolve({ allowed: false, retryAfterSeconds, scope: this.scope });
     }
 
     recent.push(now);
@@ -72,6 +87,32 @@ export class MemoryRateLimiter implements RateLimiter {
         this.hits.set(key, live);
       }
     }
+  }
+}
+
+/**
+ * Chains several limiters: the first bucket that denies wins. Used to stack the
+ * short burst window (anti-hammering) with the daily cost cap.
+ *
+ * Note: buckets checked before the denying one still record a hit for the
+ * denied request (slight over-count). That errs on the strict side, which is
+ * fine for an abuse limit.
+ */
+export class CompositeRateLimiter implements RateLimiter {
+  private readonly limiters: RateLimiter[];
+
+  constructor(limiters: RateLimiter[]) {
+    this.limiters = limiters;
+  }
+
+  async check(key: string): Promise<RateLimitResult> {
+    for (const limiter of this.limiters) {
+      const result = await limiter.check(key);
+      if (!result.allowed) {
+        return result;
+      }
+    }
+    return { allowed: true, retryAfterSeconds: 0 };
   }
 }
 
@@ -104,11 +145,18 @@ export class KvRateLimiter implements RateLimiter {
   private readonly kv: KvLike;
   private readonly limit: number;
   private readonly windowMs: number;
+  private readonly scope: RateLimitScope;
 
-  constructor(kv: KvLike, limit: number = DEFAULT_LIMIT, windowMs: number = DEFAULT_WINDOW_MS) {
+  constructor(
+    kv: KvLike,
+    limit: number = DEFAULT_LIMIT,
+    windowMs: number = DEFAULT_WINDOW_MS,
+    scope: RateLimitScope = 'burst',
+  ) {
     this.kv = kv;
     this.limit = limit;
     this.windowMs = windowMs;
+    this.scope = scope;
   }
 
   async check(key: string): Promise<RateLimitResult> {
@@ -124,7 +172,7 @@ export class KvRateLimiter implements RateLimiter {
     if (timestamps.length >= this.limit) {
       const oldest = timestamps[0];
       const retryAfterSeconds = Math.max(1, Math.ceil((oldest + this.windowMs - now) / 1000));
-      return { allowed: false, retryAfterSeconds };
+      return { allowed: false, retryAfterSeconds, scope: this.scope };
     }
 
     timestamps.push(now);

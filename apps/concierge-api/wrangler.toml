@@ -14,6 +14,13 @@ compatibility_flags = ["nodejs_compat"]
 # Optional: comma-separated origin allowlist for CORS. If unset, a built-in
 # localhost dev allowlist is used.
 #   ALLOWED_ORIGINS=https://viewer.example.com
+#
+# Exakte Origin-Allowlist: Produktionsdomains + die Vercel-Preview-Origin des
+# Feature-Branches (wird nach jedem Preview-Deploy bei Bedarf ergänzt). Bewusst
+# KEIN Wildcard: sonst könnte jede fremde Seite auf unsere Kosten Modell-
+# Anfragen stellen.
+[vars]
+ALLOWED_ORIGINS = "https://www.stepinside.eu,https://stepinside.eu"
 
 # Production rate limiting should use a KV namespace or Durable Object so that
 # limits are shared across isolates (see KvRateLimiter in src/ratelimit.ts).

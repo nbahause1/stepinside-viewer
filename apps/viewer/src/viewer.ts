@@ -28,6 +28,7 @@ import {
 } from 'playcanvas';
 
 import { Annotations } from './annotations';
+import { verifyScale } from './calibration';
 import { CameraManager, isWalkAllowed } from './camera-manager';
 import { Camera } from './cameras/camera';
 import { IdleLook } from './cameras/idle-look';
@@ -409,6 +410,10 @@ class Viewer {
 
             // distance measurement tool (uses the same picker + collision)
             initMeasure(global, this.picker, collision ?? null);
+
+            // verify the scan is at true metric scale (warns if mis-scaled, so a
+            // bad scan is caught before its measurements/floor plan mislead anyone)
+            verifyScale(global);
 
             // hasCollision = collision data exists (drives fly-mode collision
             // detection and the voxel/mesh debug overlay availability).

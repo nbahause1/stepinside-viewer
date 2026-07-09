@@ -1,0 +1,103 @@
+{
+  "propertyId": "altbau-eppendorf",
+  "displayName": "Stilaltbau-Etagenwohnung Hamburg-Eppendorf",
+  "context": "kauf",
+  "rooms": [
+    {
+      "id": "salon",
+      "label": {
+        "de": "Wohnsalon",
+        "en": "Main salon"
+      }
+    }
+  ],
+  "facts": [
+    {
+      "id": "price",
+      "topic": "price",
+      "rooms": [],
+      "text": "Der Kaufpreis beträgt 895.000 Euro. Der Kauf ist für Käufer provisionsfrei."
+    },
+    {
+      "id": "size",
+      "topic": "basics",
+      "rooms": [],
+      "text": "Die Wohnung hat ca. 112 m² Wohnfläche und 3 Zimmer. Sie liegt im 2. Obergeschoss (von 4) eines Stilaltbaus, Baujahr um 1905."
+    },
+    {
+      "id": "ceiling",
+      "topic": "dimensions",
+      "rooms": [],
+      "text": "Die Raumhöhe beträgt ca. 3,60 m (im 3D-Scan nachgemessen)."
+    },
+    {
+      "id": "salon-size",
+      "topic": "dimensions",
+      "rooms": [
+        "salon"
+      ],
+      "text": "Der Wohnsalon misst rund 49 m², im 3D-Scan nachgemessen: Die Fensterwand ist ca. 9,1 m lang, die Raumtiefe von der Fensterwand zur gegenüberliegenden Wand beträgt ca. 5,4 m."
+    },
+    {
+      "id": "window-size",
+      "topic": "dimensions",
+      "rooms": [],
+      "text": "Die Fenster sind 2,72 m hoch und 1,25 m breit. Es sind bodentiefe Flügelfenster mit französischem Balkon und original erhaltenem, schmiedeeisernem Geländer."
+    },
+    {
+      "id": "door-size",
+      "topic": "dimensions",
+      "rooms": [],
+      "text": "Die Türen sind 2,77 m hoch und 1,48 m breit. Hohe weiße Stiltüren, passend zur Bauzeit."
+    },
+    {
+      "id": "floor",
+      "topic": "features",
+      "rooms": [],
+      "text": "Der Boden ist originales Eichen-Fischgrätparkett, aufwendig aufgearbeitet und in sehr gutem Zustand."
+    },
+    {
+      "id": "features",
+      "topic": "features",
+      "rooms": [
+        "salon"
+      ],
+      "text": "Der Wohnsalon hat umlaufende Wandvertäfelung mit Kassettenprofilen, Stuck an Wand und Decke sowie wandbündig integrierte Einbauschränke."
+    },
+    {
+      "id": "heating",
+      "topic": "heating",
+      "rooms": [],
+      "text": "Geheizt wird über eine Gas-Zentralheizung. Der Energieausweis liegt vor: Verbrauchsausweis, 112 kWh/(m²a), Energieträger Gas, Klasse D."
+    },
+    {
+      "id": "condition",
+      "topic": "condition",
+      "rooms": [],
+      "text": "Die Wohnung ist bezugsfertig und wird leer übergeben. Übergabe nach Vereinbarung."
+    },
+    {
+      "id": "location",
+      "topic": "location",
+      "rooms": [],
+      "text": "Die Wohnung liegt in einer ruhigen, von Altbauten geprägten Wohnstraße in Hamburg-Eppendorf. Cafés, Bäcker und der Wochenmarkt sind fußläufig erreichbar, die U-Bahn Kellinghusenstraße liegt etwa 5 Gehminuten entfernt. Alster und Grünanlagen sind schnell zu Fuß oder mit dem Rad erreicht."
+    },
+    {
+      "id": "hausgeld",
+      "topic": "costs",
+      "rooms": [],
+      "text": "Das monatliche Hausgeld beträgt 420 Euro inklusive Heizkostenvorauszahlung und Rücklagenzuführung."
+    },
+    {
+      "id": "contact",
+      "topic": "contact",
+      "rooms": [],
+      "text": "Ansprechpartner ist Thomas Bergmann von Bergmann Immobilien: Telefon 040 555 123 45, E-Mail t.bergmann@bergmann-immobilien.de. Besichtigungstermine nach Vereinbarung, auch abends und am Wochenende."
+    }
+  ],
+  "voice": "Hanseatisch zurückhaltend und professionell, wie ein erfahrener Hamburger Makler: ruhig, präzise, warm. Kurze klare Sätze. Keine Superlative, keine Ausrufezeichen, kein Verkaufsdruck. Die Qualität der Wohnung spricht für sich; Fakten nennen statt schwärmen. Anrede stets Sie.",
+  "fallback": {
+    "de": "Das kann ich Ihnen aus dem Exposé leider nicht beantworten. Thomas Bergmann von Bergmann Immobilien hilft Ihnen da direkt weiter.",
+    "en": "I'm afraid the listing doesn't cover that. Thomas Bergmann at Bergmann Immobilien can help you with it directly."
+  }
+}
