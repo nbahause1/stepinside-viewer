@@ -26,26 +26,40 @@
             position: sticky;
             top: 0;
             z-index: 2;
-            display: flex;
+            /* back pill | centered title | spacer — the title stays optically
+               centered no matter how wide the back pill renders */
+            display: grid;
+            grid-template-columns: 1fr auto 1fr;
             align-items: center;
-            gap: 14px;
-            padding: max(14px, env(safe-area-inset-top)) 16px 14px;
+            padding: calc(10px + env(safe-area-inset-top)) 12px 10px;
             background: rgba(11, 11, 13, 0.92);
             -webkit-backdrop-filter: blur(12px);
             backdrop-filter: blur(12px);
             border-bottom: 1px solid rgba(255, 255, 255, 0.08);
         }
-        header a {
+        #back {
+            justify-self: start;
+            display: inline-flex;
+            align-items: center;
+            gap: 7px;
+            height: 40px;
+            padding: 0 16px 0 11px;
+            border: 1px solid rgba(255, 255, 255, 0.16);
+            border-radius: 80px;
+            background: rgba(255, 255, 255, 0.04);
             color: #f0f0f2;
             text-decoration: none;
-            font-size: 15px;
-            opacity: 0.85;
+            font-size: 14px;
             white-space: nowrap;
+            transition: background-color 160ms ease;
         }
+        #back:active { background: rgba(255, 255, 255, 0.14); }
+        #back svg { stroke: #f0f0f2; flex: 0 0 auto; }
         header h1 {
-            font-size: 17px;
+            grid-column: 2;
+            font-size: 16px;
             font-weight: 500;
-            letter-spacing: 0.01em;
+            letter-spacing: 0.02em;
         }
         main {
             flex: 1;
@@ -151,8 +165,12 @@
 </head>
 <body>
     <header>
-        <a href="index.html" id="back" aria-label="Zurück zum Rundgang">‹ Rundgang</a>
+        <a href="index.html" id="back" aria-label="Zurück zum Rundgang">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
+            Rundgang
+        </a>
         <h1>Concierge</h1>
+        <span aria-hidden="true"></span>
     </header>
     <main id="messages"></main>
     <form id="form" autocomplete="off">
