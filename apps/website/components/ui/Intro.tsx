@@ -4,8 +4,8 @@ import { useEffect, useRef, useState } from "react";
 
 /*
   First-load intro: a dark screen showing only the square mark, centred. The
-  mark fades in, spins into the diamond, then the "StepInside" wordmark unfurls
-  to its RIGHT via a clip that opens outward. Once the "◆ StepInside" lockup is
+  mark fades in, spins into the diamond, then the "innsyn" wordmark unfurls
+  to its RIGHT via a clip that opens outward. Once the "◆ innsyn" lockup is
   assembled it does NOT simply fade: it GLIDES up to the hero logo's resting
   spot (top-centre) and shrinks to the hero logo's exact size while the midnight
   backdrop fades to expose the hero video — a seamless shared-element handoff to
@@ -164,7 +164,7 @@ export default function Intro() {
           >
             <span className="overflow-hidden">
               <span className="block whitespace-nowrap pl-2.5 text-[16px] font-bold tracking-[0.01em]">
-                StepInside
+                innsyn
               </span>
             </span>
           </span>

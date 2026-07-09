@@ -7,18 +7,18 @@ export const metadata: Metadata = {
 };
 
 // Branded 404 in the site's paper/ink look, so a mistyped or stale URL still
-// feels like StepInside and offers a clear way back.
+// feels like innsyn and offers a clear way back.
 export default function NotFound() {
   return (
     <div className="flex min-h-[100dvh] flex-col items-center justify-center bg-paper px-6 text-center text-ink">
       <Link
         href="/"
-        aria-label="StepInside"
+        aria-label="innsyn"
         className="mb-10 inline-flex items-center gap-2.5"
       >
         <span aria-hidden className="block size-2 rotate-45 bg-ink" />
         <span className="text-[16px] font-bold tracking-[0.01em]">
-          StepInside
+          innsyn
         </span>
       </Link>
 

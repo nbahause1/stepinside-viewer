@@ -40,7 +40,7 @@ export default function ImpressumPage() {
           </Link>
           <Link href="/" className="flex items-center gap-2">
             <span className="block size-2 rotate-45 bg-ink" aria-hidden="true" />
-            <span className="text-[15px] font-bold">StepInside</span>
+            <span className="text-[15px] font-bold">innsyn</span>
           </Link>
         </div>
       </header>

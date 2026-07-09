@@ -189,7 +189,7 @@ button {
     white-space: nowrap;
 }
 
-/* StepInside brand dome — ported 1:1 from the website hero.
+/* innsyn brand dome — ported 1:1 from the website hero.
    A downward-opening half-circle: a frosted-glass blur masked into the dome
    shape, a soft white radial glow on top, and the breathing wordmark centred. */
 
@@ -2679,7 +2679,7 @@ body.staging-open {
         transform: scale(1.05);
     }
 
-    // ---- generating state: the StepInside logo glides in from the top, grows
+    // ---- generating state: the innsyn logo glides in from the top, grows
     // to the centre and fills up (dim base + bright fill revealed left to right)
     // while the room is furnished. Shown only under .is-generating. ----
     #stageStatus {
@@ -3021,7 +3021,7 @@ body.staging-open {
 
 
 /* ================================================================
-   STEPINSIDE - PREMIUM LIQUID GLASS  (erweitert das Basis-Glas)
+   INNSYN - PREMIUM LIQUID GLASS  (erweitert das Basis-Glas)
    Mobile-first, reines CSS -> laeuft ueberall inkl. iOS Safari.
    Desktop-Chrome erhaelt zusaetzlich echte SVG-Refraktion (unten).
    Feintuning zentral ueber die Tokens in :root.
@@ -3248,7 +3248,7 @@ body.staging-open {
 /* ================================================================
    DECLUTTER THE TOP (all viewports)
    ----------------------------------------------------------------
-   The StepInside brand pill and the highlights pill sat stacked at the
+   The innsyn brand pill and the highlights pill sat stacked at the
    top. Drop the brand pill and lift the highlights pill into its
    (top-centre) slot. Now applied on EVERY viewport (was mobile-only).
    ================================================================ */

@@ -673,6 +673,6 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
     return new Viewer(global, gsplatLoad, skyboxLoad, collisionLoad);
 };
 
-console.log(`StepInside Viewer v${appVersion} | Engine v${engineVersion} (${engineRevision})`);
+console.log(`innsyn Viewer v${appVersion} | Engine v${engineVersion} (${engineRevision})`);
 
 export { main };

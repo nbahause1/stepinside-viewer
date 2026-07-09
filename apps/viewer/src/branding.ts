@@ -2,11 +2,11 @@ import { Global } from './types';
 
 // Per-scan white-label branding (settings.branding), applied once at init:
 //   - #brandDome wordmark pill: `logoUrl` (image) beats `logoText` (text)
-//     beats the stock StepInside mark
-//   - browser tab title: "{title} — StepInside"
+//     beats the stock innsyn mark
+//   - browser tab title: "{title} — innsyn"
 //   - accent color: overrides the --accent custom property that drives the
 //     viewer accent (toggles, active tabs, camera switch etc.)
-// The info panel keeps "StepInside Viewer" — that's the engine brand.
+// The info panel keeps "innsyn Viewer" — that's the engine brand.
 //
 // Reading is deliberately lenient: settings.json is authored per customer and
 // a bad value must never break the tour — it just falls back to the default
@@ -35,9 +35,9 @@ const initBranding = (global: Global) => {
     const logoUrl = asText(branding.logoUrl);
     const accentColor = asText(branding.accentColor);
 
-    // browser tab: "{title} — StepInside" (the engine brand stays as suffix)
+    // browser tab: "{title} — innsyn" (the engine brand stays as suffix)
     if (title) {
-        document.title = `${title} — StepInside`;
+        document.title = `${title} — innsyn`;
     }
 
     // top-centre wordmark pill
@@ -50,7 +50,7 @@ const initBranding = (global: Global) => {
             img.draggable = false;
 
             // if the customer logo fails to load, fall back to the text mark
-            // (or restore the StepInside mark when no text was provided)
+            // (or restore the innsyn mark when no text was provided)
             const stock = Array.from(inner.childNodes);
             img.onerror = () => {
                 if (logoText) {

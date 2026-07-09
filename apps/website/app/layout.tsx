@@ -21,17 +21,17 @@ const lora = Lora({
 export const metadata: Metadata = {
   metadataBase: new URL("https://stepinside.eu"),
   title: {
-    default: "StepInside - Räume begehbar machen. Von überall.",
-    template: "%s · StepInside",
+    default: "innsyn - Räume begehbar machen. Von überall.",
+    template: "%s · innsyn",
   },
   description:
     "Fotorealistische, frei begehbare 3D-Touren für Hotels, Immobilien, Gastronomie und mehr. Ein Link, jedes Gerät, kein Download.",
   openGraph: {
-    title: "StepInside - Räume begehbar machen. Von überall.",
+    title: "innsyn - Räume begehbar machen. Von überall.",
     description:
       "Fotorealistische, frei begehbare 3D-Touren. Ein Link, jedes Gerät, kein Download.",
     url: "https://stepinside.eu",
-    siteName: "StepInside",
+    siteName: "innsyn",
     locale: "de_DE",
     type: "website",
   },
@@ -53,7 +53,9 @@ export default function RootLayout({
   const l = config.legal;
   const [postalCode, ...localityParts] = l.city.split(" ");
   // schema.org Organization so search engines understand who is behind the site
-  // (name, location in Koblenz, contact) — better local SEO and trust.
+  // (name, location in Koblenz, contact) — better local SEO and trust. The
+  // contact e-mail is deliberately absent: it stays on the legally required
+  // Impressum, but is kept out of machine-readable markup that scrapers harvest.
   const jsonLd = {
     "@context": "https://schema.org",
     "@type": "Organization",
@@ -61,7 +63,6 @@ export default function RootLayout({
     url: "https://stepinside.eu",
     description:
       "Fotorealistische, frei begehbare 3D-Touren für Hotels, Immobilien, Gastronomie und mehr.",
-    email: l.email,
     telephone: l.phone,
     founder: { "@type": "Person", name: l.owner },
     address: {

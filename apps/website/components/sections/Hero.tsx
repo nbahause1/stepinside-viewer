@@ -115,7 +115,7 @@ export default function Hero() {
           `}</style>
           <a
             href={"#" + SECTION_IDS.top}
-            aria-label="StepInside"
+            aria-label="innsyn"
             data-brandmark
             style={{
               // Delayed so the first glow peak (at 50% of the cycle = 1.8s)
@@ -141,7 +141,7 @@ export default function Hero() {
             >
               <span className="block size-2 rotate-45 bg-paper" />
               <span className="text-[16px] font-bold tracking-[0.01em]">
-                StepInside
+                innsyn
               </span>
             </span>
             <span
@@ -149,7 +149,7 @@ export default function Hero() {
               className="relative z-10 block size-2 rotate-45 bg-paper"
             />
             <span className="relative z-10 text-[16px] font-bold tracking-[0.01em]">
-              StepInside
+              innsyn
             </span>
           </a>
         </div>

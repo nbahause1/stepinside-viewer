@@ -1,6 +1,6 @@
 import deJson from './locales/de.json';
 
-// StepInside ships German only (product decision). This keeps the inherited
+// innsyn ships German only (product decision). This keeps the inherited
 // [data-i18n]/localize() plumbing — the geerbte SuperSplat chrome (tooltips,
 // settings labels, the info panel) still resolves its strings through here —
 // but there is exactly one dictionary and no locale detection. To go

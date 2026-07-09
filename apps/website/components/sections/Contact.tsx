@@ -128,25 +128,19 @@ export default function Contact() {
             </form>
           </Reveal>
 
-          {/* RIGHT: direct contact details above the big StepInside wordmark. */}
+          {/* RIGHT: direct contact details above the big innsyn wordmark. */}
           <Reveal
             as="div"
             delay={0.05}
             className="flex h-full flex-col justify-end gap-12"
           >
-            {/* Direct email / phone — the fast lane past the form. Ember is
-                reserved for exactly these inline links (Aker treatment). */}
+            {/* Direct phone — the fast lane past the form. Ember is reserved
+                for exactly these inline links (Aker treatment). */}
             <div className="lg:text-right">
               <p className="text-[14px] text-pewter">{t.contact.directLabel}</p>
               {/* Ember at rest so the links read as links without hover (touch
                   devices never hover); each row is a >=44px tap target. */}
               <div className="mt-2 flex flex-col lg:items-end">
-                <a
-                  href={`mailto:${config.email}`}
-                  className="flex min-h-11 items-center py-2 text-[17px] text-ember transition-colors hover:text-ink"
-                >
-                  {config.email}
-                </a>
                 <a
                   href={`tel:${config.phoneHref}`}
                   className="flex min-h-11 items-center py-2 text-[17px] text-ember transition-colors hover:text-ink"
@@ -172,7 +166,7 @@ export default function Contact() {
             <div className="lg:mb-[81px] lg:text-right">
               <div className="flex items-center gap-[clamp(1rem,2.5vw,2rem)] lg:justify-end">
                 <span className="text-[clamp(2rem,5.5vw,3.5rem)] font-light leading-[0.9] tracking-[-0.02em] text-ink">
-                  StepInside
+                  innsyn
                 </span>
                 {/* Brand mark: a diamond that bounces — it hops up (ease-out,
                     decelerating like gravity), rotates 90° clockwise mid-air,
@@ -286,7 +280,7 @@ export default function Contact() {
             </Link>
           </nav>
           <p className="text-[13px] text-smoke">
-            {"©"} {year} StepInside
+            {"©"} {year} innsyn
           </p>
         </Reveal>
       </div>

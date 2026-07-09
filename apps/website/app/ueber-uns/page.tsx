@@ -6,7 +6,7 @@ import About from "@/components/sections/About";
 export const metadata: Metadata = {
   title: "Über uns",
   description:
-    "Die Geschichte hinter StepInside: Hospitality und Immobilien, verbunden zu begehbaren 3D-Touren.",
+    "Die Geschichte hinter innsyn: Hospitality und Immobilien, verbunden zu begehbaren 3D-Touren.",
 };
 
 export default function UeberUnsPage() {
@@ -42,7 +42,7 @@ export default function UeberUnsPage() {
                 className="block size-2 rotate-45 bg-ink"
                 aria-hidden="true"
               />
-              <span className="text-[15px] font-bold">StepInside</span>
+              <span className="text-[15px] font-bold">innsyn</span>
             </Link>
           </div>
         </header>

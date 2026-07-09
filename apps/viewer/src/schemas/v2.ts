@@ -211,10 +211,10 @@ type ExperienceSettings = {
 
     // Per-scan white-label branding (optional). Lets a customer's tour carry
     // their own mark: `logoUrl` (image) beats `logoText` (wordmark text) beats
-    // the default StepInside wordmark in the top-centre pill. `title` sets the
-    // browser tab to "{title} — StepInside". `accentColor` overrides the viewer
+    // the default innsyn wordmark in the top-centre pill. `title` sets the
+    // browser tab to "{title} — innsyn". `accentColor` overrides the viewer
     // accent (the --accent custom property). Absent or invalid values fall back
-    // to stock StepInside branding — validation strips them instead of throwing.
+    // to stock innsyn branding — validation strips them instead of throwing.
     branding?: {
         title?: string,
         logoText?: string,
@@ -345,7 +345,7 @@ const BRANDING_KEYS = ['title', 'logoText', 'logoUrl', 'accentColor'] as const;
 
 // Branding is optional cosmetics: a malformed object or wrong-typed field must
 // never reject the whole settings file, so invalid values are stripped (falling
-// back to stock StepInside branding) instead of throwing like the assert*
+// back to stock innsyn branding) instead of throwing like the assert*
 // helpers do.
 const sanitizeBranding = (obj: Record<string, unknown>) => {
     const raw = obj.branding;

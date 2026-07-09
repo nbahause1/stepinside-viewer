@@ -1,5 +1,5 @@
-// Bilingual content for StepInside. German is the primary language, English the option.
-// The brand name "StepInside" always stays in English.
+// Bilingual content for innsyn. German is the primary language, English the option.
+// The brand name "innsyn" always stays in English.
 
 export type Lang = "de" | "en";
 
@@ -256,10 +256,10 @@ const de: Dict = {
   },
   about: {
     label: "Über uns",
-    heading: "Wie StepInside entstanden ist.",
+    heading: "Wie innsyn entstanden ist.",
     paragraphs: [
       "Ich bin in einer Hotelfamilie groß geworden. Gastfreundschaft und der Umgang mit Gästen gehörten bei uns von klein auf zum Alltag. Schon früh habe ich gemerkt, wie viel der erste Eindruck ausmacht, wenn jemand einen Raum zum ersten Mal betritt.",
-      "Heute arbeite ich in der Immobilienbranche, und dort begegnet mir immer wieder dasselbe Problem: Fotos zeigen nie das ganze Bild. Man sieht ein paar Ausschnitte, aber nicht, wie sich ein Raum wirklich anfühlt. Aus diesen beiden Welten, Hotellerie und Immobilien, ist StepInside entstanden.",
+      "Heute arbeite ich in der Immobilienbranche, und dort begegnet mir immer wieder dasselbe Problem: Fotos zeigen nie das ganze Bild. Man sieht ein paar Ausschnitte, aber nicht, wie sich ein Raum wirklich anfühlt. Aus diesen beiden Welten, Hotellerie und Immobilien, ist innsyn entstanden.",
       "Unsere begehbaren 3D-Touren lösen genau das. Man bewegt sich frei durch das Objekt, drinnen wie draußen, und bekommt ein echtes Gefühl dafür, wie es vor Ort ist, ohne selbst dort gewesen zu sein. Gerade die Außenbereiche, die in virtuellen Touren bisher gefehlt haben, gehören für uns selbstverständlich dazu.",
     ],
   },
@@ -419,10 +419,10 @@ const en: Dict = {
   },
   about: {
     label: "About",
-    heading: "How StepInside came to be.",
+    heading: "How innsyn came to be.",
     paragraphs: [
       "I grew up in a hotel family. Hospitality and looking after guests were part of everyday life for us from early on. I learned quickly how much a first impression matters the moment someone walks into a room for the first time.",
-      "Today I work in real estate, and I keep running into the same problem: photos never tell the whole story. You see a few angles, but not how a space actually feels. StepInside grew out of those two worlds, hospitality and property.",
+      "Today I work in real estate, and I keep running into the same problem: photos never tell the whole story. You see a few angles, but not how a space actually feels. innsyn grew out of those two worlds, hospitality and property.",
       "Our walkable 3D tours fix exactly that. You move freely through the space, inside and out, and get a real sense of how it is on site without ever having been there. The outdoor areas that virtual tours have always left out are a natural part of it for us.",
     ],
   },

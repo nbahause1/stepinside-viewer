@@ -2,7 +2,7 @@ import { ImageResponse } from "next/og";
 
 // Social share card shown when stepinside.eu is linked (WhatsApp, LinkedIn,
 // iMessage, …). Mirrors the hero: white wordmark on the brand-dark canvas.
-export const alt = "StepInside — Räume begehbar machen. Von überall.";
+export const alt = "innsyn — Räume begehbar machen. Von überall.";
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
@@ -42,7 +42,7 @@ export default function OpengraphImage() {
             }}
           />
           <div style={{ fontSize: 36, fontWeight: 700, letterSpacing: "0.01em" }}>
-            StepInside
+            innsyn
           </div>
         </div>
 

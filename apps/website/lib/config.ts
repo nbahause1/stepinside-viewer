@@ -1,4 +1,4 @@
-// Central runtime configuration for StepInside.
+// Central runtime configuration for innsyn.
 // Everything marked TODO must be filled in with real values before launch.
 
 export const config = {
@@ -28,7 +28,7 @@ export const config = {
 
   // Legal entity data used on the Impressum page.
   legal: {
-    company: "StepInside",
+    company: "innsyn",
     owner: "Hauke Braband",
     street: "Saurbornstraße 19",
     city: "56073 Koblenz",
