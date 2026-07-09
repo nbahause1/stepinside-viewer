@@ -675,7 +675,8 @@
                          with a question/answer). Populated by concierge.ts. -->
                     <div id="chatSuggest" class="hidden"></div>
                     <div id="chatInputRow">
-                        <input id="chatInput" type="text" autocomplete="off" autocapitalize="sentences" placeholder="Frag den Concierge…" />
+                        <!-- enterkeyhint: iOS shows a "senden" return key; Enter is wired to send() -->
+                        <input id="chatInput" type="text" autocomplete="off" autocapitalize="sentences" enterkeyhint="send" placeholder="Frag den Concierge…" />
                         <button id="chatSend" type="button" aria-label="Senden" title="Senden">
                             <svg width="20" height="20" viewBox="0 0 22 22" aria-hidden="true">
                                 <path d="M3.5 11 L18.5 4 L13 18 L10.5 12 Z" />

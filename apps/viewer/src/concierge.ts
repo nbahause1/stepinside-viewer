@@ -174,20 +174,32 @@ const initConcierge = (global: Global) => {
         }
     });
 
-    // Mobile keyboard handling. The panel is position:fixed/inset:0 against the
-    // LAYOUT viewport, which iOS Safari does NOT shrink when the on-screen
-    // keyboard opens — it pans the VISUAL viewport instead. So the panel stays
-    // full-screen (its black surface always covers the whole scene — nothing
-    // ever peeks through), and we only lift the input row above the keyboard by
-    // padding the panel's bottom by the keyboard's height. The input row is the
-    // panel's last flex child, so the padding pushes it up while the messages
-    // list shrinks. keyboardH = layout height − visible height − any top pan.
     // Touch = coarse pointer. Checked at call time (`.matches`) so hybrid
     // devices (iPad + trackpad, convertibles) are classified per interaction.
     const touchDevice = window.matchMedia('(pointer: coarse)');
 
+    // Mobile keyboard handling. The panel is position:fixed/inset:0 against the
+    // LAYOUT viewport, which iOS Safari does NOT shrink when the on-screen
+    // keyboard opens — it shrinks/pans the VISUAL viewport instead. While the
+    // keyboard is up we therefore fit the panel to exactly the VISIBLE area:
+    // height = vv.height, shifted down by any pan (vv.offsetTop). That keeps
+    // the header on screen (full overview of the conversation) and puts the
+    // input row directly above the keyboard — no dead strip of our own, and
+    // iOS has no reason to auto-pan the field into view.
     const vv = window.visualViewport;
     if (vv) {
+        // A visual-viewport shrink below this is Safari chrome noise (URL bar
+        // collapsing, rounding) — only larger shrinks count as "keyboard up".
+        const KEYBOARD_MIN = 60;
+        // The keyboard-open/close ANIMATION fires a burst of resize events in
+        // which the computed height flickers through 0. Acting on a single
+        // reading closed the keyboard right after it opened ("die Tastatur
+        // fährt sich wieder ein") — so "keyboard gone" must hold steadily for
+        // this long before we act on it.
+        const DISMISS_CONFIRM_MS = 250;
+
+        const keyboardHeight = () => Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+
         // THE keyboard invariant (touch only): field focused ⟺ keyboard up.
         // iOS raises the keyboard ONLY when an editable element GAINS focus
         // inside a user gesture. Whenever iOS dismisses the keyboard on its own
@@ -195,29 +207,49 @@ const initConcierge = (global: Global) => {
         // tapping the already-focused field is a no-op — no focus change, no
         // keyboard, "can't type the second message". Tricks to force a change
         // (synchronous blur()+focus() in touchend) get coalesced by WebKit and
-        // don't work. So instead: the moment the keyboard visibly goes away,
+        // don't work. So instead: once the keyboard has verifiably gone away,
         // drop focus too. The next tap is then a genuine focus gain inside a
         // genuine gesture, and iOS brings the keyboard back — native behavior,
         // no tricks. (Same conclusion as react-spectrum PR #7479: remove the
         // touch/focus trickery, let iOS do its thing.)
         let keyboardWasUp = false;
+        let dismissTimer: ReturnType<typeof setTimeout> | null = null;
+        const cancelDismiss = () => {
+            if (dismissTimer !== null) {
+                clearTimeout(dismissTimer);
+                dismissTimer = null;
+            }
+        };
+
         const applyViewport = () => {
             if (!state.chatOpen) {
-                panel.style.paddingBottom = '';
+                panel.style.height = '';
+                panel.style.transform = '';
                 keyboardWasUp = false;
+                cancelDismiss();
                 return;
             }
-            // Keyboard height = layout viewport − visible height − top pan.
-            const keyboardH = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
-            const keyboardUp = keyboardH > 0;
-            // The panel is fixed to the LAYOUT viewport (which iOS does NOT
-            // shrink for the keyboard) — pad its bottom so the input row (the
-            // last flex child) rides above the keyboard.
-            panel.style.paddingBottom = keyboardUp ? `${keyboardH}px` : '';
-            if (keyboardUp) messages.scrollTop = messages.scrollHeight;
-            if (keyboardWasUp && !keyboardUp && touchDevice.matches &&
-                document.activeElement === input) {
-                input.blur();
+            const keyboardUp = keyboardHeight() > KEYBOARD_MIN;
+            if (keyboardUp) {
+                panel.style.height = `${vv.height}px`;
+                panel.style.transform = vv.offsetTop > 0 ? `translateY(${vv.offsetTop}px)` : '';
+                messages.scrollTop = messages.scrollHeight;
+            } else {
+                panel.style.height = '';
+                panel.style.transform = '';
+            }
+            if (keyboardUp) {
+                cancelDismiss();
+            } else if (keyboardWasUp && dismissTimer === null && touchDevice.matches &&
+                       document.activeElement === input) {
+                dismissTimer = setTimeout(() => {
+                    dismissTimer = null;
+                    // Re-check: still open, still down, still focused.
+                    if (state.chatOpen && keyboardHeight() <= KEYBOARD_MIN &&
+                        document.activeElement === input) {
+                        input.blur();
+                    }
+                }, DISMISS_CONFIRM_MS);
             }
             keyboardWasUp = keyboardUp;
         };
@@ -235,6 +267,10 @@ const initConcierge = (global: Global) => {
     events.on('chatOpen:changed', (open: boolean) => {
         document.documentElement.style.overflow = open ? 'hidden' : '';
         document.body.style.overflow = open ? 'hidden' : '';
+        // Tell the browser the open chat is a dark surface: iOS then renders
+        // the on-screen keyboard, its accessory bar and the collapsed URL pill
+        // dark instead of glaring white between the black panel and the keys.
+        document.documentElement.style.colorScheme = open ? 'dark' : '';
     });
 
     // Type-anywhere: while the chat is open, every printable key lands in the
