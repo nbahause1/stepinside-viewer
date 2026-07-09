@@ -189,6 +189,19 @@
     "label": "Besichtigung anfragen",
     "email": "kurieronline6@gmail.com"
   },
+  "concierge": {
+    "mode": "ai",
+    "greeting": "Frag mich etwas zur Wohnung.",
+    "endpoint": "https://concierge-api.stepinside-eu.workers.dev/concierge",
+    "propertyId": "altbau-eppendorf",
+    "softLimit": 8,
+    "contact": {
+      "name": "Thomas Bergmann",
+      "phone": "040 555 123 45",
+      "email": "t.bergmann@bergmann-immobilien.de",
+      "exposeUrl": "expose-altbau-eppendorf.html"
+    }
+  },
   "pois": [
     {
       "id": "window",

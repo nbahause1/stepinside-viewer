@@ -1,3 +1,4 @@
+import { IdleLook } from './cameras/idle-look';
 import type { Global } from './types';
 
 // Concierge chat. A small dark-glass pill expands into a chat panel. Two modes,
@@ -26,6 +27,9 @@ type ChatMessage = {
 type ConciergeResponse = {
     answer: string,
     focus?: string | null,
+    // True when the model answered with the fallback message (question not
+    // covered by the knowledge base) — we render the contact buttons then.
+    fallback?: boolean,
     usage?: unknown
 };
 
@@ -91,9 +95,12 @@ const initConcierge = (global: Global) => {
     events.on('chatOpen:changed', (open: boolean) => {
         panel.classList.toggle('is-open', open);
         pill.classList.toggle('is-open', open);
-        // Focus the field after the entrance transition starts (AI mode only —
-        // scripted mode has no text field).
+        // Focus the field right away AND after the entrance transition starts
+        // (AI mode only — scripted mode has no text field). The immediate call
+        // matters: while the scene streams in, a queued rAF can lag seconds
+        // behind, and anything typed until then would miss the field.
         if (open && mode !== 'scripted') {
+            input.focus();
             window.requestAnimationFrame(() => input.focus());
         }
     });
@@ -142,13 +149,119 @@ const initConcierge = (global: Global) => {
     }
 
     // -------------------------------------------------------------------- ai
+    // AI mode takes over the whole viewport like a native chat app (Claude /
+    // Gemini style): same DOM as the corner panel, restyled via this modifier.
+    // Scripted mode keeps the small corner panel above.
+    pill.classList.add('chatPill--full');
+
+    // While the fullscreen chat covers the scene, stop the idle camera drift —
+    // otherwise the splat keeps re-rendering behind the opaque panel and the
+    // wasted GPU/main-thread work makes typing feel laggy on weaker machines.
+    let idleWasSuppressed = false;
+    events.on('chatOpen:changed', (open: boolean) => {
+        if (open) {
+            idleWasSuppressed = IdleLook.suppressed;
+            IdleLook.suppressed = true;
+        } else {
+            IdleLook.suppressed = idleWasSuppressed;
+        }
+    });
+
+    // Type-anywhere: while the chat is open, every printable key lands in the
+    // input no matter what currently holds focus. Focus is fragile here — the
+    // deferred focus() can lag seconds behind while the scene streams in, and
+    // a stray click on the panel background blurs the field — both read as
+    // "typing is broken". Capture phase so the keystroke is rerouted before
+    // the viewer's window-level camera/hotkey handlers can consume it.
+    const typeAnywhere = (event: KeyboardEvent) => {
+        if (!state.chatOpen) return;
+        if (event.target === input) return;
+        if (event.metaKey || event.ctrlKey || event.altKey) return;
+        if (event.key.length === 1 || event.key === 'Backspace') {
+            input.focus();  // the key's default action now inserts into the input
+            event.stopPropagation();
+        }
+    };
+    window.addEventListener('keydown', typeAnywhere, true);
+
     // Curated jump targets for this scan. The model only sees {id,label,keywords}
     // so it can pick a focus; the camera pose stays here and never goes server-side.
     const focusList = pois.map(p => ({ id: p.id, label: p.label, keywords: p.keywords }));
 
+    // Soft conversation limit: after this many sent questions the chat offers
+    // the broker contact card. Pure UX (leads a warm prospect to a human); the
+    // server's burst + daily buckets enforce the hard cost caps.
+    const softLimit = cfg?.softLimit ?? 8;
+    const contact = cfg?.contact;
+    const hasContact = !!(contact && (contact.phone || contact.email || contact.url || contact.exposeUrl));
+    let userTurns = 0;
+    let contactCardShown = false;
+    let fallbackCardShown = false;
+
     const history: ChatMessage[] = [];
     let loading = false;
     let thinking: HTMLElement | null = null;
+
+    // Broker contact card: a bot-side bubble with tap-able phone / mail /
+    // appointment links. Built via createElement + textContent so settings data
+    // is never interpreted as HTML.
+    const appendContactCard = (intro: string) => {
+        if (!hasContact || !contact) return;
+        const el = document.createElement('div');
+        el.className = 'chatMsg chatMsg--bot chatMsg--contact';
+        const text = document.createElement('div');
+        text.textContent = intro;
+        el.appendChild(text);
+        const addLink = (href: string, label: string) => {
+            const a = document.createElement('a');
+            a.className = 'chatContactLink';
+            a.href = href;
+            a.textContent = label;
+            a.rel = 'noopener';
+            el.appendChild(a);
+        };
+        const addExternalLink = (href: string, label: string) => {
+            const a = document.createElement('a');
+            a.className = 'chatContactLink';
+            a.href = href;
+            a.target = '_blank';
+            a.rel = 'noopener noreferrer';
+            a.textContent = label;
+            el.appendChild(a);
+        };
+        if (contact.phone) addLink(`tel:${contact.phone.replace(/\s+/g, '')}`, `Anrufen: ${contact.phone}`);
+        if (contact.url) addExternalLink(contact.url, 'Termin vereinbaren');
+        if (contact.email) addLink(`mailto:${contact.email}`, 'E-Mail schreiben');
+        if (contact.exposeUrl) addExternalLink(contact.exposeUrl, 'Exposé ansehen');
+        messages.appendChild(el);
+        scrollToBottom();
+    };
+
+    // True when the last thing in the transcript is already a contact card —
+    // guards against stacking cards when several fallbacks come in a row.
+    const contactCardJustShown = () =>
+        messages.lastElementChild?.classList.contains('chatMsg--contact') === true;
+
+    // The fullscreen chat hides the 3D scene, so a focus answer must not fly
+    // the camera blind. Instead the answer gets a "show me" action that closes
+    // the chat and then jumps the camera.
+    const appendShowAction = (camera: NonNullable<typeof pois[number]['camera']>, label: string) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'chatChip chatAction';
+        btn.textContent = `Im Rundgang zeigen: ${label}`;
+        btn.addEventListener('click', () => {
+            state.chatOpen = false;
+            events.fire('focusPoi', camera);
+        });
+        messages.appendChild(btn);
+        scrollToBottom();
+    };
+
+    // Greeting as the first bot bubble, so the empty fullscreen app has a
+    // starting point (mirrors the scripted panel).
+    const greeting = cfg?.greeting;
+    if (greeting) appendBubble('bot', greeting);
 
     // MVP: the room is just the loaded scene's name (or null). Phase 2 swaps in
     // camera-vs-bounding-box zone detection; the wire contract stays the same.
@@ -176,9 +289,11 @@ const initConcierge = (global: Global) => {
         }
     };
 
+    // While the answer loads only the SEND path is blocked — the field itself
+    // stays editable so the guest can already type the next question (locking
+    // the input for the 3-5s round-trip reads as "typing is broken").
     const setLoading = (value: boolean) => {
         loading = value;
-        input.disabled = value;
         sendBtn.disabled = value;
     };
 
@@ -223,6 +338,20 @@ const initConcierge = (global: Global) => {
             clearThinking();
 
             if (!res.ok) {
+                // The server's 429 carries `reason`: 'daily' is terminal for
+                // today (hard cost cap) -> hand over to the broker; 'burst'
+                // just means slow down.
+                let reason = '';
+                try {
+                    reason = ((await res.json()) as { reason?: string }).reason ?? '';
+                } catch { /* body not JSON -> generic message below */ }
+                if (res.status === 429 && reason === 'daily') {
+                    appendBubble('bot', 'Das Fragen-Kontingent für heute ist aufgebraucht.');
+                    if (hasContact) {
+                        appendContactCard(`${contact?.name ?? 'Ihr Ansprechpartner'} beantwortet Ihre Fragen gern persönlich:`);
+                    }
+                    return;
+                }
                 const text = res.status === 429 ?
                     'Zu viele Anfragen. Bitte warte einen Moment und versuch es erneut.' :
                     'Da ist etwas schiefgelaufen. Bitte versuch es gleich nochmal.';
@@ -236,9 +365,23 @@ const initConcierge = (global: Global) => {
                 history.push({ role: 'assistant', content: answer });
                 if (history.length > MAX_HISTORY) history.splice(0, history.length - MAX_HISTORY);
                 appendBubble('bot', answer);
-                // If the answer is about a locatable object, fly the camera there.
+                // If the answer is about a locatable object, offer to show it
+                // (the fullscreen chat covers the scene, so no blind camera fly).
                 const poi = data.focus ? pois.find(p => p.id === data.focus) : undefined;
-                if (poi) events.fire('focusPoi', poi.camera);
+                if (poi) appendShowAction(poi.camera, poi.label);
+                userTurns += 1;
+                if (data.fallback === true && hasContact && !fallbackCardShown && !contactCardJustShown()) {
+                    // The bot couldn't answer -> hand over with tap-able actions,
+                    // not just a "please contact the broker" sentence. Once per
+                    // conversation — repeating the card after every unanswered
+                    // question feels pushy; later answers still name the broker.
+                    fallbackCardShown = true;
+                    appendContactCard(`Am schnellsten hilft Ihnen ${contact?.name ?? 'Ihr Ansprechpartner'} direkt weiter:`);
+                } else if (userTurns >= softLimit && !contactCardShown && hasContact && !contactCardJustShown()) {
+                    // Soft limit reached: once, after a real answer, offer the human.
+                    contactCardShown = true;
+                    appendContactCard(`Gern können Sie alles Weitere direkt mit ${contact?.name ?? 'Ihrem Ansprechpartner'} besprechen:`);
+                }
             } else {
                 appendBubble('bot', 'Da ist etwas schiefgelaufen. Bitte versuch es gleich nochmal.');
             }

@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { validateKnowledge } from './knowledge.js';
 import type { KnowledgeBase } from './knowledge.js';
-import { MemoryRateLimiter } from './ratelimit.js';
+import { LayeredRateLimiter, MemoryRateLimiter } from './ratelimit.js';
 import { handleConcierge } from './core.js';
 import { handleStaging } from './staging.js';
 import { handleEvents, handleLead } from './analytics.js';
@@ -81,7 +81,15 @@ async function loadKnowledge(propertyId: string): Promise<KnowledgeBase | null> 
   }
 }
 
-const rateLimiter = new MemoryRateLimiter();
+// Two stacked buckets per IP: a short burst window (anti-hammering) and a hard
+// daily cap (bounds worst-case model cost per visitor). Env-overridable so the
+// test harness can exercise both without hundreds of requests.
+const BURST_LIMIT = Number(process.env.RATE_BURST ?? 20);
+const DAILY_LIMIT = Number(process.env.RATE_DAILY ?? 40);
+const rateLimiter = new LayeredRateLimiter([
+  new MemoryRateLimiter(BURST_LIMIT, 5 * 60 * 1000, 'burst'),
+  new MemoryRateLimiter(DAILY_LIMIT, 24 * 60 * 60 * 1000, 'daily'),
+]);
 // Image generation is far pricier than a chat turn -> its own tighter bucket.
 const stagingRateLimiter = new MemoryRateLimiter(6, 5 * 60 * 1000);
 const allowedOrigins = parseAllowedOrigins(process.env.ALLOWED_ORIGINS);

@@ -32,7 +32,7 @@ fallthrough = true
 # Optional: comma-separated origin allowlist for CORS. If unset, a built-in
 # localhost dev allowlist is used.
 #   ALLOWED_ORIGINS=https://viewer.example.com
-
+#
 # --- Rate limiting + daily spend/flood caps (KV) ------------------------------
 # Real (cross-isolate) rate limiting AND the global daily caps (/stage,
 # concierge, /events, /lead) require a KV namespace bound as RATE_LIMIT_KV.
@@ -44,9 +44,15 @@ fallthrough = true
 # Provision once (needs account access), then uncomment with the printed id:
 #   npx wrangler kv namespace create RATE_LIMIT_KV
 
-[[kv_namespaces]]
-binding = "RATE_LIMIT_KV"
-id = "40014ed55db54b6ebcb6c85154069e01"
+# KONSOLIDIERUNG OFFEN: Diese KV-/D1-IDs stammen aus einem ZWEITEN
+# Cloudflare-Account (workers.dev-Subdomain "stepinside"); im Account
+# haukecux19@gmail.com ("stepinside-eu", aktuelles Deploy-Ziel) existieren sie
+# nicht — ein Deploy mit aktiven Bindings schlägt dort fehl. Bis die Accounts
+# konsolidiert sind, bleiben die Bindings auskommentiert; der Worker läuft
+# dann mit In-Memory-Limits, /events + /lead droppen still (202).
+# [[kv_namespaces]]
+# binding = "RATE_LIMIT_KV"
+# id = "40014ed55db54b6ebcb6c85154069e01"
 
 # --- Anonymous analytics + leads (D1) ----------------------------------------
 # /events, /lead and /report/{propertyId} require a D1 database bound as
@@ -61,11 +67,12 @@ id = "40014ed55db54b6ebcb6c85154069e01"
 #   npx wrangler d1 migrations apply stepinside-analytics --remote
 # (local dev against `wrangler dev`: npx wrangler d1 migrations apply stepinside-analytics --local)
 #
-[[d1_databases]]
-binding = "ANALYTICS_DB"
-database_name = "stepinside-analytics"
-database_id = "933ec231-8cc0-4dfb-9f26-00eee62735ae"
-migrations_dir = "migrations"
+# Siehe Konsolidierungs-Hinweis oben (zweiter Cloudflare-Account):
+# [[d1_databases]]
+# binding = "ANALYTICS_DB"
+# database_name = "stepinside-analytics"
+# database_id = "933ec231-8cc0-4dfb-9f26-00eee62735ae"
+# migrations_dir = "migrations"
 
 # Optional hardening (details in README.md):
 #
@@ -78,9 +85,11 @@ migrations_dir = "migrations"
 #   LEAD_DAILY_LIMIT — max leads stored per UTC day (default 200; past the
 #   cap: 429 with Retry-After):
 [vars]
-# Exact-match origin allowlist (see src/cors.ts). Production site + local dev
-# (Next.js on 3000, incl. the LAN IP used for on-device iPhone testing).
-ALLOWED_ORIGINS = "https://stepinside.eu,https://www.stepinside.eu,https://stepinside-viewer-git-analytics-leads-nbahauses-projects.vercel.app,http://localhost:3000,http://127.0.0.1:3000,http://192.168.0.146:3000,http://localhost:4500,http://127.0.0.1:4500"
+# Exact-match origin allowlist (see src/cors.ts). Production site + branch
+# previews + local dev (Next.js on 3000, viewer on 4500, incl. LAN IPs used
+# for on-device iPhone testing). Bewusst KEIN Wildcard: sonst könnte jede
+# fremde Seite auf unsere Kosten Modell-Anfragen stellen.
+ALLOWED_ORIGINS = "https://stepinside.eu,https://www.stepinside.eu,https://stepinside-viewer-git-analytics-leads-nbahauses-projects.vercel.app,https://stepinside-viewer-git-concierge-endprodukt-nbahauses-projects.vercel.app,https://stepinside-viewer-git-concierge-merge-nbahauses-projects.vercel.app,https://stepinside-viewer-git-aker-redesign-nbahauses-projects.vercel.app,http://localhost:3000,http://127.0.0.1:3000,http://192.168.0.146:3000,http://192.168.0.201:3000,http://localhost:4500,http://127.0.0.1:4500,http://192.168.0.201:4500"
 STAGE_DAILY_LIMIT = "200"
 CONCIERGE_DAILY_LIMIT = "1000"
 EVENTS_DAILY_LIMIT = "50000"

@@ -25,6 +25,7 @@
  *     (frictionless demo), protected only by CORS + rate limits.
  */
 import exampleFewo from '../knowledge/example-fewo.json';
+import altbauEppendorf from '../knowledge/altbau-eppendorf.json';
 // Reference furniture photos, bundled as raw bytes via the wrangler.toml Data
 // rule (Workers has no filesystem). Keyed as `${style.dir}/${file}` below.
 import set1Sofa from '../staging-refs/set1-vitra-klassiker/anagram-sofa.jpg';
@@ -92,6 +93,7 @@ interface Env {
 // Validate + freeze the bundled KB once per isolate.
 const KNOWLEDGE: Record<string, KnowledgeBase> = {
   'example-fewo': validateKnowledge(exampleFewo),
+  'altbau-eppendorf': validateKnowledge(altbauEppendorf),
 };
 
 function loadKnowledge(propertyId: string): KnowledgeBase | null {

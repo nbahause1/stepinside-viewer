@@ -15,10 +15,19 @@
  * Durable Object if you ever need strict counting.
  */
 
+/**
+ * Which bucket denied a request. 'burst' is the short anti-hammering window;
+ * 'daily' is the hard per-day cost cap. The frontend uses this to show either
+ * a "please wait" note (burst) or the broker contact card (daily).
+ */
+export type RateLimitScope = 'burst' | 'daily';
+
 export interface RateLimitResult {
   allowed: boolean;
   /** Seconds until the caller may retry (only meaningful when !allowed). */
   retryAfterSeconds: number;
+  /** Which bucket denied the request (only meaningful when !allowed). */
+  scope?: RateLimitScope;
 }
 
 export interface RateLimiter {
@@ -72,11 +81,17 @@ const DEFAULT_WINDOW_MS = 5 * 60 * 1000; // 5 minutes
 export class MemoryRateLimiter implements RateLimiter {
   private readonly limit: number;
   private readonly windowMs: number;
+  private readonly scope: RateLimitScope;
   private readonly hits = new Map<string, number[]>();
 
-  constructor(limit: number = DEFAULT_LIMIT, windowMs: number = DEFAULT_WINDOW_MS) {
+  constructor(
+    limit: number = DEFAULT_LIMIT,
+    windowMs: number = DEFAULT_WINDOW_MS,
+    scope: RateLimitScope = 'burst',
+  ) {
     this.limit = limit;
     this.windowMs = windowMs;
+    this.scope = scope;
   }
 
   check(key: string): Promise<RateLimitResult> {
@@ -92,7 +107,7 @@ export class MemoryRateLimiter implements RateLimiter {
       // Persist the pruned list so memory doesn't grow unbounded.
       this.hits.set(key, recent);
       this.pruneOccasionally(windowStart);
-      return Promise.resolve({ allowed: false, retryAfterSeconds });
+      return Promise.resolve({ allowed: false, retryAfterSeconds, scope: this.scope });
     }
 
     recent.push(now);
@@ -153,17 +168,20 @@ export class KvRateLimiter implements RateLimiter {
   private readonly limit: number;
   private readonly windowMs: number;
   private readonly prefix: string;
+  private readonly scope: RateLimitScope;
 
   constructor(
     kv: KvLike,
     limit: number = DEFAULT_LIMIT,
     windowMs: number = DEFAULT_WINDOW_MS,
     prefix: string = 'rl',
+    scope: RateLimitScope = 'burst',
   ) {
     this.kv = kv;
     this.limit = limit;
     this.windowMs = windowMs;
     this.prefix = prefix;
+    this.scope = scope;
   }
 
   async check(key: string): Promise<RateLimitResult> {
@@ -184,7 +202,7 @@ export class KvRateLimiter implements RateLimiter {
     if (count >= this.limit) {
       const windowEnd = (windowIndex + 1) * this.windowMs;
       const retryAfterSeconds = Math.max(1, Math.ceil((windowEnd - now) / 1000));
-      return { allowed: false, retryAfterSeconds };
+      return { allowed: false, retryAfterSeconds, scope: this.scope };
     }
 
     try {
@@ -256,7 +274,9 @@ export class KvDailyBudget {
         now.getUTCDate() + 1,
       );
       const retryAfterSeconds = Math.max(1, Math.ceil((nextMidnightUtc - now.getTime()) / 1000));
-      return { allowed: false, retryAfterSeconds };
+      // scope 'daily' lets the client show its "quota exhausted, contact the
+      // broker" hand-over instead of a generic "please wait".
+      return { allowed: false, retryAfterSeconds, scope: 'daily' };
     }
 
     try {
