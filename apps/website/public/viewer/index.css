@@ -517,6 +517,10 @@ body.tutorial-active #walkHint {
   align-items: flex-start;
   gap: 10px;
 }
+#chatPill,
+#chatPill * {
+  touch-action: manipulation;
+}
 #chatPill #chatToggle {
   pointer-events: auto;
   width: 44px;

@@ -3,7 +3,14 @@
     <head>
         <title>innsyn</title>
         <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+        <!-- interactive-widget=resizes-content: Android Chrome shrinks the layout
+             viewport when the on-screen keyboard opens, so the chat input stays
+             visible. iOS ignores it (handled via visualViewport in concierge.ts). -->
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content">
+        <!-- Dark page, dark browser chrome: without these, iOS Safari paints its
+             status-bar and toolbar zones white around the dark viewer. -->
+        <meta name="color-scheme" content="dark">
+        <meta name="theme-color" content="#0b0b0d">
         <base href="">
         <!-- Inter self-hosted (latin subset, variable → one file covers all
              weights): no render-blocking Google roundtrip, no visitor-IP leak to
@@ -672,7 +679,8 @@
                          with a question/answer). Populated by concierge.ts. -->
                     <div id="chatSuggest" class="hidden"></div>
                     <div id="chatInputRow">
-                        <input id="chatInput" type="text" autocomplete="off" autocapitalize="sentences" placeholder="Frag den Concierge…" />
+                        <!-- enterkeyhint: iOS shows a "senden" return key; Enter is wired to send() -->
+                        <input id="chatInput" type="text" autocomplete="off" autocapitalize="sentences" enterkeyhint="send" placeholder="Frag den Concierge…" />
                         <button id="chatSend" type="button" aria-label="Senden" title="Senden">
                             <svg width="20" height="20" viewBox="0 0 22 22" aria-hidden="true">
                                 <path d="M3.5 11 L18.5 4 L13 18 L10.5 12 Z" />

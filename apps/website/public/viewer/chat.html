@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="utf-8">
+    <!-- Deliberately a PLAIN, normally-scrolling document: no fixed overlays,
+         no viewport tricks, no WebGL underneath. On phones the in-viewer chat
+         overlay lost a five-round war against the iOS on-screen keyboard
+         (see concierge.ts + git log); a boring page is the one shape where
+         the keyboard is native form behavior and simply works. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="color-scheme" content="dark">
+    <!-- Tints Safari's status-bar/toolbar zones dark — without it they render
+         as white bars around the dark page. -->
+    <meta name="theme-color" content="#0b0b0d">
+    <title>Concierge</title>
+    <style>
+        :root { color-scheme: dark; }
+        * { box-sizing: border-box; margin: 0; }
+        html { background: #0b0b0d; }
+        body {
+            background: #0b0b0d;
+            color: #f0f0f2;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            /* svh, not vh: on iOS 100vh includes the collapsed-toolbar height,
+               which makes a short page scrollable — after keyboard use the
+               content ended up shifted half under the sticky header. svh is
+               the small (toolbar visible) height, so a short chat never
+               scrolls; long chats scroll naturally. */
+            min-height: 100vh; /* fallback for pre-svh browsers */
+            min-height: 100svh;
+            display: flex;
+            flex-direction: column;
+        }
+        header {
+            position: sticky;
+            top: 0;
+            z-index: 2;
+            /* back pill | centered title | spacer — the title stays optically
+               centered no matter how wide the back pill renders */
+            display: grid;
+            grid-template-columns: 1fr auto 1fr;
+            align-items: center;
+            padding: calc(10px + env(safe-area-inset-top)) 12px 10px;
+            background: rgba(11, 11, 13, 0.92);
+            -webkit-backdrop-filter: blur(12px);
+            backdrop-filter: blur(12px);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        #back {
+            justify-self: start;
+            display: inline-flex;
+            align-items: center;
+            gap: 7px;
+            height: 40px;
+            padding: 0 16px 0 11px;
+            border: 1px solid rgba(255, 255, 255, 0.16);
+            border-radius: 80px;
+            background: rgba(255, 255, 255, 0.04);
+            color: #f0f0f2;
+            text-decoration: none;
+            font-size: 14px;
+            white-space: nowrap;
+            transition: background-color 160ms ease;
+        }
+        #back:active { background: rgba(255, 255, 255, 0.14); }
+        #back svg { stroke: #f0f0f2; flex: 0 0 auto; }
+        header h1 {
+            grid-column: 2;
+            font-size: 16px;
+            font-weight: 500;
+            letter-spacing: 0.02em;
+        }
+        main {
+            flex: 1;
+            width: 100%;
+            max-width: 720px;
+            margin: 0 auto;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .msg {
+            max-width: 85%;
+            padding: 10px 14px;
+            border-radius: 16px;
+            font-size: 15px;
+            line-height: 1.5;
+            white-space: pre-wrap;
+            overflow-wrap: break-word;
+        }
+        .msg--bot {
+            background: #ffffff;
+            color: #141414;
+            align-self: flex-start;
+            border-bottom-left-radius: 4px;
+        }
+        .msg--user {
+            background: #232326;
+            color: #f0f0f2;
+            align-self: flex-end;
+            border-bottom-right-radius: 4px;
+        }
+        .msg--contact { display: flex; flex-direction: column; gap: 8px; }
+        .msg--contact a {
+            display: block;
+            text-align: center;
+            border: 1px solid rgba(20, 20, 20, 0.3);
+            border-radius: 80px;
+            padding: 9px 14px;
+            color: #141414;
+            text-decoration: none;
+            font-size: 14px;
+        }
+        .dots span {
+            display: inline-block;
+            width: 6px;
+            height: 6px;
+            margin-right: 4px;
+            border-radius: 50%;
+            background: #141414;
+            animation: pulse 1s infinite;
+        }
+        .dots span:nth-child(2) { animation-delay: 0.15s; }
+        .dots span:nth-child(3) { animation-delay: 0.3s; }
+        @keyframes pulse { 0%, 100% { opacity: 0.25; } 50% { opacity: 0.8; } }
+        form {
+            position: sticky;
+            bottom: 0;
+            z-index: 2;
+            display: flex;
+            gap: 10px;
+            width: 100%;
+            max-width: 720px;
+            margin: 0 auto;
+            padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+            background: rgba(11, 11, 13, 0.92);
+            -webkit-backdrop-filter: blur(12px);
+            backdrop-filter: blur(12px);
+            border-top: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        input {
+            flex: 1;
+            min-width: 0;
+            height: 48px;
+            padding: 0 20px;
+            border-radius: 80px;
+            border: 1px solid rgba(255, 255, 255, 0.16);
+            background: #151517;
+            color: #f0f0f2;
+            /* 16px: anything below makes iOS Safari zoom the page on focus */
+            font-size: 16px;
+        }
+        input::placeholder { color: rgba(240, 240, 242, 0.58); }
+        input:focus {
+            outline: none;
+            border-color: rgba(255, 255, 255, 0.44);
+            background: #18181a;
+        }
+        button {
+            width: 48px;
+            height: 48px;
+            flex: 0 0 48px;
+            border-radius: 50%;
+            border: none;
+            background: #ffffff;
+            cursor: pointer;
+            display: grid;
+            place-items: center;
+        }
+        button:disabled { opacity: 0.5; }
+        button svg { stroke: #141414; }
+    </style>
+</head>
+<body>
+    <header>
+        <a href="index.html" id="back" aria-label="Zurück zum Rundgang">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
+            Rundgang
+        </a>
+        <h1>Concierge</h1>
+        <span aria-hidden="true"></span>
+    </header>
+    <main id="messages"></main>
+    <form id="form" autocomplete="off">
+        <input id="input" type="text" autocomplete="off" autocapitalize="sentences" enterkeyhint="send" placeholder="Frag den Concierge…" aria-label="Frage" />
+        <button id="send" type="submit" aria-label="Senden" title="Senden">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4Z"/></svg>
+        </button>
+    </form>
+    <script>
+        (async () => {
+            const messages = document.getElementById('messages');
+            const form = document.getElementById('form');
+            const input = document.getElementById('input');
+            const sendBtn = document.getElementById('send');
+            const back = document.getElementById('back');
+
+            // Back = browser back when we came from the viewer (bfcache makes
+            // that instant, the scene doesn't reload); plain link otherwise.
+            if (document.referrer.includes('index.html') && window.history.length > 1) {
+                back.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    window.history.back();
+                });
+            }
+
+            // Same config source as the viewer: the concierge block in the
+            // settings.json that lives next to this page.
+            let cfg = null;
+            try {
+                cfg = (await (await fetch('settings.json')).json()).concierge;
+            } catch { /* handled below */ }
+
+            const appendBubble = (side, text) => {
+                const el = document.createElement('div');
+                el.className = 'msg msg--' + side;
+                el.textContent = text;
+                messages.appendChild(el);
+                el.scrollIntoView({ block: 'end' });
+                return el;
+            };
+
+            if (!cfg || !cfg.endpoint || !cfg.propertyId) {
+                appendBubble('bot', 'Der Concierge ist gerade nicht erreichbar. Bitte versuch es später nochmal.');
+                form.style.display = 'none';
+                return;
+            }
+
+            const contact = cfg.contact;
+            const hasContact = !!(contact && (contact.phone || contact.email || contact.url || contact.exposeUrl));
+            const softLimit = cfg.softLimit ?? 8;
+            const MAX_HISTORY = 12;
+            const history = [];
+            let userTurns = 0;
+            let contactCardShown = false;
+            let fallbackCardShown = false;
+            let loading = false;
+            let thinking = null;
+
+            // Contact card: textContent only, settings data is never HTML.
+            const appendContactCard = (intro) => {
+                if (!hasContact) return;
+                const el = document.createElement('div');
+                el.className = 'msg msg--bot msg--contact';
+                const text = document.createElement('div');
+                text.textContent = intro;
+                el.appendChild(text);
+                const addLink = (href, label, external) => {
+                    const a = document.createElement('a');
+                    a.href = href;
+                    a.textContent = label;
+                    a.rel = 'noopener' + (external ? ' noreferrer' : '');
+                    if (external) a.target = '_blank';
+                    el.appendChild(a);
+                };
+                if (contact.phone) addLink('tel:' + contact.phone.replace(/\s+/g, ''), 'Anrufen: ' + contact.phone, false);
+                if (contact.url) addLink(contact.url, 'Termin vereinbaren', true);
+                if (contact.email) addLink('mailto:' + contact.email, 'E-Mail schreiben', false);
+                if (contact.exposeUrl) addLink(contact.exposeUrl, 'Exposé ansehen', true);
+                messages.appendChild(el);
+                el.scrollIntoView({ block: 'end' });
+            };
+
+            const contactCardJustShown = () =>
+                messages.lastElementChild?.classList.contains('msg--contact') === true;
+
+            const showThinking = () => {
+                thinking = document.createElement('div');
+                thinking.className = 'msg msg--bot dots';
+                thinking.setAttribute('aria-label', 'Concierge denkt nach');
+                for (let i = 0; i < 3; i++) thinking.appendChild(document.createElement('span'));
+                messages.appendChild(thinking);
+                thinking.scrollIntoView({ block: 'end' });
+            };
+            const clearThinking = () => { thinking?.remove(); thinking = null; };
+
+            if (cfg.greeting) appendBubble('bot', cfg.greeting);
+
+            form.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                if (loading) return;
+                const content = input.value.trim();
+                if (!content) return;
+
+                history.push({ role: 'user', content });
+                if (history.length > MAX_HISTORY) history.splice(0, history.length - MAX_HISTORY);
+                appendBubble('user', content);
+                input.value = '';
+                loading = true;
+                sendBtn.disabled = true;
+                showThinking();
+
+                try {
+                    const res = await fetch(cfg.endpoint, {
+                        method: 'POST',
+                        headers: { 'content-type': 'application/json' },
+                        body: JSON.stringify({ propertyId: cfg.propertyId, messages: history, room: null, pois: [] })
+                    });
+                    clearThinking();
+
+                    if (!res.ok) {
+                        let reason = '';
+                        try { reason = (await res.json()).reason ?? ''; } catch { /* generic below */ }
+                        if (res.status === 429 && reason === 'daily') {
+                            appendBubble('bot', 'Das Fragen-Kontingent für heute ist aufgebraucht.');
+                            if (hasContact) appendContactCard((contact?.name ?? 'Ihr Ansprechpartner') + ' beantwortet Ihre Fragen gern persönlich:');
+                            return;
+                        }
+                        appendBubble('bot', res.status === 429 ?
+                            'Zu viele Anfragen. Bitte warte einen Moment und versuch es erneut.' :
+                            'Da ist etwas schiefgelaufen. Bitte versuch es gleich nochmal.');
+                        return;
+                    }
+
+                    const data = await res.json();
+                    const answer = typeof data.answer === 'string' ? data.answer : '';
+                    if (!answer) {
+                        appendBubble('bot', 'Da ist etwas schiefgelaufen. Bitte versuch es gleich nochmal.');
+                        return;
+                    }
+                    history.push({ role: 'assistant', content: answer });
+                    if (history.length > MAX_HISTORY) history.splice(0, history.length - MAX_HISTORY);
+                    appendBubble('bot', answer);
+                    userTurns += 1;
+                    if (data.fallback === true && hasContact && !fallbackCardShown && !contactCardJustShown()) {
+                        fallbackCardShown = true;
+                        appendContactCard('Am schnellsten hilft Ihnen ' + (contact?.name ?? 'Ihr Ansprechpartner') + ' direkt weiter:');
+                    } else if (userTurns >= softLimit && !contactCardShown && hasContact && !contactCardJustShown()) {
+                        contactCardShown = true;
+                        appendContactCard('Gern können Sie alles Weitere direkt mit ' + (contact?.name ?? 'Ihrem Ansprechpartner') + ' besprechen:');
+                    }
+                } catch (err) {
+                    console.warn('Concierge request failed:', err);
+                    clearThinking();
+                    appendBubble('bot', 'Da ist etwas schiefgelaufen. Bitte versuch es gleich nochmal.');
+                } finally {
+                    loading = false;
+                    sendBtn.disabled = false;
+                }
+            });
+        })();
+    </script>
+</body>
+</html>

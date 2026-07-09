@@ -77,7 +77,12 @@ const buildPublic = {
         // request, no GDPR exposure (fonts.googleapis.com leaks visitor IPs —
         // LG München territory for a German real-estate product).
         copy({
-            targets: [{ src: 'src/fonts/*.woff2', dest: 'public/fonts' }]
+            targets: [
+                { src: 'src/fonts/*.woff2', dest: 'public/fonts' },
+                // Standalone concierge chat page (phones navigate here; a plain
+                // document is the one shape the iOS keyboard can't break).
+                { src: 'src/chat.html', dest: 'public' }
+            ]
         }),
         // The visitor bundle ships the full PlayCanvas engine — unminified it
         // was 3.0 MB (~680 KB gzip). Terser roughly halves the gzip size and,

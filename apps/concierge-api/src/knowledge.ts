@@ -7,6 +7,16 @@
  * purely additive change with no schema migration.
  */
 
+/**
+ * Who the assistant is talking to. Drives the persona line of the system
+ * prompt: 'fewo' = vacation-rental guest, 'kauf' = prospective buyer viewing a
+ * sales listing, 'miete' = prospective tenant. Defaults to 'fewo' so existing
+ * KB files stay valid.
+ */
+export type PropertyContext = 'fewo' | 'kauf' | 'miete';
+
+const PROPERTY_CONTEXTS: readonly PropertyContext[] = ['fewo', 'kauf', 'miete'];
+
 /** Localized label, keyed by language code (e.g. "de", "en"). */
 export interface LocalizedText {
   de: string;
@@ -33,10 +43,19 @@ export interface Fact {
 export interface KnowledgeBase {
   propertyId: string;
   displayName: string;
+  /** Audience the assistant addresses (see PropertyContext). */
+  context: PropertyContext;
   rooms: Room[];
   facts: Fact[];
   /** Localized "I don't know" message used when a question is out of scope. */
   fallback: LocalizedText;
+  /**
+   * Optional brand voice: a short style instruction for the assistant's tone
+   * (per broker/customer, e.g. "hanseatisch zurückhaltend, keine Superlative").
+   * Keep it to a few sentences — it lives in the cached prompt prefix, so it
+   * costs almost nothing per message, but it is not the place for a brand book.
+   */
+  voice?: string;
 }
 
 /** A function that resolves a propertyId to its KB, or null if unknown. */
@@ -104,6 +123,20 @@ export function validateKnowledge(raw: unknown): KnowledgeBase {
   const propertyId = requireString(raw, 'propertyId', 'knowledge base');
   const displayName = requireString(raw, 'displayName', 'knowledge base');
 
+  const rawContext = raw['context'];
+  let context: PropertyContext = 'fewo';
+  if (rawContext !== undefined) {
+    if (
+      typeof rawContext !== 'string' ||
+      !PROPERTY_CONTEXTS.includes(rawContext as PropertyContext)
+    ) {
+      throw new KnowledgeValidationError(
+        `knowledge base: "context" must be one of ${PROPERTY_CONTEXTS.join(', ')}`,
+      );
+    }
+    context = rawContext as PropertyContext;
+  }
+
   const rawRooms = raw['rooms'];
   if (!Array.isArray(rawRooms)) {
     throw new KnowledgeValidationError('knowledge base: "rooms" must be an array');
@@ -152,7 +185,20 @@ export function validateKnowledge(raw: unknown): KnowledgeBase {
 
   const fallback = validateLocalizedText(raw['fallback'], 'knowledge base.fallback');
 
-  return { propertyId, displayName, rooms, facts, fallback };
+  const rawVoice = raw['voice'];
+  let voice: string | undefined;
+  if (rawVoice !== undefined) {
+    if (typeof rawVoice !== 'string' || rawVoice.length === 0 || rawVoice.length > 1500) {
+      throw new KnowledgeValidationError(
+        'knowledge base: "voice" must be a non-empty string of at most 1500 characters',
+      );
+    }
+    voice = rawVoice;
+  }
+
+  return voice !== undefined
+    ? { propertyId, displayName, context, rooms, facts, fallback, voice }
+    : { propertyId, displayName, context, rooms, facts, fallback };
 }
 
 /**

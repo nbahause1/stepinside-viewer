@@ -74,9 +74,17 @@ export async function handleConcierge(
   const rateKey = deps.clientIp || 'unknown';
   const rate = await deps.rateLimiter.check(rateKey);
   if (!rate.allowed) {
+    // `reason` lets the client tailor its message: 'burst' -> "please wait",
+    // 'daily' -> terminal for today, show the broker contact card instead.
+    const reason = rate.scope ?? 'burst';
     return {
       status: 429,
-      body: { error: 'Too many requests. Please slow down.' },
+      body: {
+        error: reason === 'daily'
+          ? 'Daily question limit reached for this property.'
+          : 'Too many requests. Please slow down.',
+        reason,
+      },
       retryAfterSeconds: rate.retryAfterSeconds,
     };
   }
@@ -153,8 +161,11 @@ export async function handleConcierge(
             properties: {
               answer: { type: 'string' },
               focus: { type: ['string', 'null'] },
+              // True when the model answered with the fallback message (question
+              // not covered by the KB) — the client renders contact buttons then.
+              fallback: { type: 'boolean' },
             },
-            required: ['answer', 'focus'],
+            required: ['answer', 'focus', 'fallback'],
             additionalProperties: false,
           },
         },
@@ -165,17 +176,19 @@ export async function handleConcierge(
     // unsafe answer. Default to the German fallback as the property's primary
     // language; the system prompt otherwise handles per-language fallbacks.
     if (message.stop_reason === 'refusal') {
-      return { status: 200, body: { answer: kb.fallback.de, focus: null } };
+      return { status: 200, body: { answer: kb.fallback.de, focus: null, fallback: true } };
     }
 
     const parsed = parseStructured(extractText(message.content), poiIds);
-    const finalAnswer = parsed.answer.length > 0 ? parsed.answer : kb.fallback.de;
+    const usedServerFallback = parsed.answer.length === 0;
+    const finalAnswer = usedServerFallback ? kb.fallback.de : parsed.answer;
 
     return {
       status: 200,
       body: {
         answer: finalAnswer,
         focus: parsed.focus,
+        fallback: parsed.fallback || usedServerFallback,
         usage: {
           input_tokens: message.usage.input_tokens,
           output_tokens: message.usage.output_tokens,
@@ -212,19 +225,23 @@ function extractText(content: Anthropic.ContentBlock[]): string {
 }
 
 /**
- * Parse the structured { answer, focus } JSON. `focus` is only honoured when it
- * is one of the ids the client offered (so the model can't point the camera at
- * something that doesn't exist); anything else becomes null.
+ * Parse the structured { answer, focus, fallback } JSON. `focus` is only
+ * honoured when it is one of the ids the client offered (so the model can't
+ * point the camera at something that doesn't exist); anything else becomes null.
  */
-function parseStructured(text: string, poiIds: Set<string>): { answer: string; focus: string | null } {
+function parseStructured(
+  text: string,
+  poiIds: Set<string>,
+): { answer: string; focus: string | null; fallback: boolean } {
   try {
-    const obj = JSON.parse(text) as { answer?: unknown; focus?: unknown };
+    const obj = JSON.parse(text) as { answer?: unknown; focus?: unknown; fallback?: unknown };
     const answer = typeof obj.answer === 'string' ? obj.answer.trim() : '';
     const focus = typeof obj.focus === 'string' && poiIds.has(obj.focus) ? obj.focus : null;
-    return { answer, focus };
+    const fallback = obj.fallback === true;
+    return { answer, focus, fallback };
   } catch {
     // Not valid JSON (shouldn't happen with structured output) — treat the raw
     // text as the answer, no focus.
-    return { answer: text, focus: null };
+    return { answer: text, focus: null, fallback: false };
   }
 }
