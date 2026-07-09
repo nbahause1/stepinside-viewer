@@ -186,6 +186,41 @@ const initConcierge = (global: Global) => {
     // the header on screen (full overview of the conversation) and puts the
     // input row directly above the keyboard — no dead strip of our own, and
     // iOS has no reason to auto-pan the field into view.
+    // ---- keyboard debug HUD (?kbdebug in the URL) --------------------------
+    // iOS soft-keyboard behavior cannot be reproduced in any desktop tooling,
+    // so this HUD IS the debugger: it live-prints every value the keyboard
+    // logic depends on, big enough to read in a screen recording. Costs
+    // nothing unless the flag is present.
+    let debugHud: ((event: string) => void) | null = null;
+    if (window.location.search.includes('kbdebug')) {
+        const hud = document.createElement('div');
+        hud.style.cssText =
+            'position:fixed;top:60px;left:8px;z-index:9999;pointer-events:none;' +
+            'background:rgba(180,0,40,0.85);color:#fff;font:700 15px/1.45 monospace;' +
+            'padding:8px 10px;border-radius:8px;white-space:pre;';
+        document.body.appendChild(hud);
+        const log: string[] = [];
+        debugHud = (event: string) => {
+            const v = window.visualViewport;
+            const ae = document.activeElement;
+            log.push(`${(performance.now() / 1000).toFixed(1)}s ${event}`);
+            while (log.length > 5) log.shift();
+            hud.textContent =
+                `innerH ${window.innerHeight}  scrollY ${Math.round(window.scrollY)}\n` +
+                `vv.h ${v ? Math.round(v.height) : '-'}  vv.top ${v ? Math.round(v.offsetTop) : '-'}  ` +
+                `vv.pageTop ${v ? Math.round(v.pageTop) : '-'}\n` +
+                `panelRect.top ${Math.round(panel.getBoundingClientRect().top)}  ` +
+                `h ${panel.style.height || '-'}  tf ${panel.style.transform || '-'}\n` +
+                `focus ${ae === input ? 'INPUT' : (ae?.id || ae?.tagName || '-')}  ` +
+                `val ${input.value.length}ch\n${
+                    log.join('\n')}`;
+        };
+        window.addEventListener('focusin', () => debugHud!('focusin'), true);
+        window.addEventListener('focusout', () => debugHud!('focusout'), true);
+        setInterval(() => debugHud!('tick'), 500);
+    }
+    // ------------------------------------------------------------------------
+
     const vv = window.visualViewport;
     if (vv) {
         // A visual-viewport shrink below this is Safari chrome noise (URL bar
@@ -257,8 +292,10 @@ const initConcierge = (global: Global) => {
                 panel.style.transform = panelShift !== 0 ? `translateY(${panelShift}px)` : '';
                 messages.scrollTop = messages.scrollHeight;
                 cancelDismiss();
+                debugHud?.(`fit kbH=${Math.round(keyboardHeight())} shift=${Math.round(panelShift)}`);
             } else {
                 releasePanel();
+                debugHud?.(`release kbH=${Math.round(keyboardHeight())}`);
                 if (keyboardWasUp && dismissTimer === null && touchDevice.matches &&
                     document.activeElement === input) {
                     dismissTimer = setTimeout(() => {
@@ -267,6 +304,7 @@ const initConcierge = (global: Global) => {
                         if (state.chatOpen && keyboardHeight() <= KEYBOARD_MIN &&
                             document.activeElement === input) {
                             input.blur();
+                            debugHud?.('invariant BLUR');
                         }
                     }, DISMISS_CONFIRM_MS);
                 }
