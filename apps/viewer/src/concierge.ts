@@ -189,12 +189,18 @@ const initConcierge = (global: Global) => {
         vv.addEventListener('resize', applyViewport);
         vv.addEventListener('scroll', applyViewport);
         events.on('chatOpen:changed', applyViewport);
-        // iOS also auto-scrolls the document to "reveal" the focused input,
-        // which fights the fixed panel — pin the page back while chatting.
-        window.addEventListener('scroll', () => {
-            if (state.chatOpen) window.scrollTo(0, 0);
-        });
     }
+
+    // Lock body scroll while the fullscreen chat is open. The panel already
+    // covers everything (position:fixed inset:0), so we only need to stop the
+    // page itself from scrolling — via overflow:hidden, NOT a scroll-position
+    // pin. A JS scrollTo() on every scroll event fights iOS's own focus-scroll
+    // when you tap the input, which cancels the keyboard from re-opening after
+    // the first message (the exact "can't tap the search bar" symptom).
+    events.on('chatOpen:changed', (open: boolean) => {
+        document.documentElement.style.overflow = open ? 'hidden' : '';
+        document.body.style.overflow = open ? 'hidden' : '';
+    });
 
     // Type-anywhere: while the chat is open, every printable key lands in the
     // input no matter what currently holds focus. Focus is fragile here — the
