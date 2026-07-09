@@ -654,6 +654,15 @@ body.tutorial-active #walkHint {
     align-items: flex-start;     // bottom-left corner; panel expands up + to the right
     gap: 10px;
 
+    // The viewer's global `* { touch-action: none }` is for the canvas — on a
+    // text field iOS needs normal touch semantics or focus/keyboard handling
+    // gets flaky. `manipulation` also kills the 300ms double-tap-zoom delay on
+    // the chat buttons. (#chatMessages re-overrides to pan-y further down.)
+    &,
+    * {
+        touch-action: manipulation;
+    }
+
     // dark frosted glass pill, matching the brand + control domes. Secondary to
     // the "Möbliert sehen" pill above it, so it is smaller and a touch quieter.
     #chatToggle {
@@ -1302,6 +1311,11 @@ body.tutorial-active #walkHint {
         font-size: 16px;
         font-weight: 400;
         letter-spacing: 0.01em;
+        // body sets user-select:none for the canvas; an editable field must
+        // allow selection or iOS text editing (cursor, selection handles,
+        // autocorrect bar) misbehaves.
+        user-select: text;
+        -webkit-user-select: text;
 
         &::placeholder {
             color: rgba(240, 240, 242, 0.58);

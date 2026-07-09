@@ -517,6 +517,10 @@ body.tutorial-active #walkHint {
   align-items: flex-start;
   gap: 10px;
 }
+#chatPill,
+#chatPill * {
+  touch-action: manipulation;
+}
 #chatPill #chatToggle {
   pointer-events: auto;
   width: 44px;
@@ -1038,6 +1042,9 @@ body.tutorial-active #walkHint {
   font-size: 16px;
   font-weight: 400;
   letter-spacing: 0.01em;
+  -moz-user-select: text;
+       user-select: text;
+  -webkit-user-select: text;
 }
 #chatPill.chatPill--full #chatInput::-moz-placeholder {
   color: rgba(240, 240, 242, 0.58);

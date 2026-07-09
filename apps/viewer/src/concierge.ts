@@ -1,4 +1,5 @@
 import { IdleLook } from './cameras/idle-look';
+import { shieldFromViewer } from './dom-shield';
 import type { Global } from './types';
 
 // Concierge chat. A small dark-glass pill expands into a chat panel. Two modes,
@@ -95,22 +96,28 @@ const initConcierge = (global: Global) => {
     events.on('chatOpen:changed', (open: boolean) => {
         panel.classList.toggle('is-open', open);
         pill.classList.toggle('is-open', open);
-        // Focus the field right away AND after the entrance transition starts
-        // (AI mode only — scripted mode has no text field). The immediate call
-        // matters: while the scene streams in, a queued rAF can lag seconds
-        // behind, and anything typed until then would miss the field.
-        if (open && mode !== 'scripted') {
+        if (mode === 'scripted') return;
+        if (open) {
+            // Runs synchronously inside the toggle tap's gesture, so iOS also
+            // raises the on-screen keyboard right away.
             input.focus();
-            window.requestAnimationFrame(() => input.focus());
+        } else {
+            // Never leave a focused field behind the closed panel — a focused
+            // field with the keyboard down is the iOS stuck state where the
+            // next tap on it does nothing (see the keyboard invariant below).
+            input.blur();
         }
     });
 
-    // The message list scrolls on its own — wheel and pointer gestures over it
-    // (and over the suggestion buttons) must not reach the canvas and drive the
-    // camera. Shared by both modes.
-    messages.addEventListener('wheel', event => event.stopPropagation());
-    messages.addEventListener('pointerdown', event => event.stopPropagation());
-    suggest.addEventListener('pointerdown', event => event.stopPropagation());
+    // Nothing inside the chat may leak to the viewer underneath: pointer
+    // gestures must not drive the camera, wheel must not zoom, typed keys must
+    // not fire hotkeys — and, critically, clicks must not bubble up to #ui.
+    // ui.ts blurs document.activeElement after EVERY #ui click ("free the
+    // keyboard for hotkeys"); the chat lives inside #ui, so each tap on the
+    // input field focused it and was instantly blurred again by that handler.
+    // On iOS that means the on-screen keyboard closes / never opens — the
+    // "can't type the second message" bug. Shared by both modes.
+    shieldFromViewer(pill, { hasInput: mode !== 'scripted' });
 
     // ---------------------------------------------------------------- scripted
     if (mode === 'scripted') {
@@ -175,43 +182,49 @@ const initConcierge = (global: Global) => {
     // padding the panel's bottom by the keyboard's height. The input row is the
     // panel's last flex child, so the padding pushes it up while the messages
     // list shrinks. keyboardH = layout height − visible height − any top pan.
+    // Touch = coarse pointer. Checked at call time (`.matches`) so hybrid
+    // devices (iPad + trackpad, convertibles) are classified per interaction.
+    const touchDevice = window.matchMedia('(pointer: coarse)');
+
     const vv = window.visualViewport;
-    // Whether the on-screen keyboard is currently raised (derived from the
-    // visual viewport being shorter than the layout viewport). Drives the
-    // tap-to-reopen fix further down. Assumed down when we can't measure.
-    let keyboardUp = false;
     if (vv) {
+        // THE keyboard invariant (touch only): field focused ⟺ keyboard up.
+        // iOS raises the keyboard ONLY when an editable element GAINS focus
+        // inside a user gesture. Whenever iOS dismisses the keyboard on its own
+        // (Done key, scrolling, tab switch …) while the field keeps focus,
+        // tapping the already-focused field is a no-op — no focus change, no
+        // keyboard, "can't type the second message". Tricks to force a change
+        // (synchronous blur()+focus() in touchend) get coalesced by WebKit and
+        // don't work. So instead: the moment the keyboard visibly goes away,
+        // drop focus too. The next tap is then a genuine focus gain inside a
+        // genuine gesture, and iOS brings the keyboard back — native behavior,
+        // no tricks. (Same conclusion as react-spectrum PR #7479: remove the
+        // touch/focus trickery, let iOS do its thing.)
+        let keyboardWasUp = false;
         const applyViewport = () => {
             if (!state.chatOpen) {
                 panel.style.paddingBottom = '';
-                keyboardUp = false;
+                keyboardWasUp = false;
                 return;
             }
+            // Keyboard height = layout viewport − visible height − top pan.
             const keyboardH = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
-            keyboardUp = keyboardH > 0;
-            panel.style.paddingBottom = keyboardH > 0 ? `${keyboardH}px` : '';
-            messages.scrollTop = messages.scrollHeight;
+            const keyboardUp = keyboardH > 0;
+            // The panel is fixed to the LAYOUT viewport (which iOS does NOT
+            // shrink for the keyboard) — pad its bottom so the input row (the
+            // last flex child) rides above the keyboard.
+            panel.style.paddingBottom = keyboardUp ? `${keyboardH}px` : '';
+            if (keyboardUp) messages.scrollTop = messages.scrollHeight;
+            if (keyboardWasUp && !keyboardUp && touchDevice.matches &&
+                document.activeElement === input) {
+                input.blur();
+            }
+            keyboardWasUp = keyboardUp;
         };
         vv.addEventListener('resize', applyViewport);
         vv.addEventListener('scroll', applyViewport);
         events.on('chatOpen:changed', applyViewport);
     }
-
-    // iOS raises the on-screen keyboard ONLY on a focus CHANGE. After the first
-    // answer the field usually still holds focus (we keep it there on purpose so
-    // the guest can keep typing), yet iOS has dismissed the keyboard — so tapping
-    // the already-focused field is a no-op and no keyboard comes up. That is the
-    // "can't type the second message, tapping the bar does nothing" symptom.
-    // Force a real focus change inside the tap gesture: blur, then refocus. Only
-    // when we can see the keyboard is down, so a normal tap while it's already up
-    // never flickers it. touchend is a genuine user gesture, so the refocus is
-    // allowed to summon the keyboard.
-    input.addEventListener('touchend', () => {
-        if (keyboardUp) return;
-        if (document.activeElement !== input) return; // first tap: iOS focuses it itself
-        input.blur();
-        input.focus();
-    });
 
     // Lock body scroll while the fullscreen chat is open. The panel already
     // covers everything (position:fixed inset:0), so we only need to stop the
@@ -296,8 +309,7 @@ const initConcierge = (global: Global) => {
 
     // True when the last thing in the transcript is already a contact card —
     // guards against stacking cards when several fallbacks come in a row.
-    const contactCardJustShown = () =>
-        messages.lastElementChild?.classList.contains('chatMsg--contact') === true;
+    const contactCardJustShown = () => messages.lastElementChild?.classList.contains('chatMsg--contact') === true;
 
     // The fullscreen chat hides the 3D scene, so a focus answer must not fly
     // the camera blind. Instead the answer gets a "show me" action that closes
@@ -354,6 +366,16 @@ const initConcierge = (global: Global) => {
         sendBtn.disabled = value;
     };
 
+    // Hand focus back after a send resolves — desktop/keyboard only. On touch,
+    // an async focus() can never raise the iOS keyboard (no user gesture), it
+    // would only re-create the focused-but-keyboard-down stuck state that the
+    // keyboard invariant above exists to prevent. On touch the field either
+    // still has focus (the send button never took it) and the keyboard is
+    // simply still up, or the guest re-taps the field — which now always works.
+    const refocusAfterSend = () => {
+        if (!touchDevice.matches) input.focus();
+    };
+
     const send = async () => {
         if (loading) return;
         const content = input.value.trim();
@@ -376,7 +398,7 @@ const initConcierge = (global: Global) => {
             clearThinking();
             appendBubble('bot', 'Keine Verbindung. Bitte prüfe dein Internet und versuch es erneut.');
             setLoading(false);
-            input.focus();
+            refocusAfterSend();
             return;
         }
 
@@ -448,34 +470,25 @@ const initConcierge = (global: Global) => {
             appendBubble('bot', 'Da ist etwas schiefgelaufen. Bitte versuch es gleich nochmal.');
         } finally {
             setLoading(false);
-            input.focus();
+            refocusAfterSend();
             scrollToBottom();
         }
     };
 
     // Tapping the send button must NOT blur the input. On iOS a blur closes the
-    // on-screen keyboard, and the post-response input.focus() can't reopen it
-    // (reopening the keyboard requires a user gesture — the async callback isn't
-    // one). Preventing default on pointer/mouse-down keeps focus on the input,
-    // so the keyboard stays up across sends and you can immediately type again.
+    // on-screen keyboard mid-send; keeping focus on the field means the
+    // keyboard simply stays up across sends and the guest can type on.
     // (preventDefault here blocks only the focus shift, not the click event.)
     const keepFocus = (event: Event) => event.preventDefault();
     sendBtn.addEventListener('pointerdown', keepFocus);
     sendBtn.addEventListener('mousedown', keepFocus);
     sendBtn.addEventListener('click', () => {
         send();
-        input.focus();  // synchronous, inside the click gesture — keeps iOS keyboard up
+        input.focus();  // synchronous, inside the tap gesture — legal on iOS, keeps/raises the keyboard
     });
-    // Keyboard inside the chat must NOT reach the viewer's global shortcuts
-    // (1/2/3 switch camera mode, r resets, h toggles help, space play/pause, …).
-    // Without this, typing a normal sentence fires those actions and the mode
-    // switches steal focus from the field — it looks like you "can't type".
-    // Stop every key event from bubbling to the window-level handlers.
-    const swallow = (event: KeyboardEvent) => event.stopPropagation();
-    input.addEventListener('keyup', swallow);
-    input.addEventListener('keypress', swallow);
+    // Enter sends. Key events never reach the viewer's global hotkeys (1/2/3,
+    // r, space, …) — shieldFromViewer() stops them at the panel boundary.
     input.addEventListener('keydown', (event: KeyboardEvent) => {
-        event.stopPropagation();
         if (event.key === 'Enter' && !event.shiftKey) {
             event.preventDefault();
             send();
