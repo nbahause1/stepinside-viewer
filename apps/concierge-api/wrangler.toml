@@ -20,7 +20,7 @@ compatibility_flags = ["nodejs_compat"]
 # KEIN Wildcard: sonst könnte jede fremde Seite auf unsere Kosten Modell-
 # Anfragen stellen.
 [vars]
-ALLOWED_ORIGINS = "https://www.stepinside.eu,https://stepinside.eu"
+ALLOWED_ORIGINS = "https://www.stepinside.eu,https://stepinside.eu,https://stepinside-viewer-git-concierge-endprodukt-nbahauses-projects.vercel.app"
 
 # Production rate limiting should use a KV namespace or Durable Object so that
 # limits are shared across isolates (see KvRateLimiter in src/ratelimit.ts).
