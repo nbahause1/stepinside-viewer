@@ -1,4 +1,3 @@
-import { IdleLook } from './cameras/idle-look';
 import { shieldFromViewer } from './dom-shield';
 import type { Global } from './types';
 
@@ -156,36 +155,19 @@ const initConcierge = (global: Global) => {
     }
 
     // -------------------------------------------------------------------- ai
-    // AI mode takes over the whole viewport like a native chat app (Claude /
-    // Gemini style): same DOM as the corner panel, restyled via this modifier.
-    // Scripted mode keeps the small corner panel above.
-    pill.classList.add('chatPill--full');
-
-    // While the fullscreen chat covers the scene, stop the idle camera drift —
-    // otherwise the splat keeps re-rendering behind the opaque panel and the
-    // wasted GPU/main-thread work makes typing feel laggy on weaker machines.
-    let idleWasSuppressed = false;
-    events.on('chatOpen:changed', (open: boolean) => {
-        if (open) {
-            idleWasSuppressed = IdleLook.suppressed;
-            IdleLook.suppressed = true;
-        } else {
-            IdleLook.suppressed = idleWasSuppressed;
-        }
-    });
+    // AI mode uses the SAME small glass corner panel as scripted mode — the
+    // scan stays visible behind it. (There was a fullscreen chat-app variant,
+    // .chatPill--full; it lost the fight against the iOS keyboard: a viewport-
+    // filling fixed panel gets displaced by every keyboard mechanism iOS has.
+    // The small bottom-anchored overlay is what native chat widgets use, and
+    // iOS's own "reveal the input" shove moves it roughly where it belongs —
+    // we only fine-pin it below.) All the current logic — backend contract,
+    // limits, contact cards, focus jumps, keyboard invariant — is unchanged.
 
     // Touch = coarse pointer. Checked at call time (`.matches`) so hybrid
     // devices (iPad + trackpad, convertibles) are classified per interaction.
     const touchDevice = window.matchMedia('(pointer: coarse)');
 
-    // Mobile keyboard handling. The panel is position:fixed/inset:0 against the
-    // LAYOUT viewport, which iOS Safari does NOT shrink when the on-screen
-    // keyboard opens — it shrinks/pans the VISUAL viewport instead. While the
-    // keyboard is up we therefore fit the panel to exactly the VISIBLE area:
-    // height = vv.height, shifted down by any pan (vv.offsetTop). That keeps
-    // the header on screen (full overview of the conversation) and puts the
-    // input row directly above the keyboard — no dead strip of our own, and
-    // iOS has no reason to auto-pan the field into view.
     // ---- keyboard debug HUD (?kbdebug in the URL) --------------------------
     // iOS soft-keyboard behavior cannot be reproduced in any desktop tooling,
     // so this HUD IS the debugger: it live-prints every value the keyboard
@@ -209,8 +191,8 @@ const initConcierge = (global: Global) => {
                 `innerH ${window.innerHeight}  scrollY ${Math.round(window.scrollY)}\n` +
                 `vv.h ${v ? Math.round(v.height) : '-'}  vv.top ${v ? Math.round(v.offsetTop) : '-'}  ` +
                 `vv.pageTop ${v ? Math.round(v.pageTop) : '-'}\n` +
-                `panelRect.top ${Math.round(panel.getBoundingClientRect().top)}  ` +
-                `h ${panel.style.height || '-'}  tf ${panel.style.transform || '-'}\n` +
+                `pillRect.btm ${Math.round(pill.getBoundingClientRect().bottom)}  ` +
+                `tf ${pill.style.transform || '-'}\n` +
                 `focus ${ae === input ? 'INPUT' : (ae?.id || ae?.tagName || '-')}  ` +
                 `val ${input.value.length}ch\n${
                     log.join('\n')}`;
@@ -256,50 +238,42 @@ const initConcierge = (global: Global) => {
             }
         };
 
-        // Cumulative correction currently applied to the panel (px, downwards).
-        let panelShift = 0;
-        const releasePanel = () => {
-            panel.style.height = '';
-            panel.style.transform = '';
-            panel.style.transition = '';
-            panelShift = 0;
+        // Cumulative correction currently applied to the pill (px, downwards).
+        let pillShift = 0;
+        const releasePill = () => {
+            pill.style.transform = '';
+            pill.style.transition = '';
+            pillShift = 0;
         };
 
-        // Fit the panel to exactly the VISIBLE area, so the header stays on
-        // screen and the input row sits right on the keyboard. iOS displaces
-        // fixed elements in more than one way while the keyboard is up
-        // (visual-viewport pan, focus-scroll, the notorious fixed-acts-like-
-        // absolute conversion) — predicting which one happened is a losing
-        // game. So measure where the panel's top edge actually ended up and
-        // shift by the delta to the visible top (vv.offsetTop in client
-        // coords — true under every mechanism). The entrance transition
-        // animates transform, so it must be off while we correct — otherwise
-        // the corrections lag behind the measurements and oscillate.
-        const fitPanel = () => {
-            panel.style.transition = 'none';
-            panel.style.height = `${vv.height}px`;
-            const delta = vv.offsetTop - panel.getBoundingClientRect().top;
+        // Keep the small overlay riding ABOVE the on-screen keyboard. iOS
+        // mostly shoves the page up by itself to reveal the focused input,
+        // but (measured on-device with the HUD) sometimes without firing a
+        // single visualViewport event, and not always by the right amount.
+        // So: measure where the pill's bottom actually is and pin it to the
+        // visible bottom (vv.offsetTop + vv.height, in client coords — true
+        // under every displacement mechanism iOS has). Delta-based, so when
+        // iOS already shoved correctly this is a no-op.
+        const PILL_MARGIN = 14; // matches the pill's CSS bottom offset
+        const fitPill = () => {
+            pill.style.transition = 'none';
+            const target = vv.offsetTop + vv.height - PILL_MARGIN;
+            const delta = target - pill.getBoundingClientRect().bottom;
             if (delta !== 0) {
-                panelShift += delta;
-                panel.style.transform = panelShift !== 0 ? `translateY(${panelShift}px)` : '';
-                if (Math.abs(delta) > 2) debugHud?.(`pin Δ${Math.round(delta)} shift=${Math.round(panelShift)}`);
+                pillShift += delta;
+                pill.style.transform = pillShift !== 0 ? `translateY(${pillShift}px)` : '';
+                if (Math.abs(delta) > 2) debugHud?.(`pin Δ${Math.round(delta)} shift=${Math.round(pillShift)}`);
             }
         };
 
-        // ACTIVE pinning while the keyboard is up. The re-focus displacement
-        // (tap the field for message 2 → iOS shoves the whole page up to
-        // "reveal" the input) fires NO visualViewport event at all — measured
-        // on-device: the panel, header and even the debug HUD slid off-screen
-        // while resize/scroll stayed silent. Event listeners alone therefore
-        // can't hold the layout. This rAF loop re-measures every frame and
-        // pins the panel to the visible area no matter what iOS does; it runs
-        // only while chat is open AND the keyboard is up (the scene render
-        // loop is idle then — IdleLook is suppressed — so this is cheap).
+        // ACTIVE pinning while the keyboard is up: a rAF loop re-measures
+        // every frame, so silent displacements can't move the chat off the
+        // keyboard. Runs only while chat is open AND the keyboard is up.
         let pinRaf = 0;
         const pinLoop = () => {
             pinRaf = 0;
             if (!state.chatOpen || keyboardHeight() <= KEYBOARD_MIN) return;
-            fitPanel();
+            fitPill();
             pinRaf = requestAnimationFrame(pinLoop);
         };
         const stopPin = () => {
@@ -311,7 +285,7 @@ const initConcierge = (global: Global) => {
 
         const applyViewport = () => {
             if (!state.chatOpen) {
-                releasePanel();
+                releasePill();
                 stopPin();
                 keyboardWasUp = false;
                 cancelDismiss();
@@ -319,13 +293,13 @@ const initConcierge = (global: Global) => {
             }
             const keyboardUp = keyboardHeight() > KEYBOARD_MIN;
             if (keyboardUp) {
-                fitPanel();
+                fitPill();
                 messages.scrollTop = messages.scrollHeight;
                 if (pinRaf === 0) pinRaf = requestAnimationFrame(pinLoop);
                 cancelDismiss();
-                debugHud?.(`fit kbH=${Math.round(keyboardHeight())} shift=${Math.round(panelShift)}`);
+                debugHud?.(`fit kbH=${Math.round(keyboardHeight())} shift=${Math.round(pillShift)}`);
             } else {
-                releasePanel();
+                releasePill();
                 stopPin();
                 debugHud?.(`release kbH=${Math.round(keyboardHeight())}`);
                 if (keyboardWasUp && dismissTimer === null && touchDevice.matches &&
@@ -437,23 +411,7 @@ const initConcierge = (global: Global) => {
     // guards against stacking cards when several fallbacks come in a row.
     const contactCardJustShown = () => messages.lastElementChild?.classList.contains('chatMsg--contact') === true;
 
-    // The fullscreen chat hides the 3D scene, so a focus answer must not fly
-    // the camera blind. Instead the answer gets a "show me" action that closes
-    // the chat and then jumps the camera.
-    const appendShowAction = (camera: NonNullable<typeof pois[number]['camera']>, label: string) => {
-        const btn = document.createElement('button');
-        btn.type = 'button';
-        btn.className = 'chatChip chatAction';
-        btn.textContent = `Im Rundgang zeigen: ${label}`;
-        btn.addEventListener('click', () => {
-            state.chatOpen = false;
-            events.fire('focusPoi', camera);
-        });
-        messages.appendChild(btn);
-        scrollToBottom();
-    };
-
-    // Greeting as the first bot bubble, so the empty fullscreen app has a
+    // Greeting as the first bot bubble, so the empty panel has a
     // starting point (mirrors the scripted panel).
     const greeting = cfg?.greeting;
     if (greeting) appendBubble('bot', greeting);
@@ -570,10 +528,10 @@ const initConcierge = (global: Global) => {
                 history.push({ role: 'assistant', content: answer });
                 if (history.length > MAX_HISTORY) history.splice(0, history.length - MAX_HISTORY);
                 appendBubble('bot', answer);
-                // If the answer is about a locatable object, offer to show it
-                // (the fullscreen chat covers the scene, so no blind camera fly).
+                // If the answer is about a locatable object, glide the camera
+                // there — the scan is visible behind the small panel.
                 const poi = data.focus ? pois.find(p => p.id === data.focus) : undefined;
-                if (poi) appendShowAction(poi.camera, poi.label);
+                if (poi?.camera) events.fire('focusPoi', poi.camera);
                 userTurns += 1;
                 if (data.fallback === true && hasContact && !fallbackCardShown && !contactCardJustShown()) {
                     // The bot couldn't answer -> hand over with tap-able actions,
