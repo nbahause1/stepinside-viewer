@@ -42,6 +42,7 @@ const copied = [];
 for (const f of readdirSync(src)) {
   const isArtifact =
     f === 'index.html' || f === 'index.css' || f === 'index.js' ||
+    f === 'chat.html' ||  // standalone concierge chat page (phone handoff)
     /^(index-|tour-generator-).*\.js$/.test(f) ||
     f === 'settings.json';
   if (isArtifact) {

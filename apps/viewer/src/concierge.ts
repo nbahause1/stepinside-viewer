@@ -87,6 +87,17 @@ const initConcierge = (global: Global) => {
     // Open/close is state-driven so anything else (e.g. Esc handling) can toggle
     // it; the Proxy fires `chatOpen:changed`. Shared by both modes.
     toggle.addEventListener('click', () => {
+        // Touch devices in AI mode hand off to the standalone chat page
+        // (chat.html, same directory). The in-viewer overlay lost a five-round
+        // war against the iOS on-screen keyboard — every fixed-position chat
+        // over the WebGL canvas gets displaced or cancels the keyboard; a
+        // plain scrolling document has none of these problems. Back button
+        // returns to the tour (bfcache keeps the scene alive). Desktop keeps
+        // the overlay panel — no on-screen keyboard, no war.
+        if (mode !== 'scripted' && window.matchMedia('(pointer: coarse)').matches) {
+            window.location.href = 'chat.html';
+            return;
+        }
         state.chatOpen = !state.chatOpen;
     });
     closeBtn.addEventListener('click', () => {
