@@ -221,35 +221,55 @@ const initConcierge = (global: Global) => {
             }
         };
 
+        // Cumulative correction currently applied to the panel (px, downwards).
+        let panelShift = 0;
+        const releasePanel = () => {
+            panel.style.height = '';
+            panel.style.transform = '';
+            panel.style.transition = '';
+            panelShift = 0;
+        };
+
         const applyViewport = () => {
             if (!state.chatOpen) {
-                panel.style.height = '';
-                panel.style.transform = '';
+                releasePanel();
                 keyboardWasUp = false;
                 cancelDismiss();
                 return;
             }
             const keyboardUp = keyboardHeight() > KEYBOARD_MIN;
             if (keyboardUp) {
+                // Fit the panel to exactly the VISIBLE area, so the header
+                // stays on screen and the input row sits right on the keyboard.
+                // iOS displaces fixed elements in more than one way while the
+                // keyboard is up (visual-viewport pan, focus-scroll, the
+                // notorious fixed-acts-like-absolute conversion) — predicting
+                // which one happened is a losing game. So measure where the
+                // panel's top edge actually ended up and shift by the delta to
+                // the visible top (vv.offsetTop in client coords — true under
+                // every mechanism). Re-runs on every vv event; delta becomes 0
+                // once settled. The entrance transition animates transform, so
+                // it must be off while we correct — otherwise the corrections
+                // lag behind the measurements and oscillate.
+                panel.style.transition = 'none';
                 panel.style.height = `${vv.height}px`;
-                panel.style.transform = vv.offsetTop > 0 ? `translateY(${vv.offsetTop}px)` : '';
+                panelShift += vv.offsetTop - panel.getBoundingClientRect().top;
+                panel.style.transform = panelShift !== 0 ? `translateY(${panelShift}px)` : '';
                 messages.scrollTop = messages.scrollHeight;
-            } else {
-                panel.style.height = '';
-                panel.style.transform = '';
-            }
-            if (keyboardUp) {
                 cancelDismiss();
-            } else if (keyboardWasUp && dismissTimer === null && touchDevice.matches &&
-                       document.activeElement === input) {
-                dismissTimer = setTimeout(() => {
-                    dismissTimer = null;
-                    // Re-check: still open, still down, still focused.
-                    if (state.chatOpen && keyboardHeight() <= KEYBOARD_MIN &&
-                        document.activeElement === input) {
-                        input.blur();
-                    }
-                }, DISMISS_CONFIRM_MS);
+            } else {
+                releasePanel();
+                if (keyboardWasUp && dismissTimer === null && touchDevice.matches &&
+                    document.activeElement === input) {
+                    dismissTimer = setTimeout(() => {
+                        dismissTimer = null;
+                        // Re-check: still open, still down, still focused.
+                        if (state.chatOpen && keyboardHeight() <= KEYBOARD_MIN &&
+                            document.activeElement === input) {
+                            input.blur();
+                        }
+                    }, DISMISS_CONFIRM_MS);
+                }
             }
             keyboardWasUp = keyboardUp;
         };
