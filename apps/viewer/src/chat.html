@@ -15,6 +15,20 @@
     <title>Concierge</title>
     <style>
         :root { color-scheme: dark; }
+
+        /* Weicher Übergang Rundgang <-> Chat statt hartem Seitensprung.
+           Cross-document View Transition: die Seite gleitet leicht herein
+           während die andere ausblendet. Browser ohne Support navigieren
+           einfach sofort (kein Bruch); reduced-motion schaltet es ab. */
+        @view-transition { navigation: auto; }
+        ::view-transition-old(root) { animation: vtFadeOut 240ms cubic-bezier(0.4, 0, 0.2, 1) both; }
+        ::view-transition-new(root) { animation: vtRiseIn 340ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+        @keyframes vtFadeOut { to { opacity: 0; } }
+        @keyframes vtRiseIn { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: translateY(0); } }
+        @media (prefers-reduced-motion: reduce) {
+            ::view-transition-old(root), ::view-transition-new(root) { animation: none; }
+        }
+
         * { box-sizing: border-box; margin: 0; }
         html { background: #0b0b0d; }
         body {
