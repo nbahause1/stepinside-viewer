@@ -38,8 +38,19 @@ const STAGING_AERIAL_INDEX = 0;
 // a real generation without making (paid) API calls.
 const DEMO_DELAY_MS = 6000;
 
+// Feature flag: the AI staging ("Möbliert sehen") feature is globally DISABLED
+// for now (product decision 2026-07-10 — the cheap 2D staging cheapens the
+// premium experience, mobile and desktop alike). The whole feature is kept
+// intact; flip this back to true to re-enable it everywhere. Typed :boolean so
+// the compiler doesn't treat the rest of initStaging as unreachable.
+const STAGING_ENABLED: boolean = false;
+
 const initStaging = (global: Global) => {
     const { app, settings, state, events, renderer, config } = global;
+
+    // Globally disabled via the flag above — leave the pill hidden and do
+    // nothing, regardless of what settings.json says. Re-enable by flipping it.
+    if (!STAGING_ENABLED) return;
 
     // Cast-through config (not part of the validated schema core; see v2.ts).
     const cfg = settings.staging;
