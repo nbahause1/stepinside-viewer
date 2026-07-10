@@ -3126,32 +3126,10 @@ body.staging-open {
 }
 
 
-/* -- "alive" specular sheen: a slow light sweep over the hero glass --
-   Subtle moving highlight (like light gliding across glass) on the two
-   always-visible elements. Pure CSS -> works on iOS Safari. The ::after is
-   clipped to the pill via border-radius:inherit; no parent overflow needed. */
-#brandDome .brandMark { position: relative; }
-#brandDome .brandMark::after,
-#controlDome::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  pointer-events: none;
-  background: linear-gradient(105deg, transparent 36%, rgba(255,255,255,0.16) 50%, transparent 64%);
-  background-size: 220% 100%;
-  background-position: 160% 0;
-  animation: lgSheen 12s ease-in-out infinite;
-}
-@keyframes lgSheen {
-  0%   { background-position: 160% 0; }
-  45%  { background-position: -60% 0; }
-  100% { background-position: -60% 0; }
-}
-@media (prefers-reduced-motion: reduce) {
-  #brandDome .brandMark::after,
-  #controlDome::after { animation: none; opacity: 0; }
-}
+/* The "alive" specular sheen (a slow moving light sweep over the brand mark
+   and the control dome / buttons) was REMOVED 2026-07-10 on request. The glass
+   shape, borders and shadows carry the premium feel without the animated glint.
+   Recoverable from git history (keyframes lgSheen + the two ::after rules). */
 
 
 /* ================================================================
