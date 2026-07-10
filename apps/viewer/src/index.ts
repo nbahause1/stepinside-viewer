@@ -560,25 +560,71 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
     // (navTarget:clear), with a short fade so a step isn't hard-clipped. The tap
     // that starts the walk is itself the gesture that unlocks audio on iOS, and
     // this runs in the viewer document, so it works embedded AND standalone.
-    const footstepsUrl = sfx?.footsteps;
-    if (footstepsUrl) {
+    // Game-audio approach: instead of ONE looping clip (mechanical + repetitive),
+    // play discrete single-step samples at a walking cadence — each a random pick
+    // with pitch + volume jitter and no immediate repeat. That variation is what
+    // makes footsteps read as real rather than looped. Configured via
+    // settings.sound.footstepSet (array of urls); falls back to the legacy single
+    // `footsteps` loop when no set is given.
+    const footstepSet = (sfx as unknown as { footstepSet?: unknown } | undefined)?.footstepSet;
+    if (Array.isArray(footstepSet) && footstepSet.length > 0) {
+        const baseVol = clamp01(sfx?.footstepsVolume ?? 0.28);
+        const STEP_MS = 720;        // ~walking cadence (one foot every ~0.72 s)
+        const TIME_JITTER = 70;     // ± ms so the rhythm never sounds robotic
+        const RATE_JITTER = 0.07;   // ± playback rate (pitch/speed per step) — subtle, controlled
+        const VOL_JITTER = 0.20;    // ± per-step loudness
+        const howls = (footstepSet as string[]).map((src) =>
+            new Howl({ src: [src], volume: baseVol, preload: true }));
+        const jit = (spread: number) => 1 + (Math.random() * 2 - 1) * spread;
+        let last = -1;
+        let timer: ReturnType<typeof setTimeout> | null = null;
+        let walking = false;
+
+        const playStep = () => {
+            let i = Math.floor(Math.random() * howls.length);
+            if (howls.length > 1 && i === last) i = (i + 1) % howls.length; // no immediate repeat
+            last = i;
+            const h = howls[i];
+            const sid = h.play();
+            h.rate(jit(RATE_JITTER), sid);
+            h.volume(clamp01(baseVol * jit(VOL_JITTER)), sid);
+        };
+        const schedule = () => {
+            if (!walking) return;
+            timer = setTimeout(() => {
+                if (!walking) return;
+                playStep();
+                schedule();
+            }, STEP_MS + (Math.random() * 2 - 1) * TIME_JITTER);
+        };
+
+        events.on('navTarget:set', () => {
+            if (state.cameraMode !== 'walk') return;   // also fires for click-to-fly
+            if (walking) return;
+            walking = true;
+            playStep();     // first footfall right on the tap (also the iOS unlock gesture)
+            schedule();
+        });
+        events.on('navTarget:clear', () => {
+            walking = false;
+            if (timer !== null) { clearTimeout(timer); timer = null; }
+        });
+    } else if (sfx?.footsteps) {
+        // Legacy fallback: one looping clip gated by fade (for configs that still
+        // ship a single footsteps.mp3 instead of a footstepSet).
         const vol = clamp01(sfx?.footstepsVolume ?? 0.5);
-        const steps = new Howl({ src: [footstepsUrl], loop: true, volume: 0, preload: true });
+        const steps = new Howl({ src: [sfx.footsteps], loop: true, volume: 0, preload: true });
         let id: number | null = null;
 
         events.on('navTarget:set', () => {
-            // Only in walk mode — navTarget:set also fires for click-to-fly.
             if (state.cameraMode !== 'walk') return;
-            // Keep the loop RUNNING throughout; gate audibility with a Howler
-            // fade instead of stop/play (click-free + reliable on iOS). The
-            // position keeps advancing, so the steps still vary from walk to walk.
             if (id === null || !steps.playing(id)) id = steps.play();
             steps.fade(steps.volume(id) as number, vol, 60, id);
         });
 
         events.on('navTarget:clear', () => {
             if (id !== null && steps.playing(id)) {
-                steps.fade(steps.volume(id) as number, 0, 90, id); // silence; keep looping
+                steps.fade(steps.volume(id) as number, 0, 90, id);
             }
         });
     }
