@@ -245,14 +245,12 @@ const init = (global: Global) => {
                 events.fire('analytics', 'cta_click', { cta: interest });
                 q('[data-role="formTitle"]').textContent =
                     interest === 'expose' ? 'Exposé erhalten' : 'Besichtigung anfragen';
-                // The appointment path first asks "ab wann Einzug?" to qualify the
-                // lead; the exposé path goes straight to the form.
-                if (interest === 'besichtigung') {
-                    showStep('timeframe');
-                } else {
-                    timeframe = null;
-                    showStep('form');
-                }
+                // Direct to the form for BOTH paths — the "ab wann Einzug?"
+                // move-in qualifier step was removed (2026-07-10) so the visitor
+                // reaches the form in one tap. timeframe stays null (the step +
+                // its handlers are kept below, unused, to re-enable easily).
+                timeframe = null;
+                showStep('form');
             });
         });
 
@@ -267,18 +265,16 @@ const init = (global: Global) => {
             });
         });
 
-        // Inquiry-pill entry: an appointment request, so it also runs the
-        // "ab wann Einzug?" qualifier first (exposé would skip straight to form).
+        // Inquiry-pill entry: opens the lead form directly (the move-in
+        // qualifier step was removed 2026-07-10).
         openLeadForm = (interestValue: string) => {
             interest = interestValue;
             q('[data-role="formTitle"]').textContent =
                 interestValue === 'expose' ? 'Exposé erhalten' : 'Besichtigung anfragen';
-            if (interestValue === 'besichtigung') {
-                showStep('timeframe');
-            } else {
-                timeframe = null;
-                showStep('form');
-            }
+            // Straight to the form — the "ab wann Einzug?" move-in qualifier
+            // step was removed (2026-07-10). timeframe stays null.
+            timeframe = null;
+            showStep('form');
         };
 
         // -- step 3: mini lead form --------------------------------------------
