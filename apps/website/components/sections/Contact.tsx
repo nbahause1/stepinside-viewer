@@ -28,6 +28,22 @@ export default function Contact() {
       return;
     }
     setStatus("loading");
+
+    // Mirror the lead into the CRM (GHL Speed-to-Lead workflow) via our own
+    // server proxy at /api/lead. Fire-and-forget: Formspree stays the source of
+    // truth for the visible success state, so a CRM hiccup never blocks or
+    // delays the visitor.
+    const lead = new FormData(form);
+    void fetch("/api/lead", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: lead.get("name"),
+        email: lead.get("email"),
+        message: lead.get("message"),
+      }),
+    }).catch(() => {});
+
     try {
       const res = await fetch("https://formspree.io/f/" + config.formspreeId, {
         method: "POST",
