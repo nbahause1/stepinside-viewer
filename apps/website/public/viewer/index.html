@@ -221,17 +221,187 @@
                 display: flex;
                 align-items: center;
                 justify-content: center;
-                /* Plain black — no scene yet, and the wordmark should read as
-                   the only thing on screen. */
+                /* Black base — the arrival film (door opening) plays subdued on
+                   top of it, with the wordmark as the only sharp element. The
+                   base goes transparent during the staged reveal (below) so the
+                   film can dissolve straight into the live scan behind it. */
                 background: #000;
                 font-family: 'Inter', 'Arial', sans-serif;
                 opacity: 1;
-                transition: opacity 0.5s ease;
+                transition: opacity 0.5s ease, background-color 0.7s ease;
                 -webkit-tap-highlight-color: transparent;
             }
             #bootSplash.is-hidden {
                 opacity: 0;
                 pointer-events: none;
+            }
+            /* ——— Staged film→scan hand-off ———
+               Instead of dropping the whole splash in one 500ms fade (loading
+               screen "switches off"), the reveal is choreographed so the film
+               and the scan merge through LIGHT (a long cross-dissolve of two
+               unrelated compositions reads as a muddy double exposure — this
+               doesn't):
+               1. `.is-revealing` (focus pull): logo, vignette and the grading
+                  layer fade first — the film pulls into full focus and
+                  brightness, stepping out of the fog. The black base goes
+                  transparent (invisible: the film covers it) and the splash
+                  stops eating input, so the visitor can already move.
+               2. `.is-flashing` (light flood): the film's own sunlight/flare
+                  motif blooms up and briefly swallows the frame.
+               3. `.is-flashed`: under the peak the film is swapped out
+                  instantly; the light recedes and the live scan is simply
+                  THERE — the room emerges out of the door's light. */
+            #bootSplash.is-revealing {
+                background-color: transparent;
+                pointer-events: none;
+            }
+            #bootSplash.is-revealing .bootFocus,
+            #bootSplash.is-revealing .bootScrim {
+                opacity: 0;
+            }
+            #bootSplash.is-revealing .bootLoader {
+                /* the intro animation fill-holds opacity — clear it so the fade applies */
+                animation: none;
+                opacity: 0;
+                transition: opacity 420ms ease-out;
+            }
+            /* The arrival film: a hand opening a door into warm light, playing
+               muted behind the loader logo to BRIDGE the load. It enters IN
+               MOTION — playback starts a beat BEFORE the fade-in (`.is-on`),
+               so by the time the picture surfaces it is already running and
+               no standing start frame is ever on screen. The parent starts
+               the door SFX (the film's own soundtrack) on our
+               stepinside:doorVideo message, so sound is picture-locked.
+               The film also never STOPS on screen: the light flood is timed
+               against the film's remaining runtime (see the endgame guard in
+               the script), so the frame is swallowed by light before the last
+               frame could ever stand still. A perpetual, near-imperceptible
+               Ken Burns drift on the layer keeps everything breathing on top.
+               The film itself stays SHARP; its soft, darkened loading look
+               comes from the .bootFocus grading layer above it — so the
+               reveal can pull focus by simply fading that layer (opacity-only,
+               GPU-composited; animating `filter` stutters in Safari). */
+            /* Film wrapper: carries the perpetual Ken Burns drift (compositor-
+               interpolated, always fluid) so the video element itself is free
+               for its own entrance move below. */
+            #bootSplash #bootFilm {
+                position: absolute;
+                inset: 0;
+                /* slight over-scale so the drift below never shows an edge */
+                transform: scale(1.08);
+                animation: bootFilmDrift 18s ease-in-out infinite alternate;
+            }
+            #bootSplash video {
+                position: absolute;
+                inset: 0;
+                width: 100%;
+                height: 100%;
+                object-fit: cover;
+                opacity: 0;
+                transform: scale(1);
+                /* The entrance: an eased fade over the ALREADY-RUNNING film —
+                   playback begins just before `.is-on` is set, so the picture
+                   is in motion for every visible millisecond. No zoom here by
+                   design — the wrapper's drift carries the subtle life, the
+                   film's own motion does the rest. */
+                transition: opacity 1100ms cubic-bezier(0.4, 0, 0.2, 1);
+            }
+            #bootSplash video.is-on {
+                opacity: 1;
+            }
+            /* The coda: if the film runs out while the scan still loads, a
+               long compositor-driven zoom takes over ON the last frame the
+               instant 'ended' fires — transform interpolation cannot judder,
+               so the picture keeps travelling smoothly until the light wave
+               takes it. (Later in the file than `.is-on`, so it wins.) */
+            #bootSplash video.is-coda {
+                transform: scale(1.3);
+                transition: opacity 1100ms cubic-bezier(0.4, 0, 0.2, 1),
+                            transform 18000ms cubic-bezier(0.35, 0, 0.55, 0.65);
+            }
+            /* At the light flood's peak the film is swapped out INSTANTLY —
+               it is fully hidden under the flash, so nothing is seen of the
+               swap itself. `.is-film-hidden` does the same when the flood has
+               to crest BEFORE the scan is ready (endgame guard): the film is
+               cloaked under the held light. (Declared after `.is-on` so they
+               win.) */
+            #bootSplash.is-flashed video,
+            #bootSplash.is-film-hidden video {
+                opacity: 0;
+                transition: none;
+            }
+            /* Grading layer over the film while loading: a moderate blur +
+               a DEEP darkening (the still enters dark and the whole arrival
+               keeps travelling toward light — never resting bright). Fading
+               its OPACITY is the focus pull — blurred/dark crossfades into
+               the sharp film beneath, no filter animation involved. */
+            #bootSplash .bootFocus {
+                position: absolute;
+                inset: 0;
+                -webkit-backdrop-filter: blur(7px) saturate(1.05);
+                backdrop-filter: blur(7px) saturate(1.05);
+                background: rgba(0, 0, 0, 0.62);
+                transition: opacity 900ms cubic-bezier(0.4, 0, 0.2, 1);
+            }
+            @keyframes bootFilmDrift {
+                from { transform: scale(1.08); }
+                to   { transform: scale(1.17) translateY(-1.2%); }
+            }
+            /* Scrim between film and logo: a quiet cinematic vignette — slightly
+               deeper in the centre so the white wordmark always reads, without
+               muddying the footage. */
+            #bootSplash .bootScrim {
+                position: absolute;
+                inset: 0;
+                background: radial-gradient(
+                    ellipse at center,
+                    rgba(0, 0, 0, 0.42) 0%,
+                    rgba(0, 0, 0, 0.16) 55%,
+                    rgba(0, 0, 0, 0.55) 100%
+                );
+                transition: opacity 900ms cubic-bezier(0.4, 0, 0.2, 1);
+            }
+            /* The light flood: GOLDEN-HOUR light, not clinical white — the
+               tones are sampled from the film's own end frames (its window
+               light sits around warm cream, the floors in honeyed amber), so
+               the bloom reads as the film's sunlight growing, never as a
+               white screen. Brightest just off-centre where that sunlight
+               sits. Above every splash layer; blooms in with `.is-flashing`,
+               recedes (longer, eased out) with `.is-flashed` — the
+               `.is-flashed` rules are later in the file, so they win while
+               both classes are set. */
+            #bootSplash .bootFlash {
+                position: absolute;
+                inset: 0;
+                z-index: 5;
+                background: radial-gradient(120% 120% at 50% 42%, #fbf1de 0%, #f2dcb8 55%, #e2bd8d 100%);
+                opacity: 0;
+                pointer-events: none;
+            }
+            #bootSplash.is-flashing .bootFlash {
+                opacity: 1;
+                /* bloom with an imperceptible start: the light GROWS out of
+                   the still-running focus pull instead of stepping in
+                   (duration mirrored by FLASH_IN_MS) */
+                transition: opacity 1100ms cubic-bezier(0.55, 0, 0.85, 0.45);
+            }
+            #bootSplash.is-flashed .bootFlash {
+                opacity: 0;
+                /* decelerating recede — the room surfaces out of the light
+                   (duration mirrored by FLASH_OUT_MS) */
+                transition: opacity 1300ms cubic-bezier(0.16, 1, 0.3, 1);
+            }
+            /* If the flood has to HOLD at its peak (film over, scan still
+               loading), the light itself keeps breathing — a slow compositor
+               scale drift, so even the white is never a standing frame. The
+               class stays on through the recede; the drift simply rides the
+               fade-out. */
+            #bootSplash.is-flash-held .bootFlash {
+                animation: bootFlashBreathe 2600ms ease-in-out infinite alternate;
+            }
+            @keyframes bootFlashBreathe {
+                from { transform: scale(1); }
+                to   { transform: scale(1.06); }
             }
             /* The innsyn filling-logo loader (same as the "Möbliert sehen"
                staging loader): a dim base wordmark with a bright copy revealed
@@ -291,12 +461,20 @@
                 100% { clip-path: inset(0 4% 0 0); }
             }
             @media (prefers-reduced-motion: reduce) {
+                #bootSplash video { display: none; }
+                #bootSplash .bootFocus { display: none; }
                 #bootSplash .bootLoader { animation: none; }
                 #bootSplash .bootMark--fill { animation: none; clip-path: inset(0 12% 0 0); }
                 #bootSplash.is-complete .bootMark--fill { clip-path: inset(0 0 0 0); }
             }
         </style>
         <div id="bootSplash" aria-hidden="true">
+            <!-- ?v bumped whenever the film changes, so browsers never play a stale cut. -->
+            <div id="bootFilm">
+                <video id="bootDoor" src="./door-open.mp4?v=5" muted playsinline preload="auto"></video>
+            </div>
+            <div class="bootFocus"></div>
+            <div class="bootScrim"></div>
             <div class="bootLoader">
                 <div class="bootMark bootMark--base">
                     <span class="bootMark__diamond"></span>
@@ -307,6 +485,7 @@
                     <span>innsyn</span>
                 </div>
             </div>
+            <div class="bootFlash"></div>
         </div>
 
         <!-- Peripheral-vision overlay for walk mode: soft, darkened, slightly
@@ -688,6 +867,76 @@
                         </button>
                     </div>
                 </div>
+            </div>
+
+            <!-- Neighbourhood map ("Umgebung"): a glass pill above the concierge
+                 that opens a map overlay — house marker, chips for nearby places,
+                 animated walking route with minutes. MapLibre is lazy-loaded on
+                 first open. Wired in surroundings.ts; hidden without
+                 settings.surroundings data. -->
+            <div id="surroundingsPill" class="hidden">
+                <button id="surroundingsToggle" type="button" aria-label="Umgebung ansehen" title="Umgebung ansehen">
+                    <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true">
+                        <!-- map pin -->
+                        <path d="M12 21 C12 21 5.5 14.8 5.5 10.2 A6.5 6.5 0 0 1 18.5 10.2 C18.5 14.8 12 21 12 21 Z" />
+                        <circle cx="12" cy="10.2" r="2.3" />
+                    </svg>
+                </button>
+            </div>
+            <div id="surroundingsOverlay" role="dialog" aria-label="Umgebung" aria-modal="false">
+                <div id="surroundingsHeader">
+                    <span id="surroundingsTitle">Lage &amp; Umgebung</span>
+                    <button id="surroundingsClose" type="button" aria-label="Schließen" title="Schließen">
+                        <svg width="20" height="20" viewBox="0 0 22 22" aria-hidden="true">
+                            <path d="M6 6 L16 16 M16 6 L6 16" />
+                        </svg>
+                    </button>
+                </div>
+                <!-- Custom-address check ("wie weit ist es zu meiner Arbeit?"):
+                     typing geocodes via Photon, picking a suggestion draws the
+                     live walking route + minutes. Wired in surroundings.ts. -->
+                <div id="surroundingsSearch">
+                    <input id="surroundingsSearchInput" type="text" autocomplete="off" enterkeyhint="search" placeholder="Eigene Adresse prüfen – z.&nbsp;B. Arbeitsweg…" aria-label="Adresse suchen" />
+                    <div id="surroundingsSearchResults" class="hidden" role="listbox"></div>
+                </div>
+                <!-- Travel-mode pills for the searched address (walk/car/transit).
+                     Hidden until an address is picked; times fill in as each
+                     routing service answers. Wired in surroundings.ts. -->
+                <div id="surroundingsModes" class="hidden" role="group" aria-label="Verkehrsmittel">
+                    <button type="button" data-mode="walk">
+                        <svg width="15" height="15" viewBox="0 0 22 22" aria-hidden="true">
+                            <circle cx="12.3" cy="4" r="1.9" />
+                            <path d="M12.3 5.9 L10.9 11.5 L13.4 17.8" />
+                            <path d="M10.9 11.5 L8.5 17.3" />
+                            <path d="M13.7 9.9 L11.4 7.9 L9 9.3" />
+                        </svg>
+                        <span class="surroundingsModeLabel">Zu Fuß</span>
+                        <span class="surroundingsModeMins">…</span>
+                    </button>
+                    <button type="button" data-mode="car">
+                        <svg width="15" height="15" viewBox="0 0 24 24" aria-hidden="true">
+                            <path d="M5 13 L6.5 8.5 a1.8 1.8 0 0 1 1.7 -1.2 h7.6 a1.8 1.8 0 0 1 1.7 1.2 L19 13" />
+                            <path d="M4.5 13 h15 a1 1 0 0 1 1 1 v2.5 h-2 M4.5 13 a1 1 0 0 0 -1 1 v2.5 h2" />
+                            <circle cx="7.5" cy="16.5" r="1.6" />
+                            <circle cx="16.5" cy="16.5" r="1.6" />
+                        </svg>
+                        <span class="surroundingsModeLabel">Auto</span>
+                        <span class="surroundingsModeMins">…</span>
+                    </button>
+                    <button type="button" data-mode="transit">
+                        <svg width="15" height="15" viewBox="0 0 24 24" aria-hidden="true">
+                            <rect x="6" y="3.5" width="12" height="13.5" rx="2.5" />
+                            <path d="M6 9.5 H18 M9.5 20.5 L8 17.5 M14.5 20.5 L16 17.5" />
+                            <circle cx="9.3" cy="13.8" r="0.9" />
+                            <circle cx="14.7" cy="13.8" r="0.9" />
+                        </svg>
+                        <span class="surroundingsModeLabel">Bahn &amp; Bus</span>
+                        <span class="surroundingsModeMins">…</span>
+                    </button>
+                </div>
+                <div id="surroundingsMap"></div>
+                <div id="surroundingsStatus" class="hidden"></div>
+                <div id="surroundingsChips"></div>
             </div>
 
             <!-- AI virtual staging ("Möbliert sehen"): a glass pill bottom-left
@@ -1225,39 +1474,267 @@
                 setTimeout(() => bootSplash.remove(), 600);
             };
 
-            // "Living" arrival. The CSS fill creeps toward ~96% on its own (never
-            // freezing). We reveal the scene when the first frame is ready — but
-            // never before MIN_MS. That minimum is set to the parent's door
-            // "unlock" SFX length (2.9s): on a CACHED scan the frame is ready in
-            // ~1s, but revealing then would drop the room mid-door and stack the
-            // intro sting on top. Holding to ~door-length means the room appears
-            // AS the door finishes and the intro lands on that reveal — the
-            // designed two-part arrival — regardless of load speed. On reveal we
-            // snap to 100%, fade the splash, and post 'stepinside:viewerReady'.
+            // "Living" arrival, staged like a small film — with ONE hard rule:
+            // the visitor never sees a standing frame. Neither the film's
+            // first frame nor its last frame may ever rest on screen.
+            //   Act 1 — the film: playback starts FIRST (a short head start
+            //   before anything is visible), then the frame fades in over the
+            //   already-running picture — by the time it surfaces it is in
+            //   motion, so there is no start-frame still. On its 'playing' we
+            //   cue the parent ('stepinside:doorVideo') to start the door
+            //   SFX — the film's own soundtrack, so sound is picture-locked.
+            //   (Audio must live in the parent: this iframe never receives a
+            //   user gesture before loading.)
+            //   Act 2 — the hand-off: we reveal when the scene's first frame
+            //   is rendered, but never before the film's FINAL moving moments
+            //   (filmHoldMs = the film's real length − the staged hand-off
+            //   lead). The exit rides the film's climax: focus pull, then a
+            //   light flood that swallows the frame and recedes over the live
+            //   scan — the room emerges out of the door's light, always from
+            //   motion, never mixing two compositions. (loaderStart is
+            //   re-anchored to the film's real start; wall-clock rather than
+            //   currentTime, so a stalled or background-paused film can never
+            //   deadlock the arrival.)
+            //   The endgame guard: if the scan needs LONGER than the film,
+            //   the flood does not wait for it — it crests on the film's own
+            //   timeline (timed off the remaining runtime, on top of the
+            //   slow-motion tail) and then HOLDS at its breathing peak, film
+            //   cloaked beneath, until the scene is ready and the light can
+            //   recede over it. So the film visibly stops NEVER: it is always
+            //   swallowed by light while still moving.
+            //   Without a film (reduced motion, error), the hold is just the
+            //   door SFX length (MIN_MS) and the exit is the plain splash
+            //   fade. 'stepinside:viewerReady' (the parent's intro-sting cue)
+            //   is posted at the flood's PEAK — over a held light the intro
+            //   audibly bridges the remaining wait.
             const MIN_MS = 2600;
-            const SNAP_MS = 350;
-            const loaderStart = Date.now();
+            const HEAD_START_MS = 180;    // playback runs this long before the fade-in — visible == moving
+            const HANDOFF_LEAD_MS = 3000; // snap + focus pull + light flood (keep in sync with finishBootSplash)
+            // Film length − hand-off lead, measured from the film's real start.
+            // Kept SHORT on purpose: the light wave starts early and spans the
+            // rest of the film, so the picture is in motion for the entire
+            // hand-off and the recede lands right on the film's end — the
+            // arrival never sits on a stopped frame. Derived from the file's
+            // metadata below; fallback matches the 5s film.
+            let filmHoldMs = 2000;
+            let loaderStart = Date.now();
 
+            const postToParent = (type) => {
+                try {
+                    if (window.parent && window.parent !== window) {
+                        window.parent.postMessage({ type }, '*');
+                    }
+                } catch (e) { /* cross-origin parent: ignore */ }
+            };
+            let doorSignalled = false;
+            const signalDoorVideo = () => {
+                if (doorSignalled) return;
+                doorSignalled = true;
+                postToParent('stepinside:doorVideo');
+            };
+            const doorVideo = window.matchMedia('(prefers-reduced-motion: reduce)')
+                .matches ? null : document.getElementById('bootDoor');
+            if (doorVideo) {
+                // Tell the parent we will cue the door SFX ourselves (when the
+                // film starts) so it cancels its click-anchored fallback timer.
+                postToParent('stepinside:doorVideoArmed');
+
+                // Reveal hold from the file's REAL length, so swapping the film
+                // never needs a constant edit here.
+                const applyDuration = () => {
+                    if (Number.isFinite(doorVideo.duration) && doorVideo.duration > 0) {
+                        filmHoldMs = Math.max(1200, doorVideo.duration * 1000 - HANDOFF_LEAD_MS);
+                    }
+                };
+                if (doorVideo.readyState >= 1) applyDuration();
+                else doorVideo.addEventListener('loadedmetadata', applyDuration, { once: true });
+
+                // Motion must never stop: if the film runs out while the scan
+                // still loads, hand the last frame to the CSS coda zoom the
+                // instant it ends — playback motion flows into transform
+                // motion with no standing frame in between.
+                doorVideo.addEventListener('ended', () => {
+                    doorVideo.classList.add('is-coda');
+                }, { once: true });
+
+                doorVideo.addEventListener('playing', () => {
+                    // Only re-anchor the reveal hold when this start is also the
+                    // SFX start — if the stall timeout already cued the sound,
+                    // shifting the clock now would desync reveal and audio.
+                    if (!doorSignalled) loaderStart = Date.now();
+                    signalDoorVideo();
+                    // Never let the film END on screen (a stopped frame kills
+                    // the premium feel): as it nears its end — because the
+                    // scan needs longer or the light wave is still running —
+                    // ease it into slow motion. The door keeps moving, just
+                    // slower, until the flood swaps the film out under the
+                    // light's peak. In the normal fast path the easing barely
+                    // dips below 1x (imperceptible, SFX stays in sync); only
+                    // long loads stretch the tail. The floor is DYNAMIC: 0.5x
+                    // while the scene is ready (exit already scheduled), but
+                    // 0.35x while the scan still loads — stretching the film
+                    // harder defers the held light, so the visitor spends
+                    // less time in the white. The file is an optical-flow
+                    // 60fps master: 0.35x still shows ~21 unique frames/s —
+                    // slow, never a slideshow.
+                    const guard = setInterval(() => {
+                        if (bootHidden || !bootSplash ||
+                            bootSplash.classList.contains('is-flashed') ||
+                            doorVideo.ended) {
+                            clearInterval(guard);
+                            return;
+                        }
+                        const dur = doorVideo.duration;
+                        if (!Number.isFinite(dur) || dur <= 0 || doorVideo.paused) return;
+                        // Target rate falls linearly across the film's last 45%
+                        // (1x at 55%, floor near the end); eased per tick so the
+                        // change is never a visible step.
+                        const rateMin = firstFrameSeen ? 0.5 : 0.35;
+                        const target = Math.min(1, Math.max(rateMin,
+                            (dur - doorVideo.currentTime) / (dur * 0.45)));
+                        const rate = doorVideo.playbackRate;
+                        doorVideo.playbackRate = rate + (target - rate) * 0.18;
+                        // Endgame guard: the film must NEVER visibly stop. If
+                        // its remaining runtime (at the current rate) is about
+                        // to undercut the flood's rise, start the flood NOW,
+                        // scan ready or not — the light crests while the door
+                        // is still moving and holds (breathing) until the
+                        // scene can surface beneath it.
+                        const remainingMs =
+                            ((dur - doorVideo.currentTime) / Math.max(doorVideo.playbackRate, 0.1)) * 1000;
+                        if (remainingMs <= FLASH_IN_MS + 250) beginFlood();
+                    }, 120);
+                }, { once: true });
+
+                // Act 1 — the film enters IN MOTION: playback first, fade-in
+                // after a short head start, so the picture is already running
+                // for every millisecond it is visible. No paused-still act.
+                let filmBegun = false;
+                const beginFilm = () => {
+                    if (filmBegun) return;
+                    filmBegun = true;
+                    let faded = false;
+                    const fadeIn = () => {
+                        if (faded) return;
+                        faded = true;
+                        doorVideo.classList.add('is-on');
+                    };
+                    doorVideo.play().then(() => {
+                        // a few frames tick unseen, then the running picture surfaces
+                        setTimeout(fadeIn, HEAD_START_MS);
+                    }).catch(() => {
+                        // Autoplay refused (iOS low-power mode etc.): surface the
+                        // still rather than nothing — the Ken Burns drift keeps it
+                        // alive — and cue the SFX fallback path.
+                        fadeIn();
+                        signalDoorVideo();
+                    });
+                    // Buffering stall after the start attempt: surface the frame
+                    // and cue the sound (and the parent's fallback logic) anyway,
+                    // so the arrival never waits on a broken film.
+                    setTimeout(() => { fadeIn(); signalDoorVideo(); }, 2000);
+                };
+                if (doorVideo.readyState >= 2) beginFilm();
+                else doorVideo.addEventListener('loadeddata', beginFilm, { once: true });
+                // First frame never becomes decodable (slow network, broken
+                // file): keep the arrival alive — run the act anyway, which
+                // also arms the SFX fallback above.
+                setTimeout(beginFilm, 3000);
+            } else {
+                document.getElementById('bootDoor')?.remove();
+                // No film: the door SFX belongs at the click, as before.
+                signalDoorVideo();
+            }
+
+            let viewerReadySent = false;
             const signalViewerReady = () => {
+                if (viewerReadySent) return; // the parent must hear this ONCE (intro sting)
+                viewerReadySent = true;
                 try {
                     if (window.parent && window.parent !== window) {
                         window.parent.postMessage({ type: 'stepinside:viewerReady' }, '*');
                     }
                 } catch (e) { /* cross-origin parent: ignore */ }
             };
-            // Snap the fill to 100%, cue the intro as the wordmark completes, then
-            // fade the splash and reveal the scene.
+            // Act 2 — the staged hand-off (keep the sum in sync with
+            // HANDOFF_LEAD_MS above): snap the fill to 100%, pull focus (logo,
+            // vignette and grading fade — the film steps out of the fog), then
+            // flood the frame with the film's light; under the peak the film
+            // is swapped for the live scan and the light recedes over it.
+            // viewerReady (the parent's intro-sting cue) fires at the peak —
+            // the moment the room starts to emerge.
+            // Heavily OVERLAPPED so the exit reads as one continuous light
+            // wave, never as steps: the focus pull (350–1250) is still rolling
+            // when the bloom starts rising (500), and the bloom's curve starts
+            // imperceptibly — light simply keeps growing until it crests and
+            // recedes. Total ≈ 2.9s, spanning the film's remaining runtime
+            // (see filmHoldMs): the door keeps moving under the entire wave.
+            const SNAP_MS = 350;
+            const FLASH_AT_MS = 500;      // bloom starts mid-focus-pull
+            const FLASH_IN_MS = 1100;     // accelerating rise (mirrors the CSS)
+            const FLASH_OUT_MS = 1300;    // decelerating recede (mirrors the CSS)
+            // The light flood, split into shared primitives so BOTH triggers
+            // ride the same wave: the normal hand-off (scene ready, hold
+            // elapsed) and the endgame guard (film about to run out). The
+            // rise is unconditional; the RECEDE is gated on the scene's first
+            // frame — if the scan isn't ready at the crest, the light simply
+            // holds there (breathing, film cloaked beneath) until it is.
+            // viewerReady — the parent's intro-sting cue — fires AT THE PEAK,
+            // not at the reveal: on a fast load that is the same moment as
+            // before, but over a held light the intro now starts right as the
+            // white takes over, so sound bridges the wait and the hold never
+            // goes dead quiet.
+            let floodStarted = false;
+            let floodPeaked = false;
+            let revealed = false;
+            const maybeReveal = () => {
+                if (!floodPeaked || !firstFrameSeen || revealed || bootHidden || !bootSplash) return;
+                revealed = true;
+                bootSplash.classList.add('is-flashed');   // recede over the live scan
+                setTimeout(removeBootSplash, FLASH_OUT_MS + 100);
+            };
+            const beginFlood = () => {
+                if (floodStarted || bootHidden || !bootSplash) return;
+                floodStarted = true;
+                bootSplash.classList.add('is-revealing'); // no-op if already pulled
+                bootSplash.classList.add('is-flashing');
+                setTimeout(() => {
+                    floodPeaked = true;
+                    // Fully covered by the peak: cloak the film (it may end
+                    // unseen now) and let the light breathe while it waits.
+                    bootSplash.classList.add('is-film-hidden');
+                    bootSplash.classList.add('is-flash-held');
+                    signalViewerReady();  // intro sting rides the crest / bridges the hold
+                    maybeReveal();
+                }, FLASH_IN_MS);
+            };
             const finishBootSplash = () => {
                 if (bootHidden || !bootSplash) return;
                 bootSplash.classList.add('is-complete');      // snaps to 100% over SNAP_MS
-                setTimeout(signalViewerReady, SNAP_MS);       // intro on completion
-                setTimeout(removeBootSplash, SNAP_MS + 20);   // then fade the splash
+                const filmOn = doorVideo && doorVideo.classList.contains('is-on');
+                if (!filmOn) {
+                    // No film on screen (reduced motion, film error): the
+                    // original plain exit.
+                    setTimeout(signalViewerReady, SNAP_MS);
+                    setTimeout(removeBootSplash, SNAP_MS + 20);
+                    return;
+                }
+                if (floodStarted) {
+                    // Endgame guard already floods/holds — just release it.
+                    maybeReveal();
+                    return;
+                }
+                setTimeout(() => bootSplash.classList.add('is-revealing'), SNAP_MS);
+                setTimeout(beginFlood, FLASH_AT_MS);
             };
-            // Reveal once the first frame is ready AND the minimum has elapsed.
+            // Reveal once the first frame is ready AND the hold has elapsed —
+            // the film's final moving moments with a film, the door SFX length
+            // without one.
             let firstFrameSeen = false;
             const tryFinish = () => {
                 if (bootHidden || !bootSplash || !firstFrameSeen) return;
-                const remaining = loaderStart + MIN_MS - Date.now();
+                const holdMs = doorVideo ? filmHoldMs : MIN_MS;
+                const remaining = loaderStart + holdMs - Date.now();
                 if (remaining > 0) {
                     setTimeout(tryFinish, remaining);
                     return;

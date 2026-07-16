@@ -22,9 +22,44 @@ import type { KnowledgeLoader } from './knowledge.js';
 import type { RateLimiter, RateLimitResult } from './ratelimit.js';
 import { validateRequest, ValidationError } from './validation.js';
 import { buildSystemBlocks, buildRoomContextLine } from './prompt.js';
+import { findPlace, PLACE_CATEGORIES } from './places.js';
+import type { FoundPlace } from './places.js';
 
 const MODEL = 'claude-haiku-4-5';
 const MAX_TOKENS = 400;
+
+/**
+ * Live place lookup for "wo ist der nächste X?" questions beyond the curated
+ * surroundings list. Only offered when the KB carries the property's
+ * coordinates; executed server-side by places.ts (Photon + OSRM). The
+ * description is deliberately prescriptive about WHEN to call — that is what
+ * drives the model's should-call decision.
+ */
+const FIND_PLACE_TOOL: Anthropic.Tool = {
+  name: 'find_place',
+  description:
+    'Look up the nearest real place around the property with its name, address, and ' +
+    'real walking/driving minutes. Call this when the visitor asks about a specific ' +
+    'place or amenity that is not in KNOWLEDGE. For a KIND of place ("Fitnessstudio", ' +
+    '"Zahnarzt") set `category` to the matching value; for a NAME or brand ' +
+    '("MediaMarkt", "Alsterhaus") leave `category` unset and rely on `query`. ' +
+    'At most one call per question.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      query: {
+        type: 'string',
+        description: 'Name or brand of the place to find, in the visitor\'s wording.',
+      },
+      category: {
+        type: 'string',
+        enum: Object.keys(PLACE_CATEGORIES),
+        description: 'Kind of place, when the visitor asks for a category rather than a name.',
+      },
+    },
+    required: ['query'],
+  },
+};
 
 /** Dependencies injected by each entry point. */
 export interface ConciergeDeps {
@@ -147,54 +182,141 @@ export async function handleConcierge(
   //    { answer, focus } JSON so we get the camera focus in the same call.
   const client = getClient(deps.apiKey);
   const poiIds = new Set(request.pois.map((p) => p.id));
+  const mapPoiIds = new Set((kb.surroundings ?? []).map((p) => p.id));
+  // The find_place tool is only offered when the KB knows where the property
+  // is — without coordinates there is nothing to search around.
+  const tools = kb.location ? [FIND_PLACE_TOOL] : undefined;
+  const outputConfig = {
+    format: {
+      type: 'json_schema',
+      schema: {
+        type: 'object',
+        properties: {
+          answer: { type: 'string' },
+          focus: { type: ['string', 'null'] },
+          // Id of a nearby place (kb.surroundings) the viewer's map should
+          // route to, or null. Only meaningful for KBs with surroundings.
+          mapPoi: { type: ['string', 'null'] },
+          // True when the model answered with the fallback message (question
+          // not covered by the KB) — the client renders contact buttons then.
+          fallback: { type: 'boolean' },
+        },
+        required: ['answer', 'focus', 'mapPoi', 'fallback'],
+        additionalProperties: false,
+      },
+    },
+  };
   try {
-    const message = await client.messages.create({
+    let message = await client.messages.create({
       model: MODEL,
       max_tokens: MAX_TOKENS,
       system,
       messages,
-      output_config: {
-        format: {
-          type: 'json_schema',
-          schema: {
-            type: 'object',
-            properties: {
-              answer: { type: 'string' },
-              focus: { type: ['string', 'null'] },
-              // True when the model answered with the fallback message (question
-              // not covered by the KB) — the client renders contact buttons then.
-              fallback: { type: 'boolean' },
-            },
-            required: ['answer', 'focus', 'fallback'],
-            additionalProperties: false,
-          },
-        },
-      },
+      ...(tools ? { tools } : {}),
+      output_config: outputConfig,
     } as Anthropic.MessageCreateParamsNonStreaming);
+
+    const usageTotal = {
+      input_tokens: message.usage.input_tokens,
+      output_tokens: message.usage.output_tokens,
+      cache_read_input_tokens: message.usage.cache_read_input_tokens ?? 0,
+      cache_creation_input_tokens: message.usage.cache_creation_input_tokens ?? 0,
+    };
+
+    // Tool round: the model asked for a place lookup. Execute it server-side
+    // and give the result back in a second call; tool_choice 'none' forces the
+    // final structured answer (one lookup per question, no loops).
+    let foundPlace: FoundPlace | null = null;
+    if (message.stop_reason === 'tool_use' && kb.location) {
+      const toolUse = message.content.find(
+        (block): block is Anthropic.ToolUseBlock => block.type === 'tool_use',
+      );
+      if (toolUse) {
+        const input = toolUse.input as { query?: unknown; category?: unknown };
+        const query = typeof input.query === 'string' ? input.query : '';
+        const category = typeof input.category === 'string' ? input.category : undefined;
+        let toolResultContent: string;
+        let isError = false;
+        try {
+          foundPlace = query.length > 0 || category
+            ? await findPlace(query, kb.location, category)
+            : null;
+          toolResultContent = foundPlace
+            ? JSON.stringify({
+                name: foundPlace.name,
+                address: foundPlace.address,
+                walkMinutes: foundPlace.walkMinutes,
+                driveMinutes: foundPlace.driveMinutes,
+                distanceMeters: foundPlace.distanceMeters,
+              })
+            : 'No matching place found near the property.';
+        } catch (lookupErr) {
+          console.warn('[concierge] find_place failed:', String(lookupErr).slice(0, 200));
+          toolResultContent = 'Place lookup unavailable right now.';
+          isError = true;
+        }
+
+        message = await client.messages.create({
+          model: MODEL,
+          max_tokens: MAX_TOKENS,
+          system,
+          messages: [
+            ...messages,
+            { role: 'assistant', content: message.content },
+            {
+              role: 'user',
+              content: [{
+                type: 'tool_result',
+                tool_use_id: toolUse.id,
+                content: toolResultContent,
+                ...(isError ? { is_error: true } : {}),
+              }],
+            },
+          ],
+          tools: [FIND_PLACE_TOOL],
+          tool_choice: { type: 'none' },
+          output_config: outputConfig,
+        } as Anthropic.MessageCreateParamsNonStreaming);
+
+        usageTotal.input_tokens += message.usage.input_tokens;
+        usageTotal.output_tokens += message.usage.output_tokens;
+        usageTotal.cache_read_input_tokens += message.usage.cache_read_input_tokens ?? 0;
+        usageTotal.cache_creation_input_tokens += message.usage.cache_creation_input_tokens ?? 0;
+      }
+    }
 
     // On a refusal stop reason, return the KB fallback rather than an empty or
     // unsafe answer. Default to the German fallback as the property's primary
     // language; the system prompt otherwise handles per-language fallbacks.
     if (message.stop_reason === 'refusal') {
-      return { status: 200, body: { answer: kb.fallback.de, focus: null, fallback: true } };
+      return {
+        status: 200,
+        body: { answer: kb.fallback.de, focus: null, mapPoi: null, mapPlace: null, fallback: true },
+      };
     }
 
-    const parsed = parseStructured(extractText(message.content), poiIds);
+    const parsed = parseStructured(extractText(message.content), poiIds, mapPoiIds);
     const usedServerFallback = parsed.answer.length === 0;
     const finalAnswer = usedServerFallback ? kb.fallback.de : parsed.answer;
+
+    // The searched place only rides along when the model actually answered
+    // from it — on a fallback answer a map to the place would contradict the
+    // "I don't know" text.
+    const answeredFromPlace = foundPlace !== null && !parsed.fallback && !usedServerFallback;
 
     return {
       status: 200,
       body: {
         answer: finalAnswer,
         focus: parsed.focus,
+        mapPoi: parsed.mapPoi,
+        // Live-searched place for the viewer's neighbourhood map: it draws the
+        // route to these coordinates (they never enter the model's context).
+        mapPlace: answeredFromPlace && foundPlace
+          ? { name: foundPlace.name, address: foundPlace.address, lngLat: foundPlace.lngLat }
+          : null,
         fallback: parsed.fallback || usedServerFallback,
-        usage: {
-          input_tokens: message.usage.input_tokens,
-          output_tokens: message.usage.output_tokens,
-          cache_read_input_tokens: message.usage.cache_read_input_tokens ?? 0,
-          cache_creation_input_tokens: message.usage.cache_creation_input_tokens ?? 0,
-        },
+        usage: usageTotal,
       },
     };
   } catch (err) {
@@ -225,23 +347,29 @@ function extractText(content: Anthropic.ContentBlock[]): string {
 }
 
 /**
- * Parse the structured { answer, focus, fallback } JSON. `focus` is only
- * honoured when it is one of the ids the client offered (so the model can't
- * point the camera at something that doesn't exist); anything else becomes null.
+ * Parse the structured { answer, focus, mapPoi, fallback } JSON. `focus` is
+ * only honoured when it is one of the ids the client offered, `mapPoi` only
+ * when it names a place in the KB's surroundings list (so the model can't
+ * point the camera or the map at something that doesn't exist); anything else
+ * becomes null.
  */
 function parseStructured(
   text: string,
   poiIds: Set<string>,
-): { answer: string; focus: string | null; fallback: boolean } {
+  mapPoiIds: Set<string>,
+): { answer: string; focus: string | null; mapPoi: string | null; fallback: boolean } {
   try {
-    const obj = JSON.parse(text) as { answer?: unknown; focus?: unknown; fallback?: unknown };
+    const obj = JSON.parse(text) as {
+      answer?: unknown; focus?: unknown; mapPoi?: unknown; fallback?: unknown;
+    };
     const answer = typeof obj.answer === 'string' ? obj.answer.trim() : '';
     const focus = typeof obj.focus === 'string' && poiIds.has(obj.focus) ? obj.focus : null;
+    const mapPoi = typeof obj.mapPoi === 'string' && mapPoiIds.has(obj.mapPoi) ? obj.mapPoi : null;
     const fallback = obj.fallback === true;
-    return { answer, focus, fallback };
+    return { answer, focus, mapPoi, fallback };
   } catch {
     // Not valid JSON (shouldn't happen with structured output) — treat the raw
     // text as the answer, no focus.
-    return { answer: text, focus: null, fallback: false };
+    return { answer: text, focus: null, mapPoi: null, fallback: false };
   }
 }

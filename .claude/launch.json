@@ -9,6 +9,12 @@
       "autoPort": true
     },
     {
+      "name": "root-static",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["serve", ".", "-l", "4600", "-C"],
+      "port": 4600
+    },
+    {
       "name": "viewer",
       "runtimeExecutable": "npx",
       "runtimeArgs": ["serve", "apps/viewer/public", "-l", "4500", "-C"],

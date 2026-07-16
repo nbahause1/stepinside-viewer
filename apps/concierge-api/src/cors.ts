@@ -11,6 +11,10 @@ const DEFAULT_ALLOWED_ORIGINS = [
   'http://localhost:4500',
   'http://127.0.0.1:4500',
   'http://localhost:8787',
+  // The website (Next dev, port 3000) embeds the viewer — local chat tests
+  // against `npm run dev` (dev-server.ts) run under THIS origin, not 4500.
+  'http://localhost:3000',
+  'http://127.0.0.1:3000',
 ];
 
 /** Parse a comma-separated ALLOWED_ORIGINS value into a clean list. */

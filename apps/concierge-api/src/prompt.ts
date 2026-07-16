@@ -13,7 +13,7 @@
  * byte-stable across a whole session.
  */
 import type Anthropic from '@anthropic-ai/sdk';
-import type { KnowledgeBase, PropertyContext } from './knowledge.js';
+import type { KnowledgeBase, PropertyContext, SurroundingsPoi } from './knowledge.js';
 import { stableStringify } from './knowledge.js';
 import type { FocusTarget } from './validation.js';
 
@@ -54,6 +54,36 @@ TARGETS: ${JSON.stringify(pois.map(p => ({ id: p.id, label: p.label, keywords: p
 }
 
 /**
+ * The neighbourhood-map instruction. Cache-stable like focusSection: the
+ * surroundings list is part of the KB, constant per property. The place names
+ * and walking minutes themselves are in the KNOWLEDGE block (the KB is
+ * serialized whole), so the model can cite "EDEKA, 7 Minuten zu Fuß" — this
+ * section only teaches it to also point the map there via "mapPoi".
+ */
+function surroundingsSection(surroundings: SurroundingsPoi[] | undefined): string {
+  if (!surroundings || surroundings.length === 0) {
+    return '';
+  }
+  return `
+
+NEIGHBOURHOOD MAP — the viewer has a map that can show the walking route from the property to each place in KNOWLEDGE's "surroundings" list. If the visitor's latest question is about the surroundings, the neighbourhood, or one of these places (where is the nearest supermarket, is there a school nearby, how far to public transport, …), answer from the surroundings data (name + walking minutes) and set "mapPoi" to that place's id so the map opens and draws the route. Otherwise set "mapPoi" to null. Only ever use an id from the surroundings list and pick the single best match. The answer text must stand on its own: state the place and the walking minutes, and NEVER mention the map, a route, "die Karte", or these ids — the map opens automatically alongside your words, so sentences like "Sie können die Route auf der Karte sehen" are forbidden. Surroundings questions ARE covered by KNOWLEDGE, so answer them with "fallback": false.`;
+}
+
+/**
+ * The find_place instruction. Only present when the KB carries the property's
+ * coordinates (core.ts offers the tool under the same condition). Cache-stable
+ * like the other sections.
+ */
+function placeSearchSection(hasLocation: boolean): string {
+  if (!hasLocation) {
+    return '';
+  }
+  return `
+
+PLACE SEARCH — you have a find_place tool that looks up real places near the property (shops, brands, restaurants, gyms, doctors, …) with walking and driving minutes. Use it when the visitor asks about a specific place or kind of place that is NOT covered by KNOWLEDGE (including its "surroundings" list) — e.g. "Wo ist der nächste MediaMarkt?". At most ONE search per question. Answer ONLY from the tool result: name the place and the walking and/or driving minutes it returned; these tool results count as covered knowledge, so set "fallback" to false. If the tool returns nothing or errors, use the property's fallback message ("fallback": true). Never invent a place, address, or travel time, and never mention the tool or the map in your answer text.`;
+}
+
+/**
  * Build the two system text blocks for the Messages API.
  * The KB block carries the ephemeral cache_control breakpoint.
  */
@@ -66,7 +96,11 @@ export function buildSystemBlocks(kb: KnowledgeBase, pois: FocusTarget[]): Anthr
     : '';
   const rules = `${PERSONA[kb.context]}\n\n${SHARED_RULES}${voiceSection}`;
   return [
-    { type: 'text', text: rules + focusSection(pois) },
+    {
+      type: 'text',
+      text: rules + focusSection(pois) + surroundingsSection(kb.surroundings) +
+        placeSearchSection(kb.location !== undefined),
+    },
     {
       type: 'text',
       text: `KNOWLEDGE (JSON): ${knowledgeJson}`,

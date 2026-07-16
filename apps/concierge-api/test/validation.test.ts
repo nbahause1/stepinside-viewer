@@ -284,6 +284,7 @@ describe('validateLeadRequest', () => {
       contact: 'max@example.com',
       message: null,
       interest: null,
+      timeframe: null,
     });
   });
 

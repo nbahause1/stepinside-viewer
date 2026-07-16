@@ -83,6 +83,13 @@ interface Env {
   /** Optional shared secret; when set, /stage requires the x-stage-token header. */
   STAGE_AUTH_TOKEN?: string;
   /**
+   * Optional GHL inbound-webhook URL for the hot-lead alarm (Flaggschiff 2):
+   * every stored lead is forwarded there fire-and-forget so the property's
+   * broker gets notified. Set as a secret (the URL embeds a token):
+   *   wrangler secret put GHL_HOTLEAD_WEBHOOK_URL
+   */
+  GHL_HOTLEAD_WEBHOOK_URL?: string;
+  /**
    * Optional D1 database for anonymous analytics + leads (wrangler.toml).
    * When unbound, /events and /lead answer 202 and drop silently and
    * /report/* is a uniform 404 — the viewer never breaks without it.
@@ -288,7 +295,9 @@ export default {
     }
   },
 
-  async fetch(request: Request, env: Env): Promise<Response> {
+  // ctx is declared structurally (like D1Like/KvLike) so the module compiles
+  // without @cloudflare/workers-types.
+  async fetch(request: Request, env: Env, ctx?: { waitUntil(task: Promise<unknown>): void }): Promise<Response> {
     const allowedOrigins = parseAllowedOrigins(env.ALLOWED_ORIGINS);
     const origin = request.headers.get('origin');
     const allowOrigin = resolveAllowOrigin(origin, allowedOrigins);
@@ -458,6 +467,12 @@ export default {
               resolveDailyLimit(env.LEAD_DAILY_LIMIT, DEFAULT_LEAD_DAILY_LIMIT),
               'spend:lead',
             )
+          : undefined,
+        env.GHL_HOTLEAD_WEBHOOK_URL
+          ? {
+              webhookUrl: env.GHL_HOTLEAD_WEBHOOK_URL,
+              waitUntil: ctx ? (task) => ctx.waitUntil(task) : undefined,
+            }
           : undefined,
       );
       return jsonResponse(result.status, result.body, cors, result.retryAfterSeconds);

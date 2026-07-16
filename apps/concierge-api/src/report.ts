@@ -189,7 +189,7 @@ export function renderReportHtml(d: ReportData): string {
 </head>
 <body>
 <div class="wrap">
-  <p class="eyebrow">StepInside · Exposé-Bericht</p>
+  <p class="eyebrow">innsyn · Exposé-Bericht</p>
   <h1>${title}</h1>
   <p class="sub">Stand: ${escapeHtml(fmtDate(d.generatedAt))} · alle Zahlen anonym erhoben</p>
 
@@ -266,7 +266,7 @@ export function renderReportNotFoundHtml(): string {
 </head>
 <body>
 <div class="wrap" style="text-align:center; padding-top: 18vh;">
-  <p class="eyebrow">StepInside</p>
+  <p class="eyebrow">innsyn</p>
   <h1>Bericht nicht gefunden</h1>
   <p class="sub">Der Link ist ungültig oder abgelaufen. Bitte prüfe die Adresse oder frag nach einem neuen Link.</p>
 </div>

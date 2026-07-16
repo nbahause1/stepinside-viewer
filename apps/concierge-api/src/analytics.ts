@@ -59,6 +59,20 @@ export interface AnalyticsResult {
  */
 export type DailyBudget = { consume(): Promise<RateLimitResult> };
 
+/**
+ * Hot-lead alarm (Flaggschiff 2): after a lead is stored, POST it to a GHL
+ * inbound webhook so the property's broker is notified within minutes.
+ * Fire-and-forget — a webhook failure must never break /lead or the viewer.
+ */
+export interface HotLeadForward {
+  /** GHL inbound-webhook URL (env GHL_HOTLEAD_WEBHOOK_URL). */
+  webhookUrl: string;
+  /** Keeps the POST alive past the response (ctx.waitUntil on Workers). */
+  waitUntil?: (task: Promise<unknown>) => void;
+  /** Injectable for tests; defaults to the global fetch. */
+  fetchImpl?: (url: string, init: { method: string; headers: Record<string, string>; body: string }) => Promise<{ ok: boolean; status: number }>;
+}
+
 // ---------------------------------------------------------------------------
 // Validation caps
 // ---------------------------------------------------------------------------
@@ -86,6 +100,7 @@ export const EVENT_TYPES: ReadonlySet<string> = new Set([
   'share',
   'inquiry_click',
   'concierge_question',
+  'surroundings',
   'survey',
   'cta_click',
 ]);
@@ -261,10 +276,61 @@ export function validateLeadRequest(body: unknown): LeadRequest {
  * is a customer inquiry, silently dropping it would be worse than an error
  * the client can retry on. Without a database: 202 and drop.
  */
+/**
+ * POST the stored lead to the GHL inbound webhook. Never throws: the property
+ * lookup and the POST are each guarded, every failure is a console.warn. The
+ * owner_email lookup failing (e.g. migration 0003 not applied yet) degrades to
+ * a payload with null ownerEmail/propertyLabel — GHL still gets the alarm.
+ */
+async function forwardHotLead(
+  db: D1Like,
+  lead: LeadRequest,
+  forward: HotLeadForward,
+): Promise<void> {
+  let propertyLabel: string | null = null;
+  let ownerEmail: string | null = null;
+  try {
+    const row = await db
+      .prepare('SELECT label, owner_email FROM properties WHERE property_id = ?1')
+      .bind(lead.propertyId)
+      .first();
+    if (row) {
+      propertyLabel = typeof row['label'] === 'string' ? (row['label'] as string) : null;
+      ownerEmail = typeof row['owner_email'] === 'string' ? (row['owner_email'] as string) : null;
+    }
+  } catch (err) {
+    console.warn('[analytics] hot-lead property lookup failed:', String(err));
+  }
+  try {
+    const doFetch = forward.fetchImpl ?? (fetch as unknown as NonNullable<HotLeadForward['fetchImpl']>);
+    const res = await doFetch(forward.webhookUrl, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        signal: 'lead',
+        propertyId: lead.propertyId,
+        propertyLabel,
+        ownerEmail,
+        leadName: lead.name,
+        leadContact: lead.contact,
+        leadMessage: lead.message,
+        leadInterest: lead.interest,
+        leadTimeframe: lead.timeframe,
+      }),
+    });
+    if (!res.ok) {
+      console.warn(`[analytics] hot-lead webhook answered ${res.status}`);
+    }
+  } catch (err) {
+    console.warn('[analytics] hot-lead webhook failed:', String(err));
+  }
+}
+
 export async function handleLead(
   rawBody: unknown,
   db: D1Like | undefined,
   dailyBudget?: DailyBudget,
+  forward?: HotLeadForward,
 ): Promise<AnalyticsResult> {
   let request: LeadRequest;
   try {
@@ -304,6 +370,18 @@ export async function handleLead(
   } catch (err) {
     console.warn('[analytics] lead insert failed:', String(err));
     return { status: 500, body: { error: 'Could not store the inquiry. Please try again.' } };
+  }
+
+  // Hot-lead alarm: only after a SUCCESSFUL insert (a dropped/failed lead must
+  // not alarm anyone). forwardHotLead never throws; waitUntil keeps the POST
+  // alive past the response on Workers.
+  if (forward) {
+    const task = forwardHotLead(db, request, forward);
+    if (forward.waitUntil) {
+      forward.waitUntil(task);
+    } else {
+      void task;
+    }
   }
   return { status: 202, body: { ok: true } };
 }
