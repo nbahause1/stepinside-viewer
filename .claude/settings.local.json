@@ -3,7 +3,9 @@
     "allow": [
       "Bash(npm -v)",
       "Bash(pnpm -v)",
-      "Bash(git --version)"
+      "Bash(git --version)",
+      "Bash(caffeinate *)",
+      "Bash(node -e \"console.log\\(JSON.stringify\\(require\\('./package.json'\\).scripts,null,1\\)\\)\")"
     ]
   }
 }
