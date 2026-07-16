@@ -511,6 +511,11 @@ body.tutorial-active #walkHint {
   left: max(14px, env(safe-area-inset-left));
   bottom: max(14px, env(safe-area-inset-bottom));
   z-index: 16;
+}
+#chatPill.is-front {
+  z-index: 19;
+}
+#chatPill {
   pointer-events: none;
   display: flex;
   flex-direction: column;
@@ -846,6 +851,420 @@ body.tutorial-active #walkHint {
     opacity: 0.6;
   }
 }
+/* Neighbourhood map ("Umgebung") — glass pill above the concierge toggle,
+   opening a centered glass panel with a MapLibre map, POI chips and the
+   animated walking route. Wired in surroundings.ts. */
+#surroundingsPill {
+  position: fixed;
+  left: max(14px, env(safe-area-inset-left));
+  bottom: calc(max(14px, env(safe-area-inset-bottom)) + 54px);
+  z-index: 16;
+  pointer-events: none;
+}
+#surroundingsPill,
+#surroundingsPill * {
+  touch-action: manipulation;
+}
+#surroundingsPill #surroundingsToggle {
+  pointer-events: auto;
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 50%;
+  cursor: pointer;
+  color: rgba(255, 255, 255, 0.82);
+  background: linear-gradient(180deg, rgba(30, 30, 32, 0.5), rgba(18, 18, 20, 0.42));
+  backdrop-filter: blur(20px) saturate(150%);
+  -webkit-backdrop-filter: blur(20px) saturate(150%);
+  box-shadow: 0 8px 24px -10px rgba(0, 0, 0, 0.4), inset 0 1px 0 0 rgba(255, 255, 255, 0.14);
+  transition: background 160ms var(--ease-out), transform 160ms var(--ease-out);
+}
+#surroundingsPill #surroundingsToggle * {
+  pointer-events: none;
+}
+#surroundingsPill #surroundingsToggle > svg {
+  display: block;
+  width: 22px;
+  height: 22px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.75;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+@media (hover: hover) and (pointer: fine) {
+  #surroundingsPill #surroundingsToggle:hover {
+    background: linear-gradient(180deg, rgba(42, 42, 45, 0.56), rgba(26, 26, 28, 0.48));
+  }
+}
+#surroundingsPill #surroundingsToggle:active {
+  transform: scale(0.94);
+}
+#surroundingsPill.is-open #surroundingsToggle, #surroundingsPill.is-chat-open #surroundingsToggle {
+  opacity: 0;
+  pointer-events: none;
+}
+
+#surroundingsOverlay {
+  --surroundings-accent: #8c3a2f;
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%) scale(0.98);
+  width: min(920px, 100vw - 28px);
+  height: min(620px, 100vh - 76px);
+  z-index: 18;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 20px;
+  background: linear-gradient(180deg, rgba(30, 30, 32, 0.5), rgba(18, 18, 20, 0.42));
+  backdrop-filter: blur(20px) saturate(150%);
+  -webkit-backdrop-filter: blur(20px) saturate(150%);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 18px 44px -14px rgba(0, 0, 0, 0.5), inset 0 1px 0 0 rgba(255, 255, 255, 0.14);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.4s var(--ease-out), transform 0.4s var(--ease-out), visibility 0s linear 0.4s;
+}
+#surroundingsOverlay,
+#surroundingsOverlay * {
+  touch-action: manipulation;
+}
+#surroundingsOverlay.is-open {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1);
+  visibility: visible;
+  pointer-events: auto;
+  transition: opacity 0.4s var(--ease-out), transform 0.4s var(--ease-out), visibility 0s;
+}
+#surroundingsOverlay.is-cinematic {
+  transform: translate(-50%, -46%) scale(0.9);
+}
+#surroundingsOverlay.is-cinematic.is-open {
+  transform: translate(-50%, -50%) scale(1);
+  transition: opacity 0.55s cubic-bezier(0.22, 1.2, 0.36, 1), transform 0.7s cubic-bezier(0.22, 1.2, 0.36, 1), visibility 0s;
+}
+#surroundingsOverlay #surroundingsHeader {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 12px 12px 18px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+#surroundingsOverlay #surroundingsTitle {
+  font-family: "Inter", "Arial", sans-serif;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--label-1);
+}
+#surroundingsOverlay #surroundingsClose {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  cursor: pointer;
+  color: rgba(255, 255, 255, 0.65);
+  background: transparent;
+  transition: background 140ms var(--ease-out), color 140ms var(--ease-out);
+}
+#surroundingsOverlay #surroundingsClose > svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.75;
+  stroke-linecap: round;
+  pointer-events: none;
+}
+@media (hover: hover) and (pointer: fine) {
+  #surroundingsOverlay #surroundingsClose:hover {
+    color: rgba(255, 255, 255, 0.9);
+    background: rgba(255, 255, 255, 0.08);
+  }
+}
+#surroundingsOverlay #surroundingsSearch {
+  position: relative;
+  flex-shrink: 0;
+  padding: 10px 12px;
+  z-index: 5;
+}
+#surroundingsOverlay #surroundingsSearch input {
+  width: 100%;
+  padding: 9px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.92);
+  font-family: "Inter", "Arial", sans-serif;
+  font-size: 13px;
+  outline: none;
+  transition: border-color 140ms var(--ease-out), background 140ms var(--ease-out);
+}
+#surroundingsOverlay #surroundingsSearch input::-moz-placeholder {
+  color: rgba(255, 255, 255, 0.42);
+}
+#surroundingsOverlay #surroundingsSearch input::placeholder {
+  color: rgba(255, 255, 255, 0.42);
+}
+#surroundingsOverlay #surroundingsSearch input:focus {
+  border-color: rgba(255, 255, 255, 0.28);
+  background: rgba(255, 255, 255, 0.09);
+}
+#surroundingsOverlay #surroundingsSearchResults {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  top: calc(100% - 2px);
+  overflow: hidden;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(24, 24, 28, 0.96);
+  backdrop-filter: blur(20px) saturate(150%);
+  -webkit-backdrop-filter: blur(20px) saturate(150%);
+  box-shadow: 0 12px 32px -10px rgba(0, 0, 0, 0.55);
+}
+#surroundingsOverlay #surroundingsSearchResults.hidden {
+  display: none;
+}
+#surroundingsOverlay #surroundingsSearchResults button {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  width: 100%;
+  padding: 9px 12px;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  font-family: "Inter", "Arial", sans-serif;
+}
+#surroundingsOverlay #surroundingsSearchResults button .surroundingsHitLabel {
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.9);
+}
+#surroundingsOverlay #surroundingsSearchResults button .surroundingsHitDetail {
+  font-size: 11.5px;
+  color: rgba(255, 255, 255, 0.5);
+}
+@media (hover: hover) and (pointer: fine) {
+  #surroundingsOverlay #surroundingsSearchResults button:hover {
+    background: rgba(255, 255, 255, 0.08);
+  }
+}
+#surroundingsOverlay #surroundingsSearchResults button + button {
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+#surroundingsOverlay #surroundingsSearchResults .surroundingsSearchMsg {
+  padding: 10px 12px;
+  font-family: "Inter", "Arial", sans-serif;
+  font-size: 12.5px;
+  color: rgba(255, 255, 255, 0.6);
+}
+#surroundingsOverlay #surroundingsModes {
+  flex-shrink: 0;
+  display: flex;
+  gap: 8px;
+  padding: 0 12px 10px;
+}
+#surroundingsOverlay #surroundingsModes.hidden {
+  display: none;
+}
+#surroundingsOverlay #surroundingsModes button {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 7px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.06);
+  transition: background 140ms var(--ease-out), border-color 140ms var(--ease-out);
+}
+#surroundingsOverlay #surroundingsModes button > svg {
+  flex-shrink: 0;
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.75);
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+#surroundingsOverlay #surroundingsModes button .surroundingsModeLabel {
+  font-family: "Inter", "Arial", sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.85);
+  white-space: nowrap;
+}
+#surroundingsOverlay #surroundingsModes button .surroundingsModeMins {
+  font-family: "Inter", "Arial", sans-serif;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.55);
+  white-space: nowrap;
+}
+@media (hover: hover) and (pointer: fine) {
+  #surroundingsOverlay #surroundingsModes button:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.11);
+  }
+}
+#surroundingsOverlay #surroundingsModes button.is-active {
+  background: color-mix(in srgb, var(--surroundings-accent) 45%, transparent);
+  border-color: color-mix(in srgb, var(--surroundings-accent) 75%, transparent);
+}
+#surroundingsOverlay #surroundingsModes button.is-active .surroundingsModeMins {
+  color: rgba(255, 255, 255, 0.8);
+}
+#surroundingsOverlay #surroundingsModes button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+@media (max-width: 600px) {
+  #surroundingsOverlay #surroundingsModes button .surroundingsModeLabel {
+    display: none;
+  }
+}
+#surroundingsOverlay #surroundingsMap {
+  flex: 1;
+  min-height: 0;
+}
+#surroundingsOverlay #surroundingsMap,
+#surroundingsOverlay #surroundingsMap * {
+  touch-action: none;
+}
+#surroundingsOverlay #surroundingsMap .maplibregl-ctrl-attrib {
+  font-size: 10px;
+  background: rgba(255, 255, 255, 0.72);
+  border-radius: 6px 0 0 0;
+}
+#surroundingsOverlay #surroundingsStatus {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  padding: 8px 14px;
+  border-radius: 12px;
+  font-family: "Inter", "Arial", sans-serif;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.85);
+  background: rgba(18, 18, 20, 0.72);
+  pointer-events: none;
+}
+#surroundingsOverlay #surroundingsStatus.hidden {
+  display: none;
+}
+#surroundingsOverlay #surroundingsChips {
+  flex-shrink: 0;
+  display: flex;
+  gap: 8px;
+  padding: 10px 12px;
+  overflow-x: auto;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  scrollbar-width: none;
+}
+#surroundingsOverlay #surroundingsChips::-webkit-scrollbar {
+  display: none;
+}
+#surroundingsOverlay #surroundingsChips button {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.06);
+  transition: background 140ms var(--ease-out), border-color 140ms var(--ease-out);
+}
+#surroundingsOverlay #surroundingsChips button .surroundingsChipLabel {
+  font-family: "Inter", "Arial", sans-serif;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.88);
+  white-space: nowrap;
+}
+#surroundingsOverlay #surroundingsChips button .surroundingsChipMins {
+  font-family: "Inter", "Arial", sans-serif;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.55);
+  white-space: nowrap;
+}
+@media (hover: hover) and (pointer: fine) {
+  #surroundingsOverlay #surroundingsChips button:hover {
+    background: rgba(255, 255, 255, 0.11);
+  }
+}
+#surroundingsOverlay #surroundingsChips button.is-active {
+  background: color-mix(in srgb, var(--surroundings-accent) 45%, transparent);
+  border-color: color-mix(in srgb, var(--surroundings-accent) 75%, transparent);
+}
+#surroundingsOverlay #surroundingsChips button.is-active .surroundingsChipMins {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+/* map markers (plain DOM elements positioned by MapLibre) */
+.surroundingsHouse {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--surroundings-accent);
+  border: 3px solid #fff;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+}
+
+.surroundingsDot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2.5px solid rgba(40, 40, 45, 0.85);
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.3);
+  cursor: pointer;
+  transition: transform 160ms var(--ease-out), background 160ms var(--ease-out);
+}
+.surroundingsDot.is-active {
+  transform: scale(1.35);
+  background: var(--surroundings-accent);
+  border-color: #fff;
+}
+
+.surroundingsDest {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--surroundings-accent, #8c3a2f);
+  border: 2.5px solid #fff;
+  box-shadow: 0 1px 8px rgba(0, 0, 0, 0.35);
+}
+
+.surroundingsWalkLabel {
+  padding: 5px 10px;
+  border-radius: 999px;
+  font-family: "Inter", "Arial", sans-serif;
+  font-size: 12px;
+  font-weight: 700;
+  color: #fff;
+  background: rgba(24, 24, 28, 0.88);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
+  white-space: nowrap;
+}
+
 /* Mobile-only (narrow viewport, e.g. the embedded viewer fullscreen on a phone).
    Keyed on the viewer's OWN width, so the desktop layout is never affected. */
 @media (max-width: 600px) {
@@ -2139,6 +2558,7 @@ body.staging-open #controlsWrap,
 body.staging-open #annotationNav,
 body.staging-open #brandDome,
 body.staging-open #chatPill,
+body.staging-open #surroundingsPill,
 body.staging-open #inquiryPill,
 body.staging-open #sharePill,
 body.staging-open #stagePill,
@@ -2544,6 +2964,8 @@ body.staging-open #surveyCard {
 #controlsWrap > #timelineContainer,
 #chatPill #chatToggle,
 #chatPill #chatPanel,
+#surroundingsPill #surroundingsToggle,
+#surroundingsOverlay,
 #stagePill #stageTrigger,
 #inquiryPill #inquiryTrigger,
 #sharePill #shareTrigger,
@@ -2557,14 +2979,16 @@ body.staging-open #surveyCard {
   box-shadow: 0 8px 22px -12px rgba(0, 0, 0, 0.32), 0 24px 46px -24px rgba(0, 0, 0, 0.38), inset 0 1px 0.5px 0 rgba(255, 255, 255, 0.55), inset 0 -8px 18px -16px rgba(0, 0, 0, 0.2), inset 0 0 0 0.5px rgba(255, 255, 255, 0.1);
 }
 
-/* das grosse Chat-Panel schwebt hoeher -> etwas mehr Tiefe */
-#chatPill #chatPanel {
+/* die grossen Panels (Chat + Umgebungskarte) schweben hoeher -> mehr Tiefe */
+#chatPill #chatPanel,
+#surroundingsOverlay {
   box-shadow: 0 18px 40px -18px rgba(0, 0, 0, 0.42), 0 40px 80px -36px rgba(0, 0, 0, 0.46), inset 0 1px 0.5px 0 rgba(255, 255, 255, 0.5), inset 0 -12px 26px -18px rgba(0, 0, 0, 0.22), inset 0 0 0 0.5px rgba(255, 255, 255, 0.1);
 }
 
 /* helleres Glas beim Hover (mehr Lichteinfang) */
 @media (hover: hover) and (pointer: fine) {
   #chatPill #chatToggle:hover,
+  #surroundingsPill #surroundingsToggle:hover,
   #stagePill #stageTrigger:hover,
   #inquiryPill #inquiryTrigger:hover,
   #sharePill #shareTrigger:hover,
@@ -2592,6 +3016,7 @@ body.staging-open #surveyCard {
   #controlDome,
   #annotationNav,
   #chatPill #chatToggle,
+  #surroundingsPill #surroundingsToggle,
   #stagePill #stageTrigger,
   #inquiryPill #inquiryTrigger,
   #sharePill #shareTrigger,
@@ -2638,6 +3063,8 @@ body.staging-open #surveyCard {
   #controlsWrap > #timelineContainer,
   #chatPill #chatToggle,
   #chatPill #chatPanel,
+  #surroundingsPill #surroundingsToggle,
+  #surroundingsOverlay,
   #stagePill #stageTrigger,
   #inquiryPill #inquiryTrigger,
   #sharePill #shareTrigger,
