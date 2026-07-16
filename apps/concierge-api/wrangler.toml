@@ -61,17 +61,15 @@ id = "90ab5895edcb416fa9283bbcba6d4eca"
 # Privacy model (see README.md): no cookies, no IP addresses, no user agents;
 # the session id is crypto-random and in-memory only.
 #
-# Provision once, then uncomment with the printed database_id:
-#   npx wrangler d1 create stepinside-analytics
-#   npx wrangler d1 migrations apply stepinside-analytics --remote
-# (local dev against `wrangler dev`: npx wrangler d1 migrations apply stepinside-analytics --local)
-#
-# Siehe Konsolidierungs-Hinweis oben (zweiter Cloudflare-Account):
-# [[d1_databases]]
-# binding = "ANALYTICS_DB"
-# database_name = "stepinside-analytics"
-# database_id = "933ec231-8cc0-4dfb-9f26-00eee62735ae"
-# migrations_dir = "migrations"
+# Provisioned 2026-07-14 im Account haukecux19@gmail.com (finaler Account,
+# Konsolidierung entschieden). Die alte DB 933ec231… ("stepinside-analytics")
+# lag im zweiten Account und ist verwaist.
+# (local dev against `wrangler dev`: npx wrangler d1 migrations apply innsyn-analytics --local)
+[[d1_databases]]
+binding = "ANALYTICS_DB"
+database_name = "innsyn-analytics"
+database_id = "5a990b1f-3e10-4a67-8718-444ffcaa0ef9"
+migrations_dir = "migrations"
 
 # Optional hardening (details in README.md):
 #
@@ -88,7 +86,7 @@ id = "90ab5895edcb416fa9283bbcba6d4eca"
 # previews + local dev (Next.js on 3000, viewer on 4500, incl. LAN IPs used
 # for on-device iPhone testing). Bewusst KEIN Wildcard: sonst könnte jede
 # fremde Seite auf unsere Kosten Modell-Anfragen stellen.
-ALLOWED_ORIGINS = "https://stepinside.eu,https://www.stepinside.eu,https://stepinside-viewer-git-analytics-leads-nbahauses-projects.vercel.app,https://stepinside-viewer-git-concierge-endprodukt-nbahauses-projects.vercel.app,https://stepinside-viewer-git-concierge-merge-nbahauses-projects.vercel.app,https://stepinside-viewer-git-aker-redesign-nbahauses-projects.vercel.app,http://localhost:3000,http://127.0.0.1:3000,http://192.168.0.146:3000,http://192.168.0.201:3000,http://localhost:4500,http://127.0.0.1:4500,http://192.168.0.201:4500"
+ALLOWED_ORIGINS = "https://myinnsyn.de,https://www.myinnsyn.de,https://stepinside.eu,https://www.stepinside.eu,https://stepinside-viewer-git-analytics-leads-nbahauses-projects.vercel.app,https://stepinside-viewer-git-concierge-endprodukt-nbahauses-projects.vercel.app,https://stepinside-viewer-git-concierge-merge-nbahauses-projects.vercel.app,https://stepinside-viewer-git-aker-redesign-nbahauses-projects.vercel.app,http://localhost:3000,http://127.0.0.1:3000,http://192.168.0.146:3000,http://192.168.0.201:3000,http://localhost:4500,http://127.0.0.1:4500,http://192.168.0.201:4500"
 STAGE_DAILY_LIMIT = "200"
 CONCIERGE_DAILY_LIMIT = "1000"
 EVENTS_DAILY_LIMIT = "50000"
