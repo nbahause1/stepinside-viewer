@@ -195,6 +195,14 @@ const initConcierge = (global: Global) => {
         if (!state.chatOpen) return;
         if (event.target === input) return;
         if (event.metaKey || event.ctrlKey || event.altKey) return;
+        // Another editable field owns the keystroke (e.g. the surroundings
+        // address search) — never steal focus from it.
+        const t = event.target as HTMLElement | null;
+        if (t && (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || t.isContentEditable)) return;
+        // The map overlay sits ON TOP of the chat when both are open — the
+        // top-most layer owns the keyboard, so type-anywhere stands down.
+        const surroundings = document.getElementById('surroundingsOverlay');
+        if (surroundings && surroundings.classList.contains('is-open')) return;
         if (event.key.length === 1 || event.key === 'Backspace') {
             input.focus();  // the key's default action now inserts into the input
             event.stopPropagation();
