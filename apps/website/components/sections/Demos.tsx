@@ -18,11 +18,18 @@ import { config, SECTION_IDS } from "@/lib/config";
   Arrival audio: a subtle two-part SFX. The "Vollbild" tap is the user gesture
   iOS requires, so the audio MUST originate here in the parent (the scan runs in
   a cross-document iframe that never receives its own gesture before loading).
-  On launch we play the door "unlocking" over the loading screen; when the
-  viewer posts that the scene is revealed, we play the intro sting — "you're
-  standing in the room". Kept quiet (0.32) for a premium, unobtrusive feel.
+  The viewer's boot splash bridges the load with a door-opening film behind
+  its loader logo (first frame fades in as a still, then the film starts),
+  posting 'stepinside:doorVideo' the moment playback begins — we play the door
+  SFX (the film's own extracted soundtrack, so sound is picture-locked) on
+  that cue, and film and audio open the door together over the loading screen. 'stepinside:doorVideoArmed' (sent as
+  the viewer boots) cancels our click-anchored fallback, which otherwise plays
+  the door over the loader as before (stale cached viewer, film missing).
+  When the viewer posts that the scene is revealed, we play the intro sting —
+  "you're standing in the room". Kept quiet (0.32) for a premium, unobtrusive
+  feel.
 */
-const SFX_VOLUME = 0.32;
+const SFX_VOLUME = 0.5;
 
 export default function Demos() {
   const { t } = useLang();
@@ -31,11 +38,39 @@ export default function Demos() {
   const doorRef = useRef<HTMLAudioElement | null>(null);
   const introRef = useRef<HTMLAudioElement | null>(null);
   const doorPlayingRef = useRef(false);
+  const doorStartedRef = useRef(false); // real (audible) door play has begun
+  const doorFallbackRef = useRef<number | null>(null);
+  // Mirrors `expanded` for the long-lived message handler: the door cue can
+  // arrive many seconds after the click (film starts once the scene is ready),
+  // and it shouldn't sound if the visitor has collapsed back to the page.
+  const expandedRef = useRef(false);
   const iframeRef = useRef<HTMLIFrameElement>(null);
+
+  // Start the audible door SFX — normally cued by the viewer's doorVideo
+  // message so the unlock sound lands exactly as the boot-splash door film
+  // starts; also armed as a click-anchored timeout fallback (stale cached
+  // viewer, video error). Idempotent: whichever fires first wins.
+  const playDoor = () => {
+    const door = doorRef.current;
+    if (!door || doorStartedRef.current || !expandedRef.current) return;
+    doorStartedRef.current = true;
+    if (doorFallbackRef.current !== null) {
+      window.clearTimeout(doorFallbackRef.current);
+      doorFallbackRef.current = null;
+    }
+    door.muted = false;
+    door.currentTime = 0;
+    door.volume = SFX_VOLUME;
+    doorPlayingRef.current = true;
+    door.play().catch(() => {
+      doorPlayingRef.current = false;
+    });
+  };
 
   // Tell the viewer when it's hidden (collapsed to the website) vs shown, so it
   // suspends/resumes its own audio — a mounted-but-hidden iframe keeps playing.
   useEffect(() => {
+    expandedRef.current = expanded;
     if (!launched) return;
     iframeRef.current?.contentWindow?.postMessage(
       { type: "stepinside:visibility", visible: expanded },
@@ -47,7 +82,7 @@ export default function Demos() {
   useEffect(() => {
     // ?v bumped whenever the SFX files change, so the browser never plays a
     // stale cached clip while we iterate on the sounds.
-    const door = new Audio("/sfx/door.mp3?v=3");
+    const door = new Audio("/sfx/door.mp3?v=4");
     const intro = new Audio("/sfx/intro.mp3?v=3");
     for (const a of [door, intro]) {
       a.preload = "auto";
@@ -69,6 +104,20 @@ export default function Demos() {
     // somehow still going, defer the intro until it ends so they never overlap.
     const onMessage = (e: MessageEvent) => {
       if (e.origin !== window.location.origin) return;
+      // The viewer will cue the door itself (when its film starts, right
+      // before the reveal) — stand down the click-anchored fallback.
+      if (e.data?.type === "stepinside:doorVideoArmed") {
+        if (doorFallbackRef.current !== null) {
+          window.clearTimeout(doorFallbackRef.current);
+          doorFallbackRef.current = null;
+        }
+        return;
+      }
+      // The boot-splash door film just started — open the door audibly too.
+      if (e.data?.type === "stepinside:doorVideo") {
+        playDoor();
+        return;
+      }
       if (e.data?.type !== "stepinside:viewerReady") return;
       const playIntro = () => {
         intro.currentTime = 0;
@@ -93,6 +142,10 @@ export default function Demos() {
     window.addEventListener("message", onMessage);
     return () => {
       window.removeEventListener("message", onMessage);
+      if (doorFallbackRef.current !== null) {
+        window.clearTimeout(doorFallbackRef.current);
+        doorFallbackRef.current = null;
+      }
       door.pause();
       intro.pause();
     };
@@ -106,12 +159,26 @@ export default function Demos() {
       const door = doorRef.current;
       const intro = introRef.current;
       if (door) {
-        door.currentTime = 0;
+        // Prime the door within the gesture (muted real play, same pattern as
+        // the intro below) so the actual play can start later from the async
+        // doorVideo message — in sync with the boot splash's door film.
+        door.muted = true;
         door.volume = SFX_VOLUME;
-        doorPlayingRef.current = true;
-        door.play().catch(() => {
-          doorPlayingRef.current = false;
-        });
+        door
+          .play()
+          .then(() => {
+            // If the doorVideo cue already started the real play, leave it be.
+            if (doorStartedRef.current) return;
+            door.pause();
+            door.currentTime = 0;
+            door.muted = false;
+          })
+          .catch(() => {
+            door.muted = false;
+          });
+        // Fallback, anchored to the click: if the viewer never reports its
+        // door film starting, play the unlock over the loader anyway.
+        doorFallbackRef.current = window.setTimeout(playDoor, 2600);
       }
       if (intro) {
         // Prime the intro within the gesture so it can play later from the async
