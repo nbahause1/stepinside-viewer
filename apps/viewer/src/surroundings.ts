@@ -31,11 +31,13 @@ type SurroundingsSettings = {
     pois: SurroundingsPoi[]
 };
 
-// Default style: CARTO Positron (calm, light — reads like a paper map inside
-// the dark glass frame). Free for NON-commercial use only; a commercial
-// go-live must set settings.surroundings.styleUrl to a licensed provider
-// (MapTiler / Stadia Maps). See umgebungskarte-bauplan.md.
-const DEFAULT_STYLE_URL = 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json';
+// Default style: MapTiler "dataviz" (calm, light — reads like a paper map
+// inside the dark glass frame). Licensed via the MapTiler-Free account; the
+// key is a PUBLIC client-side key, protected by the account's allowed-origins
+// list (myinnsyn.de, *.myinnsyn.de, localhost, *.vercel.app), so it is safe
+// in the bundle. Per-scene override: settings.surroundings.styleUrl.
+// See umgebungskarte-bauplan.md.
+const DEFAULT_STYLE_URL = 'https://api.maptiler.com/maps/dataviz/style.json?key=EXxhuExYf1YqzB6AL5Bi';
 
 // The maplibre stylesheet is copied to public/vendor/ by rollup; injected as a
 // <link> alongside the dynamic import so neither ships with the viewer core.

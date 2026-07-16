@@ -25,11 +25,14 @@ relevanten Fähigkeiten (flyTo, Routen, Marker, Popups) sind MapLibre-Kern.
 → Wir bauen mit **MapLibre GL direkt** und übernehmen mapcns Design-Sprache
 (dezente Marker, Tooltips, dunkle/helle Kartenstile) in unserem innsyn-Look.
 
-**Tile-Lizenz (wichtig für Livegang):** Kartenkacheln kommen von einem externen
-Dienst. CARTO (mapcn-Default) ist nur nicht-kommerziell frei. Für die Entwicklung
-nutzen wir CARTO, der Style-URL ist aber per settings.json konfigurierbar —
-zum Livegang auf MapTiler (~30 $/Monat) oder Stadia Maps (~20 $/Monat) umstellen.
-Ein Feld, ein Wert, fertig.
+**Tile-Lizenz (erledigt 16.07.2026):** Kartenkacheln kommen von MapTiler
+(Free-Plan, Account haukecux19@gmail.com, ~100k Aufrufe/Monat, kommerziell
+erlaubt, MapTiler-Attribution läuft über maplibre automatisch). Der Key ist
+ein öffentlicher Client-Key, geschützt über die Allowed-HTTP-Origins-Liste
+im MapTiler-Dashboard (myinnsyn.de, *.myinnsyn.de, localhost, *.vercel.app) —
+NICHT über Geheimhaltung. Style: "dataviz" (hell, ruhig), als
+DEFAULT_STYLE_URL in surroundings.ts; settings.surroundings.styleUrl bleibt
+als Override pro Szene. Bei Key-Missbrauch: neuen Key anlegen, alten löschen.
 
 ---
 
@@ -148,8 +151,8 @@ bisher nur mit dem Makler-Fallback beantworten. Jetzt hat er ein Werkzeug.
 
 ## Später (bewusst NICHT jetzt)
 
-- Tile-Anbieter-Wechsel auf MapTiler/Stadia beim Livegang (`DU`: Account + Key,
-  `ICH`: styleUrl umstellen) — bis dahin kein Livegang dieser Karte.
+- ~~Tile-Anbieter-Wechsel auf MapTiler/Stadia beim Livegang~~ → erledigt
+  16.07.2026, MapTiler Free (siehe Tile-Lizenz-Abschnitt oben).
 - "Lage"-Sektion auf der Website-Property-Seite (dort ist React — mapcn passt
   direkt, gleiche Daten).
 - Kategorien-Feintuning pro Objekt (welche 6 Chips zeigt ein Objekt in Winterhude
