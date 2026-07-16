@@ -80,7 +80,7 @@
       "id": "location",
       "topic": "location",
       "rooms": [],
-      "text": "Die Wohnung liegt in einer ruhigen, von Altbauten geprägten Wohnstraße in Hamburg-Eppendorf. Cafés, Bäcker und der Wochenmarkt sind fußläufig erreichbar, die U-Bahn Kellinghusenstraße liegt etwa 5 Gehminuten entfernt. Alster und Grünanlagen sind schnell zu Fuß oder mit dem Rad erreicht."
+      "text": "Die Wohnung liegt in einer ruhigen, von Altbauten geprägten Wohnstraße in Hamburg-Eppendorf. Cafés, Bäcker und der Wochenmarkt sind fußläufig erreichbar, die U-Bahn Kellinghusenstraße liegt etwa 12 Gehminuten entfernt. Alster und Grünanlagen sind schnell zu Fuß oder mit dem Rad erreicht."
     },
     {
       "id": "hausgeld",
@@ -94,6 +94,17 @@
       "rooms": [],
       "text": "Ansprechpartner ist Thomas Bergmann von Bergmann Immobilien: Telefon 040 555 123 45, E-Mail t.bergmann@bergmann-immobilien.de. Besichtigungstermine nach Vereinbarung, auch abends und am Wochenende."
     }
+  ],
+  "location": { "lng": 9.9838, "lat": 53.5895 },
+  "surroundings": [
+    { "id": "supermarkt", "label": "Supermarkt", "name": "EDEKA Schlemmermarkt Struve", "walkMinutes": 7 },
+    { "id": "baecker", "label": "Bäckerei", "name": "Laya Bäckerei Café Konditorei", "walkMinutes": 5 },
+    { "id": "bahn", "label": "U-Bahn", "name": "Kellinghusenstraße", "walkMinutes": 12 },
+    { "id": "schule", "label": "Schule", "name": "Grundschule St. Nikolai", "walkMinutes": 6 },
+    { "id": "kita", "label": "Kita", "name": "Kindergarten Lek sä in i Norden", "walkMinutes": 7 },
+    { "id": "apotheke", "label": "Apotheke", "name": "Klosterhof-Apotheke", "walkMinutes": 7 },
+    { "id": "park", "label": "Park", "name": "Eppendorfer Park", "walkMinutes": 6 },
+    { "id": "cafe", "label": "Café", "name": "Junge", "walkMinutes": 8 }
   ],
   "voice": "Hanseatisch zurückhaltend und professionell, wie ein erfahrener Hamburger Makler: ruhig, präzise, warm. Kurze klare Sätze. Keine Superlative, keine Ausrufezeichen, kein Verkaufsdruck. Die Qualität der Wohnung spricht für sich; Fakten nennen statt schwärmen. Anrede stets Sie.",
   "fallback": {

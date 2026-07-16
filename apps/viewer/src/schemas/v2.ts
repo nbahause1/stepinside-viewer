@@ -280,6 +280,33 @@ type ExperienceSettings = {
         afterSeconds?: number
     },
 
+    // Neighbourhood map (optional; cast-through like `concierge`). With a
+    // `center` and at least one POI the viewer shows an "Umgebung" pill that
+    // opens a map overlay (MapLibre GL, lazy-loaded on first open): house
+    // marker, one chip per POI, and an animated walking route house→POI with
+    // minutes. Data is precomputed once per property by
+    // scripts/fetch-surroundings.mjs (Overpass + OSRM) — the browser never
+    // calls a geo service, only the tile server behind `styleUrl`.
+    // LICENSING: the default style is CARTO (free for non-commercial use
+    // only) — set `styleUrl` to a licensed provider (MapTiler/Stadia) before
+    // a commercial go-live.
+    surroundings?: {
+        // [lng, lat] of the property.
+        center: [number, number],
+        // MapLibre style URL override (tile provider).
+        styleUrl?: string,
+        pois: {
+            id: string,             // stable id, referenced by the concierge's mapPoi
+            label: string,          // category label on the chip ("Supermarkt")
+            name: string,           // real place name ("EDEKA Schlemmermarkt Struve")
+            lngLat: [number, number],
+            walkMinutes: number,
+            walkMeters?: number,
+            // Walking route geometry house→POI, [lng, lat] pairs (GeoJSON order).
+            route: [number, number][]
+        }[]
+    },
+
     // Optional scale verification (cast-through like `staging`). Authored once per
     // scan: pick a feature of KNOWN real length in the viewer (with config.debug on
     // the measure tool logs the two endpoints + length, ready to paste here), then

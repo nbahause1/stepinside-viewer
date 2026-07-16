@@ -19,7 +19,7 @@ if (process.argv.includes('--pre')) {
   let removed = 0;
   if (existsSync(src)) {
     for (const f of readdirSync(src)) {
-      if (/^(index-|tour-generator-).*\.js(\.map)?$/.test(f)) {
+      if (/^(index-|tour-generator-|maplibre-gl-).*\.js(\.map)?$/.test(f)) {
         rmSync(join(src, f));
         removed++;
       }
@@ -33,7 +33,7 @@ mkdirSync(destFonts, { recursive: true });
 
 // drop stale hashed chunks
 for (const f of readdirSync(dest)) {
-  if (/^(index-|tour-generator-).*\.js$/.test(f)) {
+  if (/^(index-|tour-generator-|maplibre-gl-).*\.js$/.test(f)) {
     rmSync(join(dest, f));
   }
 }
@@ -43,11 +43,23 @@ for (const f of readdirSync(src)) {
   const isArtifact =
     f === 'index.html' || f === 'index.css' || f === 'index.js' ||
     f === 'chat.html' ||  // standalone concierge chat page (phone handoff)
-    /^(index-|tour-generator-).*\.js$/.test(f) ||
+    f === 'door-open.mp4' ||  // arrival film behind the boot-splash loader
+    /^(index-|tour-generator-|maplibre-gl-).*\.js$/.test(f) ||
     f === 'settings.json';
   if (isArtifact) {
     copyFileSync(join(src, f), join(dest, f));
     copied.push(f);
+  }
+}
+
+// vendor assets (maplibre css for the surroundings map), copied like fonts
+const vendorDir = join(src, 'vendor');
+if (existsSync(vendorDir)) {
+  const destVendor = join(dest, 'vendor');
+  mkdirSync(destVendor, { recursive: true });
+  for (const f of readdirSync(vendorDir)) {
+    copyFileSync(join(vendorDir, f), join(destVendor, f));
+    copied.push(`vendor/${f}`);
   }
 }
 

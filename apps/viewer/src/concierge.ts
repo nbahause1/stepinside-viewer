@@ -27,6 +27,12 @@ type ChatMessage = {
 type ConciergeResponse = {
     answer: string,
     focus?: string | null,
+    // Id of a nearby place (settings.surroundings.pois) — the neighbourhood
+    // map opens and draws the walking route there (see surroundings.ts).
+    mapPoi?: string | null,
+    // Live-searched place (server-side find_place tool): the map opens and
+    // routes to these coordinates ("Wo ist der nächste MediaMarkt?").
+    mapPlace?: { name: string, address?: string, lngLat: [number, number] } | null,
     // True when the model answered with the fallback message (question not
     // covered by the knowledge base) — we render the contact buttons then.
     fallback?: boolean,
@@ -374,6 +380,21 @@ const initConcierge = (global: Global) => {
                 // there — the scan is visible behind the small panel.
                 const poi = data.focus ? pois.find(p => p.id === data.focus) : undefined;
                 if (poi?.camera) events.fire('focusPoi', poi.camera);
+                // Surroundings answer ("wo ist der nächste Supermarkt?"): open
+                // the neighbourhood map and draw the walking route. The camera
+                // focus and the map are mutually exclusive by construction —
+                // focus ids and mapPoi ids come from different lists.
+                if (typeof data.mapPoi === 'string' && data.mapPoi.length > 0) {
+                    events.fire('surroundings:show', data.mapPoi);
+                } else if (data.mapPlace && Array.isArray(data.mapPlace.lngLat)) {
+                    // Live-searched place (find_place tool): same map, but the
+                    // destination is an arbitrary coordinate, not a curated POI.
+                    events.fire('surroundings:showPlace', {
+                        label: data.mapPlace.name,
+                        detail: data.mapPlace.address ?? '',
+                        lngLat: data.mapPlace.lngLat
+                    });
+                }
                 userTurns += 1;
                 if (data.fallback === true && hasContact && !fallbackCardShown && !contactCardJustShown()) {
                     // The bot couldn't answer -> hand over with tap-able actions,

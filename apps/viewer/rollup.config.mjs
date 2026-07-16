@@ -81,7 +81,11 @@ const buildPublic = {
                 { src: 'src/fonts/*.woff2', dest: 'public/fonts' },
                 // Standalone concierge chat page (phones navigate here; a plain
                 // document is the one shape the iOS keyboard can't break).
-                { src: 'src/chat.html', dest: 'public' }
+                { src: 'src/chat.html', dest: 'public' },
+                // MapLibre stylesheet for the surroundings map — injected as a
+                // <link> by surroundings.ts on first open, alongside the
+                // dynamically imported library (neither ships in the core bundle).
+                { src: 'node_modules/maplibre-gl/dist/maplibre-gl.css', dest: 'public/vendor' }
             ]
         }),
         // The visitor bundle ships the full PlayCanvas engine — unminified it

@@ -39,6 +39,23 @@ export interface Fact {
   text: string;
 }
 
+/**
+ * A nearby place the concierge may point the viewer's neighbourhood map at.
+ * Mirror of the viewer's settings.surroundings.pois, WITHOUT coordinates or
+ * route geometry — the model only needs names and walking minutes for its
+ * answer text; the map data lives client-side. Generated once per property by
+ * apps/viewer/scripts/fetch-surroundings.mjs --kb.
+ */
+export interface SurroundingsPoi {
+  /** Stable id, must match the viewer's settings.surroundings.pois[].id. */
+  id: string;
+  /** Category label ("Supermarkt"). */
+  label: string;
+  /** Real place name ("EDEKA Schlemmermarkt Struve"). */
+  name: string;
+  walkMinutes: number;
+}
+
 /** A per-property knowledge base. */
 export interface KnowledgeBase {
   propertyId: string;
@@ -56,6 +73,15 @@ export interface KnowledgeBase {
    * costs almost nothing per message, but it is not the place for a brand book.
    */
   voice?: string;
+  /** Optional nearby places for the "what's around here" questions + map. */
+  surroundings?: SurroundingsPoi[];
+  /**
+   * Optional property coordinates (WGS84). Enables the find_place tool: the
+   * concierge can look up places the visitor asks about ("nächster
+   * MediaMarkt?") that are not in `surroundings`, with real walking/driving
+   * minutes from this point. Without it the tool is not offered at all.
+   */
+  location?: { lng: number; lat: number };
 }
 
 /** A function that resolves a propertyId to its KB, or null if unknown. */
@@ -196,9 +222,63 @@ export function validateKnowledge(raw: unknown): KnowledgeBase {
     voice = rawVoice;
   }
 
-  return voice !== undefined
-    ? { propertyId, displayName, context, rooms, facts, fallback, voice }
-    : { propertyId, displayName, context, rooms, facts, fallback };
+  const rawSurroundings = raw['surroundings'];
+  let surroundings: SurroundingsPoi[] | undefined;
+  if (rawSurroundings !== undefined) {
+    if (!Array.isArray(rawSurroundings) || rawSurroundings.length === 0) {
+      throw new KnowledgeValidationError(
+        'knowledge base: "surroundings" must be a non-empty array when present',
+      );
+    }
+    const seen = new Set<string>();
+    surroundings = rawSurroundings.map((poiValue, i) => {
+      if (!isObject(poiValue)) {
+        throw new KnowledgeValidationError(`surroundings[${i}]: must be an object`);
+      }
+      const id = requireString(poiValue, 'id', `surroundings[${i}]`);
+      if (seen.has(id)) {
+        throw new KnowledgeValidationError(`surroundings[${i}]: duplicate id "${id}"`);
+      }
+      seen.add(id);
+      const walkMinutes = poiValue['walkMinutes'];
+      if (typeof walkMinutes !== 'number' || !Number.isFinite(walkMinutes) || walkMinutes <= 0) {
+        throw new KnowledgeValidationError(
+          `surroundings[${i}].walkMinutes: must be a positive number`,
+        );
+      }
+      return {
+        id,
+        label: requireString(poiValue, 'label', `surroundings[${i}]`),
+        name: requireString(poiValue, 'name', `surroundings[${i}]`),
+        walkMinutes,
+      };
+    });
+  }
+
+  const rawLocation = raw['location'];
+  let location: { lng: number; lat: number } | undefined;
+  if (rawLocation !== undefined) {
+    if (!isObject(rawLocation)) {
+      throw new KnowledgeValidationError('knowledge base: "location" must be an object');
+    }
+    const lng = rawLocation['lng'];
+    const lat = rawLocation['lat'];
+    if (
+      typeof lng !== 'number' || !Number.isFinite(lng) || lng < -180 || lng > 180 ||
+      typeof lat !== 'number' || !Number.isFinite(lat) || lat < -90 || lat > 90
+    ) {
+      throw new KnowledgeValidationError(
+        'knowledge base: "location" must carry finite lng (-180..180) and lat (-90..90)',
+      );
+    }
+    location = { lng, lat };
+  }
+
+  const kb: KnowledgeBase = { propertyId, displayName, context, rooms, facts, fallback };
+  if (voice !== undefined) kb.voice = voice;
+  if (surroundings !== undefined) kb.surroundings = surroundings;
+  if (location !== undefined) kb.location = location;
+  return kb;
 }
 
 /**
