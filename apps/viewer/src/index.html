@@ -1511,12 +1511,16 @@
             const HEAD_START_MS = 180;    // playback runs this long before the fade-in — visible == moving
             const HANDOFF_LEAD_MS = 3000; // snap + focus pull + light flood (keep in sync with finishBootSplash)
             // Film length − hand-off lead, measured from the film's real start.
-            // Kept SHORT on purpose: the light wave starts early and spans the
-            // rest of the film, so the picture is in motion for the entire
-            // hand-off and the recede lands right on the film's end — the
-            // arrival never sits on a stopped frame. Derived from the file's
-            // metadata below; fallback matches the 5s film.
-            let filmHoldMs = 2000;
+            // The FLOOR is the important part: on a fast load (CDN + quick
+            // GPU) the scene can be ready after 2–3s — without the floor the
+            // light wave would start immediately and swallow the film before
+            // the door ever visibly opens ("kein Video"). The floor guarantees
+            // the film its full arc: exit earliest at ~3.4s film time, so the
+            // flash crest lands right on the film's end. On slow loads the
+            // value is load-bound anyway and nothing changes. Derived from the
+            // file's metadata below; fallback matches the 5s film.
+            const FILM_MIN_HOLD_MS = 3400;
+            let filmHoldMs = FILM_MIN_HOLD_MS;
             let loaderStart = Date.now();
 
             const postToParent = (type) => {
@@ -1543,7 +1547,7 @@
                 // never needs a constant edit here.
                 const applyDuration = () => {
                     if (Number.isFinite(doorVideo.duration) && doorVideo.duration > 0) {
-                        filmHoldMs = Math.max(1200, doorVideo.duration * 1000 - HANDOFF_LEAD_MS);
+                        filmHoldMs = Math.max(FILM_MIN_HOLD_MS, doorVideo.duration * 1000 - HANDOFF_LEAD_MS);
                     }
                 };
                 if (doorVideo.readyState >= 1) applyDuration();
