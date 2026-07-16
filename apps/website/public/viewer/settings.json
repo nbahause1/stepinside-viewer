@@ -193,7 +193,7 @@
   "concierge": {
     "mode": "ai",
     "greeting": "Frag mich etwas zur Wohnung.",
-    "endpoint": "http://localhost:8787/concierge",
+    "endpoint": "https://concierge-api.stepinside-eu.workers.dev/concierge",
     "propertyId": "altbau-eppendorf",
     "softLimit": 8,
     "contact": {
