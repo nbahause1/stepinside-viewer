@@ -711,13 +711,39 @@ class Viewer {
 
                     state.readyToRender = true;
 
-                    // handle quality mode changes + runtime tier demotion +
-                    // hero-still refinement (ramp detail up on settle, down on move)
-                    events.on('performanceMode:changed', applyPerfSettings);
-                    events.on('deviceTier:changed', applyPerfSettings);
-                    events.on('heroStill:changed', applyPerfSettings);
-                    events.on('positionStable:changed', applyPerfSettings);
-                    applyPerfSettings();
+                    // Wire the quality ramp (mode changes + runtime tier
+                    // demotion + hero-still refinement) and run it once.
+                    const startQualityRamp = () => {
+                        events.on('performanceMode:changed', applyPerfSettings);
+                        events.on('deviceTier:changed', applyPerfSettings);
+                        events.on('heroStill:changed', applyPerfSettings);
+                        events.on('positionStable:changed', applyPerfSettings);
+                        applyPerfSettings();
+                    };
+                    if (mobile) {
+                        // The reveal moment is where the full-detail streaming
+                        // wave used to start: applyPerfSettings drops the
+                        // load-time lowest-LOD clamp, and the decode/upload
+                        // burst then collides with the entrance glide under
+                        // the fading splash — on A14/A15-class phones exactly
+                        // that handover stuttered. Hold the wave until the
+                        // arrival settles (first hero-still = camera stood
+                        // still briefly), with a hard cap so a visitor who
+                        // immediately walks off never lingers on the coarse
+                        // LOD. Motion hides the coarse stage; the sharp
+                        // upgrade lands on a still image, where it reads as
+                        // intended.
+                        let ramped = false;
+                        const rampOnce = () => {
+                            if (ramped) return;
+                            ramped = true;
+                            startQualityRamp();
+                        };
+                        events.once('heroStill:changed', rampOnce);
+                        setTimeout(rampOnce, 2500);
+                    } else {
+                        startQualityRamp();
+                    }
 
                     // Runtime tier DEMOTION — the safety net for devices the
                     // static heuristic can't know (Android wildcards, old
