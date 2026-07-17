@@ -10,6 +10,9 @@
 const DEFAULT_ALLOWED_ORIGINS = [
   'http://localhost:4500',
   'http://127.0.0.1:4500',
+  // Secondary viewer dev port (used when 4500 is taken by another session).
+  'http://localhost:4520',
+  'http://127.0.0.1:4520',
   'http://localhost:8787',
   // The website (Next dev, port 3000) embeds the viewer — local chat tests
   // against `npm run dev` (dev-server.ts) run under THIS origin, not 4500.

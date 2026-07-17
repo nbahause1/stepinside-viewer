@@ -197,11 +197,16 @@ export async function handleConcierge(
           // Id of a nearby place (kb.surroundings) the viewer's map should
           // route to, or null. Only meaningful for KBs with surroundings.
           mapPoi: { type: ['string', 'null'] },
+          // True when the visitor asked about sizes/dimensions/fit — the
+          // viewer glides to its bird's-eye view where the authored room
+          // dimensions are overlaid (it ignores the flag when no dimensions
+          // are authored for the scan).
+          showDimensions: { type: 'boolean' },
           // True when the model answered with the fallback message (question
           // not covered by the KB) — the client renders contact buttons then.
           fallback: { type: 'boolean' },
         },
-        required: ['answer', 'focus', 'mapPoi', 'fallback'],
+        required: ['answer', 'focus', 'mapPoi', 'showDimensions', 'fallback'],
         additionalProperties: false,
       },
     },
@@ -291,7 +296,7 @@ export async function handleConcierge(
     if (message.stop_reason === 'refusal') {
       return {
         status: 200,
-        body: { answer: kb.fallback.de, focus: null, mapPoi: null, mapPlace: null, fallback: true },
+        body: { answer: kb.fallback.de, focus: null, mapPoi: null, mapPlace: null, showDimensions: false, fallback: true },
       };
     }
 
@@ -315,6 +320,9 @@ export async function handleConcierge(
         mapPlace: answeredFromPlace && foundPlace
           ? { name: foundPlace.name, address: foundPlace.address, lngLat: foundPlace.lngLat }
           : null,
+        // Only ride along on a real answer: flying to the dimensions view
+        // while the text says "I don't know" would contradict it.
+        showDimensions: parsed.showDimensions && !parsed.fallback && !usedServerFallback,
         fallback: parsed.fallback || usedServerFallback,
         usage: usageTotal,
       },
@@ -347,29 +355,30 @@ function extractText(content: Anthropic.ContentBlock[]): string {
 }
 
 /**
- * Parse the structured { answer, focus, mapPoi, fallback } JSON. `focus` is
- * only honoured when it is one of the ids the client offered, `mapPoi` only
- * when it names a place in the KB's surroundings list (so the model can't
- * point the camera or the map at something that doesn't exist); anything else
- * becomes null.
+ * Parse the structured { answer, focus, mapPoi, showDimensions, fallback }
+ * JSON. `focus` is only honoured when it is one of the ids the client offered,
+ * `mapPoi` only when it names a place in the KB's surroundings list (so the
+ * model can't point the camera or the map at something that doesn't exist);
+ * anything else becomes null.
  */
 function parseStructured(
   text: string,
   poiIds: Set<string>,
   mapPoiIds: Set<string>,
-): { answer: string; focus: string | null; mapPoi: string | null; fallback: boolean } {
+): { answer: string; focus: string | null; mapPoi: string | null; showDimensions: boolean; fallback: boolean } {
   try {
     const obj = JSON.parse(text) as {
-      answer?: unknown; focus?: unknown; mapPoi?: unknown; fallback?: unknown;
+      answer?: unknown; focus?: unknown; mapPoi?: unknown; showDimensions?: unknown; fallback?: unknown;
     };
     const answer = typeof obj.answer === 'string' ? obj.answer.trim() : '';
     const focus = typeof obj.focus === 'string' && poiIds.has(obj.focus) ? obj.focus : null;
     const mapPoi = typeof obj.mapPoi === 'string' && mapPoiIds.has(obj.mapPoi) ? obj.mapPoi : null;
+    const showDimensions = obj.showDimensions === true;
     const fallback = obj.fallback === true;
-    return { answer, focus, mapPoi, fallback };
+    return { answer, focus, mapPoi, showDimensions, fallback };
   } catch {
     // Not valid JSON (shouldn't happen with structured output) — treat the raw
     // text as the answer, no focus.
-    return { answer: text, focus: null, mapPoi: null, fallback: false };
+    return { answer: text, focus: null, mapPoi: null, showDimensions: false, fallback: false };
   }
 }

@@ -33,6 +33,10 @@ type ConciergeResponse = {
     // Live-searched place (server-side find_place tool): the map opens and
     // routes to these coordinates ("Wo ist der nächste MediaMarkt?").
     mapPlace?: { name: string, address?: string, lngLat: [number, number] } | null,
+    // True when the question was about sizes/dimensions/fit — the viewer
+    // glides to the bird's-eye view where the authored room dimensions
+    // (settings.rooms) are overlaid. Ignored when none are authored.
+    showDimensions?: boolean,
     // True when the model answered with the fallback message (question not
     // covered by the knowledge base) — we render the contact buttons then.
     fallback?: boolean,
@@ -402,6 +406,16 @@ const initConcierge = (global: Global) => {
                         detail: data.mapPlace.address ?? '',
                         lngLat: data.mapPlace.lngLat
                     });
+                } else if (data.showDimensions === true && !poi &&
+                    Array.isArray(settings.rooms) && settings.rooms.length > 0 &&
+                    state.cameraMode !== 'aerial') {
+                    // Size/dimension answer: glide up to the bird's-eye view,
+                    // where the authored room dimensions are overlaid — the
+                    // visitor reads the numbers in space while the chat cites
+                    // them. Camera focus and map win over this (they answer
+                    // more specific intents); no-op when already up there or
+                    // when the scan has no authored dimensions.
+                    events.fire('inputEvent', 'aerial');
                 }
                 userTurns += 1;
                 if (data.fallback === true && hasContact && !fallbackCardShown && !contactCardJustShown()) {

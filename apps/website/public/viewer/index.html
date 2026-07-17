@@ -1744,7 +1744,11 @@
                 }
                 finishBootSplash();
             };
-            const bootSafetyTimer = setTimeout(() => { firstFrameSeen = true; tryFinish(); }, 20000);
+            // Last-resort reveal if the scene never reports readiness. Generous
+            // on purpose: revealing INTO a half-streamed scan (hard cut to
+            // black, tiles popping) is worse than a long held light — real
+            // fatal errors surface via sse:error/showFatalError instead.
+            const bootSafetyTimer = setTimeout(() => { firstFrameSeen = true; tryFinish(); }, 45000);
 
             // viewer.ts calls window.firstFrame?.() once the first frame has
             // rendered — chain onto any existing hook (screenshot tooling).

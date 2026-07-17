@@ -70,6 +70,15 @@ NEIGHBOURHOOD MAP — the viewer has a map that can show the walking route from 
 }
 
 /**
+ * The dimensions-view instruction. Always present (cache-stable): the client
+ * viewer decides for itself whether it actually has an authored dimensions
+ * overlay for the scan — a true flag is simply ignored otherwise.
+ */
+const DIMENSIONS_SECTION = `
+
+DIMENSIONS VIEW — the 3D viewer can glide to a bird's-eye view that overlays the property's room measurements (wall lengths, ceiling height) directly on the scan. If the visitor's latest question is about size, dimensions, area, height, or fit (wie groß/lang/breit/hoch ist ..., how big is the bedroom, what are the measurements, passt mein 2,4-m-Sofa ...), set "showDimensions" to true so that view opens alongside your answer. Otherwise set it to false. Answer the question itself from KNOWLEDGE as usual (cite the numbers), and NEVER mention the view, the camera, or the bird's-eye perspective in your answer text — it opens automatically alongside your words.`;
+
+/**
  * The find_place instruction. Only present when the KB carries the property's
  * coordinates (core.ts offers the tool under the same condition). Cache-stable
  * like the other sections.
@@ -99,7 +108,7 @@ export function buildSystemBlocks(kb: KnowledgeBase, pois: FocusTarget[]): Anthr
     {
       type: 'text',
       text: rules + focusSection(pois) + surroundingsSection(kb.surroundings) +
-        placeSearchSection(kb.location !== undefined),
+        DIMENSIONS_SECTION + placeSearchSection(kb.location !== undefined),
     },
     {
       type: 'text',

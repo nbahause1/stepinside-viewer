@@ -688,19 +688,26 @@ const initStaging = (global: Global) => {
     // ---- Silent background prewarm (live mode only) ----------------------------
     // The model takes ~60s/image. To make that wait invisible, we generate the
     // DEFAULT style in the background the moment the scene is ready: fly to the
-    // fixed drone view behind an opaque cover (the visitor never sees it and has
-    // no control yet — the spec's "Lade-/Poster-Phase" capture), grab the frame
-    // with the proven on-canvas capture, glide back to the start pose, drop the
-    // cover, and POST while the visitor walks/onboards. The pill only appears once
-    // the result is in the cache, so the first click is instant. The other two
-    // styles stay on-demand (generate() handles them) to keep token cost to one
-    // image per load.
+    // fixed drone view WHILE THE BOOT SPLASH STILL COVERS EVERYTHING, grab the
+    // frame with the proven on-canvas capture, glide back to the start pose,
+    // and only then let the splash's light recede — onto the settled room. The
+    // splash reveal is deferred by swallowing its `window.firstFrame` hook for
+    // the detour; its held, breathing flood is DESIGNED to wait (same path as
+    // a slow scan), so the hand-off stays one continuous light wave. The dark
+    // #stagePrewarmCover plate is only the FALLBACK for the rare case that the
+    // splash is already gone when the scene gets ready (its safety-timeout
+    // reveal on a very slow load) — without it the visitor would watch the
+    // camera fly. POSTing to the model happens after either path, while the
+    // visitor walks/onboards. The pill only appears once the result is in the
+    // cache, so the first click is instant. The other two styles stay
+    // on-demand (generate() handles them) to keep token cost to one image per
+    // load.
     if (!demoMode && styles.length > 0) {
         // Gate onboarding NOW (synchronously, before firstFrame): the tutorial's
         // 'look' leg watches camera yaw, so it must not run during our sweep.
         state.prewarming = true;
 
-        // Full-screen cover, created hidden up front so showing it at firstFrame is
+        // Fallback cover, created hidden up front so showing it at firstFrame is
         // a single synchronous class flip (no paint between poster-hide and cover).
         const cover = document.createElement('div');
         cover.id = 'stagePrewarmCover';
@@ -714,7 +721,32 @@ const initStaging = (global: Global) => {
                 state.prewarming = false; revealPill(); return;
             }
 
-            cover.classList.remove('hidden');   // hide the camera detour from the visitor
+            // Decide the curtain SYNCHRONOUSLY (this listener runs via
+            // events.fire('firstFrame') right BEFORE viewer.ts invokes
+            // window.firstFrame): if the boot splash is still covering the
+            // frame, defer its reveal past the detour; otherwise fall back to
+            // the opaque cover.
+            const splash = document.getElementById('bootSplash');
+            let releaseSplash: (() => void) | null = null;
+            const splashCovers = splash && !splash.classList.contains('is-hidden') &&
+                !splash.classList.contains('is-flashed');
+            if (splashCovers && typeof window.firstFrame === 'function') {
+                const reveal = window.firstFrame;
+                let released = false;
+                const release = () => {
+                    if (released) return;
+                    released = true;
+                    window.firstFrame = reveal;
+                    reveal();
+                };
+                window.firstFrame = () => { /* swallowed — released after the detour */ };
+                // Insurance: never hold the splash hostage to a hung detour
+                // (the detour itself is bounded to ~4s by its own timeouts).
+                window.setTimeout(release, 12000);
+                releaseSplash = release;
+            } else {
+                cover.classList.remove('hidden');   // hide the camera detour from the visitor
+            }
 
             let dataUrl: string | undefined;
             try {
@@ -724,14 +756,19 @@ const initStaging = (global: Global) => {
                 console.warn('Prewarm capture failed:', err);
             } finally {
                 // Toggle-exit aerial -> glide back to exactly the start pose, settle,
-                // then lift the cover and release the onboarding gate.
+                // then let the light recede / lift the cover and release the
+                // onboarding gate.
                 events.fire('inputEvent', 'aerial');
                 await wait(1200);               // no 'arrived' signal on exit; ~match the glide
                 app.renderNextFrame = true;
-                cover.classList.add('is-fading');
-                window.setTimeout(() => {
-                    cover.classList.add('hidden'); cover.classList.remove('is-fading');
-                }, 450);
+                if (releaseSplash) {
+                    releaseSplash();
+                } else {
+                    cover.classList.add('is-fading');
+                    window.setTimeout(() => {
+                        cover.classList.add('hidden'); cover.classList.remove('is-fading');
+                    }, 450);
+                }
                 state.prewarming = false;       // re-runs the tutorial's start check
             }
 
