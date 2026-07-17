@@ -24,16 +24,18 @@ apps/trailer-render/node_modules/
 apps/trailer-render/*.png
 apps/trailer-render/frames-list.txt
 
-# Scan assets (scene + collision) now live in R2, served by apps/assets-cdn.
-# They are NO LONGER in the repo — uploaded via tools once per property.
+# Demo-scan assets (scene-pruned/ + scene.voxel.*) SHIP WITH THE SITE DEPLOY
+# again (Vercel static): the old stepinside-assets R2 worker lives in a
+# Cloudflare account we have no access to and its upload was incomplete
+# (missing shN files caused 30-60s of 404 retries on every load). Only the
+# legacy blobs stay out of git. Future per-property scans use `?assets=`
+# with their own bucket.
 apps/website/public/viewer/scene/
-apps/website/public/viewer/scene-pruned/
 apps/website/public/viewer/scene-pruned-light.sog
 apps/website/public/viewer/scene-light.sog
 apps/website/public/viewer/scene.sog
-apps/website/public/viewer/scene.voxel.bin
-apps/website/public/viewer/scene.voxel.json
 
 # Auto-experience pipeline build/test outputs
 dist/
 apps/website/public/garage/
+.wrangler/

@@ -55,13 +55,15 @@
 
             const url = new URL(location.href);
 
-            // Scan assets (scene + collision) are served from R2 via the
-            // assets-cdn worker, keyed {propertyId}/{version}/... — NOT from
-            // the site deploy. `?assets=` overrides the base (e.g. a new
-            // property or a re-exported version); `?content=`/`?collision=`
+            // Scan assets (scene + collision): the demo scan ships WITH the
+            // site deploy (Vercel static, scene-pruned/ + scene.voxel.* next
+            // to this file) — the old stepinside-assets R2 worker lived in a
+            // Cloudflare account we have no access to, and its upload was
+            // incomplete (every tile's shN 404'd, costing 30-60s of retries
+            // per load). `?assets=` still overrides the base for future
+            // properties (their own CDN/bucket); `?content=`/`?collision=`
             // still override individual files (absolute URL or ./local path).
-            const assetsBase = (url.searchParams.get('assets') ??
-                'https://stepinside-assets.stepinside.workers.dev/demo-altbau/v1').replace(/\/+$/, '');
+            const assetsBase = (url.searchParams.get('assets') ?? '.').replace(/\/+$/, '');
 
             const posterUrl = url.searchParams.get('poster');
             const skyboxUrl = url.searchParams.get('skybox');
