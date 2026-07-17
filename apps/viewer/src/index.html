@@ -134,6 +134,18 @@
             const lowEndDesktop = renderer === 'webgl' ||
                 (navigator.hardwareConcurrency > 0 && navigator.hardwareConcurrency <= 4) ||
                 (navigator.deviceMemory > 0 && navigator.deviceMemory <= 4);
+            // Desktop Macs (Apple Silicon + integrated Intel) run TBDR /
+            // fill-rate-bound GPUs like the phones, NOT like discrete-GPU PCs —
+            // yet they take the desktop branch where none of the mobile
+            // fill-rate levers fire (full resolution on every moving frame,
+            // post-fx pass on). Mark them so the viewer borrows the mobile
+            // tricks: reduced render scale while the camera moves (sharp on
+            // settle), no post-fx pass, mild overdraw culling. A real Mac has
+            // no touch (iPad is caught above via maxTouchPoints); ?fillrate
+            // forces the profile on any device for A/B, ?nofillrate off.
+            const isMacDesktop = /Macintosh/i.test(navigator.userAgent) && !isIPadOS;
+            const fillrate = url.searchParams.has('nofillrate') ? false :
+                (url.searchParams.has('fillrate') || (isMacDesktop && !isMobileUA));
             const tierParam = url.searchParams.get('tier');
             const tier = ['low', 'mid', 'high'].includes(tierParam) ? tierParam :
                 // Desktop starts SMOOTH-first, not max-first: a lot of "desktops"
@@ -155,10 +167,11 @@
                 (isIPadOS ? 'high' :
                     (shortSide >= 393 && window.devicePixelRatio >= 3 && renderer === 'webgpu') ? 'high' : 'mid');
 
-            diag('detected: iPad=' + isIPadOS + ' mobile=' + isMobileUA + ' renderer=' + renderer + ' tier=' + tier);
+            diag('detected: iPad=' + isIPadOS + ' mobile=' + isMobileUA + ' renderer=' + renderer + ' tier=' + tier + ' fillrate=' + fillrate);
 
             const sseConfig = {
                 mobile: isMobileUA,
+                fillrate,
                 poster: posterUrl && createImage(posterUrl),
                 skyboxUrl,
                 collisionUrl,

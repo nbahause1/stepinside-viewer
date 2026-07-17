@@ -193,6 +193,11 @@ class Viewer {
         // iPad maxTouchPoints probe) catches it; fall back to platform.mobile
         // when the entry point didn't provide the flag.
         const mobile = config.mobile ?? platform.mobile;
+        // Fill-rate-limited DESKTOP (Macs: Apple-Silicon/integrated TBDR GPUs,
+        // phone-like fill-rate ceilings behind a desktop UA). Gets the mobile
+        // dynamic-resolution-while-moving path + mild overdraw culling, but
+        // keeps desktop budgets, LOD reach and input. See index.html detection.
+        const fillRateLimited = !mobile && (config.fillrate ?? false);
 
         // render skybox as plain equirect
         const glsl = ShaderChunks.get(graphicsDevice, 'glsl');
@@ -275,7 +280,7 @@ class Viewer {
         // realloc = stutter). Capture-phase + window so we still see the release
         // if the input controller stops propagation or the finger lifts off-canvas.
         let pointerActive = false;
-        if (mobile) {
+        if (mobile || fillRateLimited) {
             const down = () => {
                 pointerActive = true;
             };
@@ -311,16 +316,17 @@ class Viewer {
                 }
             }
 
-            // Mobile dynamic resolution: half scale while interacting (smooth),
-            // full scale once settled (a sharp still image). While a finger is
+            // Dynamic resolution: half scale while interacting (smooth), full
+            // scale once settled (a sharp still image). While a finger is
             // down we need many more still frames before settling, so a slow drag
             // that dips below the change threshold never flips to full res
             // mid-gesture; once the finger lifts we settle in ~2 frames for a
             // snappy sharpen. The large pointer-down threshold also rescues a
             // missed release (sharpens after a held still moment). The resize
             // happens in initCanvas's apply(); we just flip the flag and force one
-            // full-res render on settle. Desktop is left untouched.
-            if (mobile) {
+            // full-res render on settle. Runs on mobile AND fill-rate-limited
+            // desktops (Macs); discrete-GPU desktops are left untouched.
+            if (mobile || fillRateLimited) {
                 // The idle look-around moves the camera but should stay sharp, so
                 // it must NOT count as user movement — only a real camera change
                 // (not the idle wander) keeps the resolution low.
@@ -638,8 +644,11 @@ class Viewer {
                 // Anti-overdraw ladder: harsh culling reads as thinned-out,
                 // "washed" splats — only the weakest devices get the harsh
                 // values; high-tier phones stay near desktop quality.
-                gsplat.minContribution = !mobile ? 1 : (tier === 'low' ? 8 : (tier === 'mid' ? 3 : 2));
-                gsplat.alphaClip = !mobile ? 1 / 255 : (tier === 'low' ? 8 / 255 : (tier === 'mid' ? 4 / 255 : 2 / 255));
+                // Fill-rate-limited desktops (Macs) take the high-tier-phone
+                // values: visually near-identical, but real fill-rate savings
+                // on exactly the overdraw-bound GPUs that need them.
+                gsplat.minContribution = !mobile ? (fillRateLimited ? 2 : 1) : (tier === 'low' ? 8 : (tier === 'mid' ? 3 : 2));
+                gsplat.alphaClip = !mobile ? (fillRateLimited ? 2 / 255 : 1 / 255) : (tier === 'low' ? 8 / 255 : (tier === 'mid' ? 4 / 255 : 2 / 255));
                 gsplat.foveationStrength = !mobile ? 0 : (tier === 'low' ? 0.5 : (tier === 'mid' ? 0.25 : 0));
                 gsplat.antiAlias = config.aa && tier !== 'low';
             };
@@ -813,6 +822,7 @@ class Viewer {
         // effective constrained-device flag (see the constructor): config.mobile
         // includes the iPadOS probe, platform.mobile is the fallback.
         const mobile = config.mobile ?? platform.mobile;
+        const fillRateLimited = !mobile && (config.fillrate ?? false);
 
         // hpr override takes precedence over settings.highPrecisionRendering
         const highPrecisionRendering = config.hpr ?? settings.highPrecisionRendering;
@@ -820,8 +830,10 @@ class Viewer {
         // Mobile skips the post-fx camera frame entirely: the extra full-screen
         // pass costs real fill rate on phones (the primary bottleneck), and the
         // sharpness gain is invisible at mobile pixel sizes. Verified on-device
-        // 2026-07-02: ?nofx was the smoothest variant on iPhone.
-        const postFxRequested = !config.nofx && !mobile &&
+        // 2026-07-02: ?nofx was the smoothest variant on iPhone. Fill-rate-
+        // limited desktops (Macs) skip it for the same reason — their TBDR
+        // GPUs pay the same full-screen-pass cost the phones do.
+        const postFxRequested = !config.nofx && !mobile && !fillRateLimited &&
             (anyPostEffectEnabled(postEffectSettings) || highPrecisionRendering);
 
         const enableCameraFrame = !app.xr.active && postFxRequested;
