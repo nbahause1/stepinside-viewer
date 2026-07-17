@@ -105,6 +105,11 @@ const initConcierge = (global: Global) => {
         // returns to the tour (bfcache keeps the scene alive). Desktop keeps
         // the overlay panel — no on-screen keyboard, no war.
         if (mode !== 'scripted' && window.matchMedia('(pointer: coarse)').matches) {
+            // Carry the current room over so the standalone chat can send the
+            // same room context the in-viewer panel would.
+            try {
+                sessionStorage.setItem('conciergeRoom', currentRoom() ?? '');
+            } catch { /* storage blocked (private mode) — chat just omits it */ }
             window.location.href = 'chat.html';
             return;
         }
@@ -463,6 +468,59 @@ const initConcierge = (global: Global) => {
             send();
         }
     });
+
+    // --- Touch handoff, return leg -------------------------------------------
+    // On touch the chat lives in the standalone chat.html (see the toggle
+    // handler above). Camera-coupled answers (dimensions view, map route, POI
+    // focus) can't run over there — the chat page stores the chosen action in
+    // sessionStorage and navigates back here, and THIS consumer executes it:
+    // instantly on a bfcache restore (pageshow), after load otherwise. The
+    // action mapping mirrors the desktop panel's precedence exactly.
+    const ACTION_MAX_AGE_MS = 5 * 60 * 1000;
+    const runPendingAction = () => {
+        let raw: string | null = null;
+        try {
+            raw = sessionStorage.getItem('conciergeAction');
+            if (raw !== null) sessionStorage.removeItem('conciergeAction');
+        } catch { return; /* storage blocked — nothing to do */ }
+        if (!raw) return;
+        let action: { type?: string; id?: string; label?: string; detail?: string; lngLat?: unknown; ts?: number };
+        try {
+            action = JSON.parse(raw);
+        } catch { return; }
+        // Stale actions (old tab, revisit much later) must not yank the camera.
+        if (typeof action.ts !== 'number' || Date.now() - action.ts > ACTION_MAX_AGE_MS) return;
+        if (action.type === 'focus' && typeof action.id === 'string') {
+            const poi = pois.find(p => p.id === action.id);
+            if (poi?.camera) events.fire('focusPoi', poi.camera);
+        } else if (action.type === 'mapPoi' && typeof action.id === 'string') {
+            events.fire('surroundings:show', action.id);
+        } else if (action.type === 'mapPlace' && Array.isArray(action.lngLat)) {
+            events.fire('surroundings:showPlace', {
+                label: String(action.label ?? ''),
+                detail: String(action.detail ?? ''),
+                lngLat: action.lngLat
+            });
+        } else if (action.type === 'dimensions' &&
+            Array.isArray(settings.rooms) && settings.rooms.length > 0 &&
+            state.cameraMode !== 'aerial') {
+            events.fire('inputEvent', 'aerial');
+        }
+    };
+    const runWhenReady = () => {
+        if (state.loaded) {
+            runPendingAction();
+        } else {
+            // Fresh page load: the scene isn't up yet — run once it is. The
+            // stored action is consumed on first execution, so a second
+            // registration (pageshow + init) stays harmless.
+            events.once('loaded:changed', runPendingAction);
+        }
+    };
+    // bfcache restore fires pageshow (persisted) with the scene alive; a fresh
+    // load may fire pageshow before this init ran, hence the direct call too.
+    window.addEventListener('pageshow', runWhenReady);
+    runWhenReady();
 };
 
 export { initConcierge };

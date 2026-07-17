@@ -112,6 +112,24 @@
             text-decoration: none;
             font-size: 14px;
         }
+        /* Action chip: tap-able jump back into the tour (bubble-shaped button;
+           overrides the round 48px send-button base styles below). */
+        .msg--action { padding: 6px; }
+        .action-chip {
+            display: block;
+            width: 100%;
+            height: auto;
+            flex: none;
+            border: 1px solid rgba(20, 20, 20, 0.3);
+            border-radius: 80px;
+            background: #ffffff;
+            color: #141414;
+            padding: 9px 16px;
+            font-family: inherit;
+            font-size: 14px;
+            cursor: pointer;
+        }
+        .action-chip:active { background: #ebebee; }
         .dots span {
             display: inline-block;
             width: 6px;
@@ -198,19 +216,42 @@
 
             // Back = browser back when we came from the viewer (bfcache makes
             // that instant, the scene doesn't reload); plain link otherwise.
-            if (document.referrer.includes('index.html') && window.history.length > 1) {
+            // The action chips below take the same route, so the tour resumes
+            // seamlessly before the viewer executes the stored camera action.
+            const cameFromViewer = document.referrer.includes('index.html') && window.history.length > 1;
+            const goBackToTour = () => {
+                if (cameFromViewer) {
+                    window.history.back();
+                } else {
+                    window.location.href = 'index.html';
+                }
+            };
+            if (cameFromViewer) {
                 back.addEventListener('click', (e) => {
                     e.preventDefault();
-                    window.history.back();
+                    goBackToTour();
                 });
             }
 
-            // Same config source as the viewer: the concierge block in the
-            // settings.json that lives next to this page.
+            // Same config source as the viewer: the settings.json next to this
+            // page. Beyond the concierge block we read the POI list (the model
+            // may point the camera at one) and whether the scan has authored
+            // room dimensions (gates the measurement-view chip).
             let cfg = null;
+            let pois = [];
+            let hasRooms = false;
             try {
-                cfg = (await (await fetch('settings.json')).json()).concierge;
+                const settings = await (await fetch('settings.json')).json();
+                cfg = settings.concierge;
+                pois = Array.isArray(settings.pois) ?
+                    settings.pois.map((p) => ({ id: p.id, label: p.label, keywords: p.keywords })) : [];
+                hasRooms = Array.isArray(settings.rooms) && settings.rooms.length > 0;
             } catch { /* handled below */ }
+
+            // Room context stashed by the viewer right before the handoff —
+            // gives the model the same "current room" hint the panel sends.
+            let room = null;
+            try { room = sessionStorage.getItem('conciergeRoom') || null; } catch { /* omit */ }
 
             const appendBubble = (side, text) => {
                 const el = document.createElement('div');
@@ -265,6 +306,29 @@
             const contactCardJustShown = () =>
                 messages.lastElementChild?.classList.contains('msg--contact') === true;
 
+            // Action chip: a camera-coupled answer (measurement view, map
+            // route, POI focus) can't run on this plain page — the chip stores
+            // the action in sessionStorage and returns to the tour, where the
+            // viewer's concierge picks it up (instant via bfcache, after load
+            // otherwise).
+            const appendActionChip = (label, action) => {
+                const el = document.createElement('div');
+                el.className = 'msg msg--bot msg--action';
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'action-chip';
+                btn.textContent = label;
+                btn.addEventListener('click', () => {
+                    try {
+                        sessionStorage.setItem('conciergeAction', JSON.stringify({ ...action, ts: Date.now() }));
+                    } catch { /* storage blocked — still return to the tour */ }
+                    goBackToTour();
+                });
+                el.appendChild(btn);
+                messages.appendChild(el);
+                el.scrollIntoView({ block: 'end' });
+            };
+
             const showThinking = () => {
                 thinking = document.createElement('div');
                 thinking.className = 'msg msg--bot dots';
@@ -295,7 +359,7 @@
                     const res = await fetch(cfg.endpoint, {
                         method: 'POST',
                         headers: { 'content-type': 'application/json' },
-                        body: JSON.stringify({ propertyId: cfg.propertyId, messages: history, room: null, pois: [] })
+                        body: JSON.stringify({ propertyId: cfg.propertyId, messages: history, room, pois })
                     });
                     clearThinking();
 
@@ -322,6 +386,26 @@
                     history.push({ role: 'assistant', content: answer });
                     if (history.length > MAX_HISTORY) history.splice(0, history.length - MAX_HISTORY);
                     appendBubble('bot', answer);
+                    // Camera-coupled answer → offer the jump back into the
+                    // tour. ONE chip per answer, desktop precedence: POI focus
+                    // beats map route beats dimensions view (concierge.ts).
+                    const focusId = typeof data.focus === 'string' && pois.some((p) => p.id === data.focus) ? data.focus : null;
+                    let action = null;
+                    let chipLabel = '';
+                    if (focusId) {
+                        action = { type: 'focus', id: focusId };
+                        chipLabel = 'Im Rundgang ansehen';
+                    } else if (typeof data.mapPoi === 'string' && data.mapPoi.length > 0) {
+                        action = { type: 'mapPoi', id: data.mapPoi };
+                        chipLabel = 'Route auf der Karte ansehen';
+                    } else if (data.mapPlace && Array.isArray(data.mapPlace.lngLat)) {
+                        action = { type: 'mapPlace', label: data.mapPlace.name, detail: data.mapPlace.address || '', lngLat: data.mapPlace.lngLat };
+                        chipLabel = 'Route auf der Karte ansehen';
+                    } else if (data.showDimensions === true && hasRooms) {
+                        action = { type: 'dimensions' };
+                        chipLabel = 'Maße im Rundgang ansehen';
+                    }
+                    if (action) appendActionChip(chipLabel, action);
                     userTurns += 1;
                     if (data.fallback === true && hasContact && !fallbackCardShown && !contactCardJustShown()) {
                         fallbackCardShown = true;
