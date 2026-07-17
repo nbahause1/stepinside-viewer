@@ -999,6 +999,7 @@ body.tutorial-active #walkHint {
   z-index: 5;
 }
 #surroundingsOverlay #surroundingsSearch input {
+  box-sizing: border-box;
   width: 100%;
   padding: 9px 12px;
   border: 1px solid rgba(255, 255, 255, 0.12);

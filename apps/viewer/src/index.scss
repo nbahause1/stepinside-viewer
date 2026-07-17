@@ -1259,6 +1259,10 @@ body.tutorial-active #walkHint {
         z-index: 5;
 
         input {
+            // border-box: the global reset doesn't set it, and 100% + padding
+            // + border otherwise overflows the panel's right edge (clipped by
+            // its overflow:hidden — glaring on phone widths).
+            box-sizing: border-box;
             width: 100%;
             padding: 9px 12px;
             border: 1px solid rgba(255, 255, 255, 0.12);
