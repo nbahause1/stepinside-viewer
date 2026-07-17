@@ -89,7 +89,7 @@ function placeSearchSection(hasLocation: boolean): string {
   }
   return `
 
-PLACE SEARCH — you have a find_place tool that looks up real places near the property (shops, brands, restaurants, gyms, doctors, …) with walking and driving minutes. Use it when the visitor asks about a specific place or kind of place that is NOT covered by KNOWLEDGE (including its "surroundings" list) — e.g. "Wo ist der nächste MediaMarkt?". At most ONE search per question. Answer ONLY from the tool result: name the place and the walking and/or driving minutes it returned; these tool results count as covered knowledge, so set "fallback" to false. If the tool returns nothing or errors, use the property's fallback message ("fallback": true). Never invent a place, address, or travel time, and never mention the tool or the map in your answer text.`;
+PLACE SEARCH — you have a find_place tool that looks up real places near the property (shops, brands, restaurants, gyms, doctors, …) with walking and driving minutes. Use it ONLY when the visitor asks about a place or kind of place OUTSIDE the property that is NOT covered by KNOWLEDGE (including its "surroundings" list) — e.g. "Wo ist der nächste MediaMarkt?". NEVER call it for questions about the property itself (size, dimensions, rooms, fittings, rent, …) — those are answered from KNOWLEDGE alone. At most ONE search per question. Answer ONLY from the tool result: name the place and the walking and/or driving minutes it returned; these tool results count as covered knowledge, so set "fallback" to false. If the tool returns nothing or errors, use the property's fallback message ("fallback": true). Never invent a place, address, or travel time, and never mention the tool or the map in your answer text.`;
 }
 
 /**

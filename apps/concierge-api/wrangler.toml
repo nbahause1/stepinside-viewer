@@ -86,7 +86,7 @@ migrations_dir = "migrations"
 # previews + local dev (Next.js on 3000, viewer on 4500, incl. LAN IPs used
 # for on-device iPhone testing). Bewusst KEIN Wildcard: sonst könnte jede
 # fremde Seite auf unsere Kosten Modell-Anfragen stellen.
-ALLOWED_ORIGINS = "https://myinnsyn.de,https://www.myinnsyn.de,https://stepinside.eu,https://www.stepinside.eu,https://stepinside-viewer-git-analytics-leads-nbahauses-projects.vercel.app,https://stepinside-viewer-git-concierge-endprodukt-nbahauses-projects.vercel.app,https://stepinside-viewer-git-concierge-merge-nbahauses-projects.vercel.app,https://stepinside-viewer-git-aker-redesign-nbahauses-projects.vercel.app,http://localhost:3000,http://127.0.0.1:3000,http://192.168.0.146:3000,http://192.168.0.201:3000,http://localhost:4500,http://127.0.0.1:4500,http://192.168.0.201:4500"
+ALLOWED_ORIGINS = "https://myinnsyn.de,https://www.myinnsyn.de,https://stepinside.eu,https://www.stepinside.eu,https://stepinside-viewer-git-analytics-leads-nbahauses-projects.vercel.app,https://stepinside-viewer-git-concierge-endprodukt-nbahauses-projects.vercel.app,https://stepinside-viewer-git-concierge-merge-nbahauses-projects.vercel.app,https://stepinside-viewer-git-aker-redesign-nbahauses-projects.vercel.app,https://stepinside-viewer-git-ios-concierge-chips-nbahauses-projects.vercel.app,http://localhost:3000,http://127.0.0.1:3000,http://192.168.0.146:3000,http://192.168.0.201:3000,http://localhost:4500,http://127.0.0.1:4500,http://192.168.0.201:4500"
 STAGE_DAILY_LIMIT = "200"
 CONCIERGE_DAILY_LIMIT = "1000"
 EVENTS_DAILY_LIMIT = "50000"

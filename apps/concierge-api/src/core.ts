@@ -330,8 +330,12 @@ export async function handleConcierge(
 
     // The searched place only rides along when the model actually answered
     // from it — on a fallback answer a map to the place would contradict the
-    // "I don't know" text.
-    const answeredFromPlace = foundPlace !== null && !parsed.fallback && !usedServerFallback;
+    // "I don't know" text. Same for a dimensions answer: Haiku sometimes
+    // calls find_place on a plain size question ("wie groß ist der Raum?"),
+    // and the stray place must not hijack the camera action — the visitor
+    // asked about the room, so the measurement view wins.
+    const answeredFromPlace = foundPlace !== null && !parsed.fallback && !usedServerFallback &&
+      !parsed.showDimensions;
 
     return {
       status: 200,
