@@ -2890,15 +2890,6 @@ body.measure-active #controlDome {
         }
     }
 
-    .survey__cta--secondary {
-        border: 1px solid rgba(0, 0, 0, 0.12);
-        background: linear-gradient(180deg, rgba(255, 255, 255, 0.8), rgba(246, 247, 250, 0.62));
-        box-shadow:
-            0 6px 14px -10px rgba(0, 0, 0, 0.3),
-            inset 0 1px 0 0 rgba(255, 255, 255, 0.9);
-        color: var(--ink-1);
-    }
-
     .survey__subtitle {
         padding: 4px 24px 0;
         font-size: 12px;

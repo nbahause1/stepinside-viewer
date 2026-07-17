@@ -6,9 +6,10 @@ import type { Global } from './types';
 // leaving fullscreen after a ≥30 s stint — a light frosted glass card slides
 // in bottom-centre and asks, in a single tap, how helpful the tour was on a
 // 1-5 scale (1 = gar nicht hilfreich, 5 = sehr hilfreich). A 4-5 rating
-// offers two warm CTAs ("Besichtigung anfragen" / "Exposé erhalten") that
-// open a three-field mini lead form; lower ratings get a warm "Danke!" and
-// the card leaves.
+// offers ONE warm CTA ("Besichtigung anfragen") that opens a three-field
+// mini lead form; lower ratings get a warm "Danke!" and the card leaves.
+// (The former "Exposé erhalten" second CTA was removed 2026-07-18: one
+// funnel, desktop and touch alike.)
 //
 // The card rides on the analytics module: survey/cta taps travel through the
 // same batched fire-and-forget queue (events.fire('analytics', …) →
@@ -84,7 +85,6 @@ const CARD_HTML = `
         <div class="survey__title">Danke! Magst du direkt weitergehen?</div>
         <div class="survey__ctas">
             <button type="button" class="survey__cta" data-cta="besichtigung">Besichtigung anfragen</button>
-            <button type="button" class="survey__cta survey__cta--secondary" data-cta="expose">Exposé erhalten</button>
         </div>
         <button type="button" class="survey__decline">Nein, danke</button>
     </div>
@@ -236,19 +236,20 @@ const init = (global: Global) => {
             });
         });
 
-        // -- step 2: CTAs (only reached after a 4-5 rating) --------------------
+        // -- step 2: CTA (only reached after a 4-5 rating) ---------------------
+        // Single path since 2026-07-18: the "Exposé erhalten" side door was
+        // removed on purpose — every warm lead lands in the SAME Besichtigung
+        // funnel, on desktop and touch alike.
         let interest = 'besichtigung';
-        let timeframe: string | null = null;   // move-in qualifier (Besichtigung path only)
+        let timeframe: string | null = null;   // move-in qualifier (kept for the lead payload)
         root.querySelectorAll<HTMLButtonElement>('.survey__cta[data-cta]').forEach((btn) => {
             btn.addEventListener('click', () => {
                 interest = btn.dataset.cta ?? 'besichtigung';
                 events.fire('analytics', 'cta_click', { cta: interest });
-                q('[data-role="formTitle"]').textContent =
-                    interest === 'expose' ? 'Exposé erhalten' : 'Besichtigung anfragen';
-                // Direct to the form for BOTH paths — the "ab wann Einzug?"
-                // move-in qualifier step was removed (2026-07-10) so the visitor
-                // reaches the form in one tap. timeframe stays null (the step +
-                // its handlers are kept below, unused, to re-enable easily).
+                // Direct to the form — the "ab wann Einzug?" move-in qualifier
+                // step was removed (2026-07-10) so the visitor reaches the form
+                // in one tap. timeframe stays null (the step + its handlers are
+                // kept below, unused, to re-enable easily).
                 timeframe = null;
                 showStep('form');
             });
@@ -266,13 +267,10 @@ const init = (global: Global) => {
         });
 
         // Inquiry-pill entry: opens the lead form directly (the move-in
-        // qualifier step was removed 2026-07-10).
+        // qualifier step was removed 2026-07-10). The form title is static
+        // ("Besichtigung anfragen" in CARD_HTML) — the Exposé path is gone.
         openLeadForm = (interestValue: string) => {
             interest = interestValue;
-            q('[data-role="formTitle"]').textContent =
-                interestValue === 'expose' ? 'Exposé erhalten' : 'Besichtigung anfragen';
-            // Straight to the form — the "ab wann Einzug?" move-in qualifier
-            // step was removed (2026-07-10). timeframe stays null.
             timeframe = null;
             showStep('form');
         };
