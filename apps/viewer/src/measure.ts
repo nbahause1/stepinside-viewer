@@ -154,7 +154,7 @@ const initMeasure = (global: Global, _picker: Picker, collision: Collision | nul
         a = null;
         b = null;
         preview = null;
-        state.moveLocked = on;       // block walking while measuring (look-around still works)
+        state.measuring = on;        // block walking while measuring (look-around still works) — own flag, so the tutorial's moveLocked resets can't unlock walking mid-measurement
         IdleLook.suppressed = on;    // hold the camera still — no idle wander while measuring
         document.body.classList.toggle('measure-active', on);
         overlay.classList.toggle('hidden', !on);
@@ -197,25 +197,97 @@ const initMeasure = (global: Global, _picker: Picker, collision: Collision | nul
         }
         // Opposite-ray pairs -> straight spans through the camera position.
         const spans = fan
-            .filter(f => f.deg < 180 && f.dist !== null)
-            .map((f) => {
-                const opposite = fan.find(o => o.deg === f.deg + 180);
-                return opposite?.dist != null
-                    ? { deg: f.deg, span: +(f.dist! + opposite.dist).toFixed(3) }
-                    : null;
-            })
-            .filter((s): s is { deg: number; span: number } => s !== null);
+        .filter(f => f.deg < 180 && f.dist !== null)
+        .map((f) => {
+            const opposite = fan.find(o => o.deg === f.deg + 180);
+            return opposite?.dist != null ?
+                { deg: f.deg, span: +(f.dist! + opposite.dist).toFixed(3) } :
+                null;
+        })
+        .filter((s): s is { deg: number; span: number } => s !== null);
         const up = ray(0, 1, 0);
         const down = ray(0, -1, 0);
         const result = {
             position: [+pos.x.toFixed(3), +pos.y.toFixed(3), +pos.z.toFixed(3)],
             floorToCeiling: up !== null && down !== null ? +(up + down).toFixed(3) : null,
+            up,
+            down,
             spans,
             fan
         };
         console.log(`probeRoom →\n${JSON.stringify(result)}`);
         return result;
     };
+
+    // Authoring aid (console): build a ready-to-paste `settings.rooms[]` entry
+    // for the room around the current camera position (see room-dimensions.ts).
+    // Uses the probeRoom ray fan: the widest reliable span becomes the length
+    // axis, its perpendicular the width axis, and the three dimension lines are
+    // laid along the floor at the base of the far walls plus one vertical line
+    // in the far corner. `maxSpan` guards against rays escaping through open
+    // doors/windows (default 15 m). The result is a STARTING POINT — verify it
+    // visually in measure mode and nudge the points where the scan is irregular.
+    (window as unknown as { roomEntry: (name?: string, stepDeg?: number, maxSpan?: number, origin?: number[]) => unknown }).roomEntry = (name = 'Raum', stepDeg = 5, maxSpan = 15, origin?: number[]) => {
+        const probe = (window as unknown as { probeRoom: (stepDeg?: number, origin?: number[]) => any }).probeRoom(stepDeg, origin);
+        if (!probe || probe.up === null || probe.down === null) {
+            console.log('roomEntry: no floor/ceiling hit — stand inside the room');
+            return null;
+        }
+        const pos = probe.position as number[];
+        const fan = probe.fan as { deg: number, dist: number | null }[];
+        const at = (deg: number) => fan.find(f => f.deg === ((deg % 360) + 360) % 360)?.dist ?? null;
+        // The SMALLEST span is the wall-to-wall width, i.e. it runs perpendicular
+        // to the long walls — the widest span would be the room's diagonal and
+        // mis-align every line. Both its rays and both perpendicular rays must
+        // hit within maxSpan (guards against escapes through open doors/windows).
+        let best: { deg: number, span: number } | null = null;
+        for (const s of probe.spans as { deg: number, span: number }[]) {
+            if (s.span > maxSpan) continue;
+            const perp = [at(s.deg + 90), at(s.deg + 270)];
+            if (perp.some(d => d === null || d! > maxSpan)) continue;
+            if (!best || s.span < best.span) best = s;
+        }
+        if (!best) {
+            console.log('roomEntry: no reliable span — try a different spot or a larger maxSpan');
+            return null;
+        }
+        const rad = (best.deg * Math.PI) / 180;
+        const v = [Math.cos(rad), Math.sin(rad)];                  // width axis (x, z)
+        const u = [Math.cos(rad + Math.PI / 2), Math.sin(rad + Math.PI / 2)];   // length axis
+        const dW1 = at(best.deg)!;
+        const dW2 = at(best.deg + 180)!;
+        const dL1 = at(best.deg + 90)!;
+        const dL2 = at(best.deg + 270)!;
+        const floorY = pos[1] - probe.down + 0.04;                 // just above the floor
+        const height = probe.up + probe.down;
+        const p = (x: number, y: number, z: number) => [+x.toFixed(3), +y.toFixed(3), +z.toFixed(3)];
+        // The four floor corners of the room rectangle — the perimeter lines
+        // share them exactly, so the frame is CLOSED (lines meet in the
+        // corners instead of stopping short of them).
+        const corner = (sL: number, sW: number) => {
+            const dL = sL > 0 ? dL1 : dL2;
+            const dW = sW > 0 ? dW1 : dW2;
+            return { x: pos[0] + u[0] * dL * sL + v[0] * dW * sW, z: pos[2] + u[1] * dL * sL + v[1] * dW * sW };
+        };
+        const ff = corner(1, 1);     // far/far — the height line stands here
+        const fn = corner(1, -1);
+        const nf = corner(-1, 1);
+        const nn = corner(-1, -1);
+        const entry = {
+            name,
+            center: p(pos[0], pos[1], pos[2]),
+            area: +((dL1 + dL2) * (dW1 + dW2)).toFixed(1),
+            lines: [
+                { a: p(nf.x, floorY, nf.z), b: p(ff.x, floorY, ff.z) },   // length, far side wall
+                { a: p(nn.x, floorY, nn.z), b: p(fn.x, floorY, fn.z) },   // length, near side wall
+                { a: p(fn.x, floorY, fn.z), b: p(ff.x, floorY, ff.z) },   // width, far end wall
+                { a: p(nn.x, floorY, nn.z), b: p(nf.x, floorY, nf.z) },   // width, near end wall
+                { a: p(ff.x, floorY, ff.z), b: p(ff.x, floorY + height - 0.08, ff.z) }   // ceiling height, far corner
+            ]
+        };
+        console.log(`roomEntry →\n${JSON.stringify(entry)}`);
+        return entry;
+    };
 };
 
-export { initMeasure };
+export { initMeasure, formatLength };

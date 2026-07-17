@@ -38,6 +38,7 @@ import { nearlyEquals } from './core/math';
 import type { DebugPanel } from './debug';
 import { InputController } from './input-controller';
 import { initMeasure } from './measure';
+import { initRoomDimensions } from './room-dimensions';
 import { MeshDebugOverlay } from './mesh-debug-overlay';
 import { NavCursor } from './nav-cursor';
 import { Picker } from './picker';
@@ -489,6 +490,9 @@ class Viewer {
 
             // distance measurement tool (uses the same picker + collision)
             initMeasure(global, this.picker, collision ?? null);
+
+            // authored room dimensions ("Raummaße"), shown in the bird's-eye view
+            initRoomDimensions(global);
 
             // Automatic tour generation — authoring tool, dynamically imported
             // so its ~360 lines never reach the visitor bundle.

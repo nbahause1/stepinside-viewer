@@ -19,6 +19,12 @@
       "runtimeExecutable": "npx",
       "runtimeArgs": ["serve", "apps/viewer/public", "-l", "4500", "-C"],
       "port": 4500
+    },
+    {
+      "name": "viewer-4520",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["serve", "apps/viewer/public", "-l", "4520", "-C"],
+      "port": 4520
     }
   ]
 }

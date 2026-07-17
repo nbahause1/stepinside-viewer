@@ -307,6 +307,32 @@ type ExperienceSettings = {
         }[]
     },
 
+    // Authored room dimensions ("Raummaße", optional; cast-through like
+    // `surroundings`). In the bird's-eye view every room shows its dimension
+    // lines (solid hairlines along the wall bases, corner-to-corner, with
+    // metric labels) — the Matterport "show dimensions" idea, but curated:
+    // the numbers are read once from the calibrated scan at authoring time
+    // (console helpers `probeRoom()` / `roomEntry()` in measure.ts) and
+    // stored here, so nothing is guessed live and the lines always sit
+    // exactly on the walls. Walk mode stays clean — down there the ruler is
+    // the visitor's own two-point measurement. Rendered by room-dimensions.ts.
+    rooms?: {
+        name: string,
+        // Room anchor (reserved for multi-floor filtering; the bird's-eye
+        // view currently shows every authored room).
+        center: [number, number, number],
+        // Dimension lines; each is drawn with the metric length of a→b as
+        // its label (lengths are recomputed from the points, never stored).
+        // roomEntry() emits a closed floor perimeter (shared corner points)
+        // plus one ceiling-height line in the far corner.
+        lines: {
+            a: [number, number, number],
+            b: [number, number, number]
+        }[],
+        // Optional floor area in m² (not currently rendered).
+        area?: number
+    }[],
+
     // Optional scale verification (cast-through like `staging`). Authored once per
     // scan: pick a feature of KNOWN real length in the viewer (with config.debug on
     // the measure tool logs the two endpoints + length, ready to paste here), then

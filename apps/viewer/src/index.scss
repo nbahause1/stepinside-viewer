@@ -1456,64 +1456,6 @@ body.tutorial-active #walkHint {
         }
     }
 
-    // chips: one glass button per place, horizontally scrollable on phones
-    #surroundingsChips {
-        flex-shrink: 0;
-        display: flex;
-        gap: 8px;
-        padding: 10px 12px;
-        overflow-x: auto;
-        border-top: 1px solid rgba(255, 255, 255, 0.08);
-        scrollbar-width: none;
-
-        &::-webkit-scrollbar {
-            display: none;
-        }
-
-        button {
-            flex-shrink: 0;
-            display: inline-flex;
-            align-items: center;
-            gap: 7px;
-            padding: 7px 12px;
-            border: 1px solid rgba(255, 255, 255, 0.12);
-            border-radius: 999px;
-            cursor: pointer;
-            background: rgba(255, 255, 255, 0.06);
-            transition: background 140ms var(--ease-out), border-color 140ms var(--ease-out);
-
-            .surroundingsChipLabel {
-                font-family: 'Inter', 'Arial', sans-serif;
-                font-size: 12.5px;
-                font-weight: 600;
-                color: rgba(255, 255, 255, 0.88);
-                white-space: nowrap;
-            }
-
-            .surroundingsChipMins {
-                font-family: 'Inter', 'Arial', sans-serif;
-                font-size: 11.5px;
-                font-weight: 600;
-                color: rgba(255, 255, 255, 0.55);
-                white-space: nowrap;
-            }
-
-            @media (hover: hover) and (pointer: fine) {
-                &:hover {
-                    background: rgba(255, 255, 255, 0.11);
-                }
-            }
-
-            &.is-active {
-                background: color-mix(in srgb, var(--surroundings-accent) 45%, transparent);
-                border-color: color-mix(in srgb, var(--surroundings-accent) 75%, transparent);
-
-                .surroundingsChipMins {
-                    color: rgba(255, 255, 255, 0.8);
-                }
-            }
-        }
-    }
 }
 
 /* map markers (plain DOM elements positioned by MapLibre) */
@@ -1527,25 +1469,8 @@ body.tutorial-active #walkHint {
     box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
 }
 
-.surroundingsDot {
-    width: 12px;
-    height: 12px;
-    border-radius: 50%;
-    background: #fff;
-    border: 2.5px solid rgba(40, 40, 45, 0.85);
-    box-shadow: 0 1px 6px rgba(0, 0, 0, 0.3);
-    cursor: pointer;
-    transition: transform 160ms var(--ease-out), background 160ms var(--ease-out);
-
-    &.is-active {
-        transform: scale(1.35);
-        background: var(--surroundings-accent);
-        border-color: #fff;
-    }
-}
-
-// guest-searched address: filled red like the house (both are "your" points,
-// start and destination), slightly smaller
+// destination (searched address or concierge answer): filled red like the
+// house (both are "your" points, start and destination), slightly smaller
 .surroundingsDest {
     width: 14px;
     height: 14px;
@@ -1590,13 +1515,22 @@ body.tutorial-active #walkHint {
 }
 
 
-/* distance measurement overlay */
+/* distance measurement overlay + authored room dimensions (bird's-eye).
+   #roomDimsOverlay sits below (z 13) so a manual measurement always wins. */
+
+#roomDimsOverlay {
+    z-index: 13;
+}
 
 #measureOverlay {
+    z-index: 14;
+}
+
+#measureOverlay,
+#roomDimsOverlay {
     position: absolute;
     inset: 0;
     pointer-events: none;
-    z-index: 14;
 
     // The overlay (esp. the full-screen SVG) must never intercept pointer
     // events, otherwise it eats the very clicks the measurement needs. Override
@@ -1662,6 +1596,21 @@ body.tutorial-active #walkHint {
         box-shadow:
             0 6px 18px -8px rgba(0, 0, 0, 0.3),
             inset 0 1px 0 0 rgba(255, 255, 255, 0.85);
+    }
+
+    // authored room dimensions (room-dimensions.ts): quieter than the manual
+    // measurement so the visitor's own line always reads as the active one.
+    // Solid (not dashed): a dash pattern re-phases on every sub-pixel
+    // projection change and reads as "crawling" — a solid hairline stays calm.
+    .roomDims__line {
+        stroke-width: 1.5;
+        stroke-dasharray: none;
+        opacity: 0.82;
+    }
+
+    .roomDims__label {
+        font-size: 12px;
+        padding: 3px 9px;
     }
 }
 
@@ -3616,7 +3565,8 @@ body.staging-open {
 /* -- helles Glas: Tutorial-Karten, Survey-Karte & Mess-Label (dunkler Text) -- */
 #tutorial .tutorialCard,
 #surveyCard,
-#measureOverlay .measure__label {
+#measureOverlay .measure__label,
+#roomDimsOverlay .measure__label {
   background:
     radial-gradient(135% 130% at 50% -14%, rgba(255,255,255,0.96), rgba(255,255,255,0) 62%),
     linear-gradient(180deg, rgba(255,255,255,0.74), rgba(246,247,250,0.56));
@@ -3713,7 +3663,8 @@ body.staging-open {
   #tutorial .tutorialCard,
   #surveyCard,
   #zoomBadge,
-  #measureOverlay .measure__label {
+  #measureOverlay .measure__label,
+  #roomDimsOverlay .measure__label {
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
     background:

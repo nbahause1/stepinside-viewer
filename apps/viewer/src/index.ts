@@ -362,6 +362,7 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
         controlsHidden: false,
         gamingControls: localStorage.getItem('gamingControls') === 'true',
         moveLocked: false,
+        measuring: false,
         chatOpen: false,
         prewarming: false,
         tourRevealActive: false,

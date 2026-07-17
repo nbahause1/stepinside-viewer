@@ -2,10 +2,12 @@ import { shieldFromViewer } from './dom-shield';
 import type { Global } from './types';
 
 // Neighbourhood map ("Umgebung"). A glass pill (bottom-left, above the
-// concierge) opens a map overlay: the property as a marker, one chip per
-// nearby place (Supermarkt, U-Bahn, …), and — on chip tap or a concierge
-// answer — a walking route that draws itself from the house to the place,
-// with minutes at the destination.
+// concierge) opens a map overlay: the property as a marker plus an address
+// search. The map stays deliberately empty — no preset pins, no suggestion
+// chips — the guest asks for what THEY care about (typed address or a
+// concierge question), and only then a route draws itself from the house to
+// the place, with minutes at the destination. Preconfigured POIs (from
+// settings.surroundings) remain as routing data for concierge answers only.
 //
 // MapLibre GL (~250 KB) is loaded via dynamic import() on FIRST open only, so
 // the 3D viewer's startup cost is untouched. Everything is precomputed data
@@ -80,18 +82,18 @@ const initSurroundings = (global: Global) => {
     const overlay = document.getElementById('surroundingsOverlay');
     const closeBtn = document.getElementById('surroundingsClose');
     const mapHost = document.getElementById('surroundingsMap');
-    const chipsRow = document.getElementById('surroundingsChips');
     const status = document.getElementById('surroundingsStatus');
     const searchInput = document.getElementById('surroundingsSearchInput') as HTMLInputElement | null;
     const searchResults = document.getElementById('surroundingsSearchResults');
     const modesRow = document.getElementById('surroundingsModes');
-    if (!pill || !toggle || !overlay || !closeBtn || !mapHost || !chipsRow || !status || !searchInput || !searchResults || !modesRow) return;
+    if (!pill || !toggle || !overlay || !closeBtn || !mapHost || !status || !searchInput || !searchResults || !modesRow) return;
 
     // No data -> the whole module is an inert no-op (same guarantee as the
-    // concierge: a misconfigured build never shows a dead button).
-    if (!cfg?.center || !Array.isArray(cfg.pois) || cfg.pois.length === 0) return;
-    const pois = cfg.pois.filter(p => p?.id && Array.isArray(p.lngLat) && Array.isArray(p.route) && p.route.length >= 2);
-    if (pois.length === 0) return;
+    // concierge: a misconfigured build never shows a dead button). Only the
+    // property's location is required; POIs are optional concierge routing data.
+    if (!cfg?.center) return;
+    const allPois = Array.isArray(cfg.pois) ? cfg.pois : [];
+    const pois = allPois.filter(p => p?.id && Array.isArray(p.lngLat) && Array.isArray(p.route) && p.route.length >= 2);
 
     pill.classList.remove('hidden');
     // hasInput: the address field's keystrokes must never reach the viewer's
@@ -110,8 +112,9 @@ const initSurroundings = (global: Global) => {
     let pendingPoiId: string | null = null;      // selected before the map finished loading
     let drawFrame = 0;                           // rAF handle of the running route animation
     let walkLabel: import('maplibre-gl').Marker | null = null;
-    let customMarker: import('maplibre-gl').Marker | null = null;   // guest-searched address
-    const poiMarkers = new Map<string, import('maplibre-gl').Marker>();
+    // Destination marker: guest-searched address OR a concierge-answered POI —
+    // there is at most one, and it exists only after an explicit request.
+    let customMarker: import('maplibre-gl').Marker | null = null;
 
 
     // -- open/close ----------------------------------------------------------
@@ -200,19 +203,11 @@ const initSurroundings = (global: Global) => {
         // every such case the moment real dimensions exist.
         new ResizeObserver(() => map?.resize()).observe(mapHost);
 
-        // House marker: deep-red dot with a white ring (see MAP_ACCENT).
+        // House marker: deep-red dot with a white ring (see MAP_ACCENT). The
+        // only marker on the empty map — destinations appear per request.
         const houseEl = document.createElement('div');
         houseEl.className = 'surroundingsHouse';
         new maplibre.Marker({ element: houseEl }).setLngLat(cfg.center).addTo(map);
-
-        // One small dot per place; the active one grows via .is-active.
-        for (const poi of pois) {
-            const el = document.createElement('div');
-            el.className = 'surroundingsDot';
-            el.title = poi.name;
-            el.addEventListener('click', () => selectPoi(poi.id));
-            poiMarkers.set(poi.id, new maplibre.Marker({ element: el }).setLngLat(poi.lngLat).addTo(map!));
-        }
 
         map.on('load', () => {
             if (!map) return;
@@ -280,10 +275,11 @@ const initSurroundings = (global: Global) => {
         return b;
     };
 
+    // Resting view: the property centred at neighbourhood zoom (no pins to
+    // frame — the map starts empty by design).
     const fitAll = (animate: boolean) => {
         if (!map) return;
-        const b = boundsOf([cfg.center, ...pois.map(p => p.lngLat)]);
-        map.fitBounds(b, { padding: 60, duration: animate ? 900 : 0, maxZoom: 16 });
+        map.easeTo({ center: cfg.center, zoom: 14.5, duration: animate ? 900 : 0 });
     };
 
     // -- route animation --------------------------------------------------------
@@ -363,7 +359,7 @@ const initSurroundings = (global: Global) => {
         drawFrame = requestAnimationFrame(step);
     };
 
-    // -- selection ---------------------------------------------------------------
+    // -- selection (concierge answers only — there are no pins or chips) ---------
     const selectPoi = (id: string) => {
         const poi = pois.find(p => p.id === id);
         if (!poi) return;
@@ -374,17 +370,15 @@ const initSurroundings = (global: Global) => {
             return;
         }
         activePoiId = id;
-        for (const [poiId, marker] of poiMarkers) {
-            marker.getElement().classList.toggle('is-active', poiId === id);
-        }
-        chipsRow.querySelectorAll('button').forEach((chip) => {
-            chip.classList.toggle('is-active', chip.dataset.poi === id);
-        });
-        customMarker?.remove();
-        customMarker = null;
         // A POI selection replaces any searched-address state.
         searchTarget = null;
         modesRow.classList.add('hidden');
+        // The destination gets a marker only now that it was explicitly asked for.
+        customMarker?.remove();
+        const destEl = document.createElement('div');
+        destEl.className = 'surroundingsDest';
+        destEl.title = poi.name;
+        customMarker = new maplibre!.Marker({ element: destEl }).setLngLat(poi.lngLat).addTo(map!);
         clearWalkLabel();
         setRoute([]);
         cancelAnimationFrame(drawFrame);
@@ -399,22 +393,6 @@ const initSurroundings = (global: Global) => {
         });
         events.fire('analytics', 'surroundings', { action: 'poi', poi: id });
     };
-
-    // -- chips ----------------------------------------------------------------
-    for (const poi of pois) {
-        const chip = document.createElement('button');
-        chip.type = 'button';
-        chip.dataset.poi = poi.id;
-        const label = document.createElement('span');
-        label.className = 'surroundingsChipLabel';
-        label.textContent = poi.label;
-        const mins = document.createElement('span');
-        mins.className = 'surroundingsChipMins';
-        mins.textContent = `${poi.walkMinutes} min`;
-        chip.append(label, mins);
-        chip.addEventListener('click', () => selectPoi(poi.id));
-        chipsRow.appendChild(chip);
-    }
 
     // -- custom-address search ("wie weit zur Arbeit?") ---------------------------
     // Photon geocodes as the guest types (debounced, biased to the property's
@@ -699,8 +677,6 @@ const initSurroundings = (global: Global) => {
         events.fire('analytics', 'surroundings', { action: 'search' });
         // Reset: a searched address replaces any active POI selection.
         activePoiId = null;
-        for (const marker of poiMarkers.values()) marker.getElement().classList.remove('is-active');
-        chipsRow.querySelectorAll('button').forEach(chip => chip.classList.remove('is-active'));
         clearWalkLabel();
         setRoute([]);
         cancelAnimationFrame(drawFrame);

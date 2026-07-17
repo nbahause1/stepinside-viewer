@@ -402,7 +402,7 @@ class CameraManager {
                     // guided-tour toggle ("Rundgang"): start track 0 from the
                     // top, or stop and hand back to the mode the visitor came
                     // from — the same exit path 'cancel'/'interrupt' use.
-                    if (state.moveLocked) break;    // don't hijack while the tutorial gate is up
+                    if (state.moveLocked || state.measuring) break;    // don't hijack while the tutorial gate is up or a measurement is running
                     if (state.hasAnimation) {
                         if (state.cameraMode === 'anim') {
                             state.cameraMode = fromMode;
@@ -466,7 +466,7 @@ class CameraManager {
         // Used by the concierge: when an answer is about a locatable object, it
         // focuses it. `poi.camera` is { position:[x,y,z], target:[x,y,z], fov }.
         events.on('focusPoi', (poi: { position: number[]; target: number[]; fov: number }) => {
-            if (state.moveLocked) return;       // don't hijack while the tutorial gate is up
+            if (state.moveLocked || state.measuring) return;       // don't hijack while the tutorial gate is up or a measurement is running
             const poiCam = createCamera(new Vec3(poi.position), new Vec3(poi.target), poi.fov);
             if (state.cameraMode !== 'walk') {
                 sourcesByMode[state.cameraMode]?.cancel();
@@ -646,8 +646,11 @@ class CameraManager {
 
         // tap-to-navigate: start auto-driving the active mode toward a picked position
         events.on('navigateTo', (position: Vec3, normal: Vec3, speedMul = 1) => {
-            // onboarding gate: movement is blocked until the visitor has looked around
-            if (state.moveLocked) {
+            // onboarding gate: movement is blocked until the visitor has looked
+            // around. The measure flag blocks independently: taps place points
+            // there, and the tutorial's moveLocked resets must not re-enable
+            // click-to-walk mid-measurement.
+            if (state.moveLocked || state.measuring) {
                 return;
             }
             const source = sourcesByMode[state.cameraMode];

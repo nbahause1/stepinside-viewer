@@ -1166,56 +1166,6 @@ body.tutorial-active #walkHint {
 #surroundingsOverlay #surroundingsStatus.hidden {
   display: none;
 }
-#surroundingsOverlay #surroundingsChips {
-  flex-shrink: 0;
-  display: flex;
-  gap: 8px;
-  padding: 10px 12px;
-  overflow-x: auto;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
-  scrollbar-width: none;
-}
-#surroundingsOverlay #surroundingsChips::-webkit-scrollbar {
-  display: none;
-}
-#surroundingsOverlay #surroundingsChips button {
-  flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  padding: 7px 12px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 999px;
-  cursor: pointer;
-  background: rgba(255, 255, 255, 0.06);
-  transition: background 140ms var(--ease-out), border-color 140ms var(--ease-out);
-}
-#surroundingsOverlay #surroundingsChips button .surroundingsChipLabel {
-  font-family: "Inter", "Arial", sans-serif;
-  font-size: 12.5px;
-  font-weight: 600;
-  color: rgba(255, 255, 255, 0.88);
-  white-space: nowrap;
-}
-#surroundingsOverlay #surroundingsChips button .surroundingsChipMins {
-  font-family: "Inter", "Arial", sans-serif;
-  font-size: 11.5px;
-  font-weight: 600;
-  color: rgba(255, 255, 255, 0.55);
-  white-space: nowrap;
-}
-@media (hover: hover) and (pointer: fine) {
-  #surroundingsOverlay #surroundingsChips button:hover {
-    background: rgba(255, 255, 255, 0.11);
-  }
-}
-#surroundingsOverlay #surroundingsChips button.is-active {
-  background: color-mix(in srgb, var(--surroundings-accent) 45%, transparent);
-  border-color: color-mix(in srgb, var(--surroundings-accent) 75%, transparent);
-}
-#surroundingsOverlay #surroundingsChips button.is-active .surroundingsChipMins {
-  color: rgba(255, 255, 255, 0.8);
-}
 
 /* map markers (plain DOM elements positioned by MapLibre) */
 .surroundingsHouse {
@@ -1225,22 +1175,6 @@ body.tutorial-active #walkHint {
   background: var(--surroundings-accent);
   border: 3px solid #fff;
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
-}
-
-.surroundingsDot {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  background: #fff;
-  border: 2.5px solid rgba(40, 40, 45, 0.85);
-  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.3);
-  cursor: pointer;
-  transition: transform 160ms var(--ease-out), background 160ms var(--ease-out);
-}
-.surroundingsDot.is-active {
-  transform: scale(1.35);
-  background: var(--surroundings-accent);
-  border-color: #fff;
 }
 
 .surroundingsDest {
@@ -1277,31 +1211,44 @@ body.tutorial-active #walkHint {
     height: min(270px, 100dvh - 140px);
   }
 }
-/* distance measurement overlay */
+/* distance measurement overlay + authored room dimensions (bird's-eye).
+   #roomDimsOverlay sits below (z 13) so a manual measurement always wins. */
+#roomDimsOverlay {
+  z-index: 13;
+}
+
 #measureOverlay {
+  z-index: 14;
+}
+
+#measureOverlay,
+#roomDimsOverlay {
   position: absolute;
   inset: 0;
   pointer-events: none;
-  z-index: 14;
 }
-#measureOverlay * {
+#measureOverlay *,
+#roomDimsOverlay * {
   pointer-events: none;
 }
-#measureOverlay .measure__svg {
+#measureOverlay .measure__svg,
+#roomDimsOverlay .measure__svg {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
   overflow: visible;
 }
-#measureOverlay .measure__line {
+#measureOverlay .measure__line,
+#roomDimsOverlay .measure__line {
   stroke: #fff;
   stroke-width: 2;
   stroke-dasharray: 7 6;
   stroke-linecap: round;
   filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.55));
 }
-#measureOverlay .measure__dot {
+#measureOverlay .measure__dot,
+#roomDimsOverlay .measure__dot {
   position: absolute;
   box-sizing: border-box;
   width: 14px;
@@ -1312,14 +1259,16 @@ body.tutorial-active #walkHint {
   background: rgba(255, 255, 255, 0.3);
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.55);
 }
-#measureOverlay .measure__dot--preview {
+#measureOverlay .measure__dot--preview,
+#roomDimsOverlay .measure__dot--preview {
   width: 18px;
   height: 18px;
   margin: -9px 0 0 -9px;
   background: transparent;
   border-color: rgba(255, 255, 255, 0.85);
 }
-#measureOverlay .measure__label {
+#measureOverlay .measure__label,
+#roomDimsOverlay .measure__label {
   position: absolute;
   transform: translate(-50%, -50%);
   padding: 4px 11px;
@@ -1335,6 +1284,17 @@ body.tutorial-active #walkHint {
   -webkit-backdrop-filter: blur(14px) saturate(150%);
   border: 1px solid rgba(255, 255, 255, 0.55);
   box-shadow: 0 6px 18px -8px rgba(0, 0, 0, 0.3), inset 0 1px 0 0 rgba(255, 255, 255, 0.85);
+}
+#measureOverlay .roomDims__line,
+#roomDimsOverlay .roomDims__line {
+  stroke-width: 1.5;
+  stroke-dasharray: none;
+  opacity: 0.82;
+}
+#measureOverlay .roomDims__label,
+#roomDimsOverlay .roomDims__label {
+  font-size: 12px;
+  padding: 3px 9px;
 }
 
 body.measure-active canvas {
@@ -2999,7 +2959,8 @@ body.staging-open #surveyCard {
 /* -- helles Glas: Tutorial-Karten, Survey-Karte & Mess-Label (dunkler Text) -- */
 #tutorial .tutorialCard,
 #surveyCard,
-#measureOverlay .measure__label {
+#measureOverlay .measure__label,
+#roomDimsOverlay .measure__label {
   background: radial-gradient(135% 130% at 50% -14%, rgba(255, 255, 255, 0.96), rgba(255, 255, 255, 0) 62%), linear-gradient(180deg, rgba(255, 255, 255, 0.74), rgba(246, 247, 250, 0.56));
   -webkit-backdrop-filter: blur(var(--lgl-blur)) saturate(var(--lgl-sat)) brightness(var(--lgl-bright));
   backdrop-filter: blur(var(--lgl-blur)) saturate(var(--lgl-sat)) brightness(var(--lgl-bright));
@@ -3083,7 +3044,8 @@ body.staging-open #surveyCard {
   #tutorial .tutorialCard,
   #surveyCard,
   #zoomBadge,
-  #measureOverlay .measure__label {
+  #measureOverlay .measure__label,
+  #roomDimsOverlay .measure__label {
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
     background: radial-gradient(135% 130% at 50% -14%, rgba(255, 255, 255, 0.98), rgba(255, 255, 255, 0) 62%), linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(247, 248, 250, 0.88));
