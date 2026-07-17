@@ -18,7 +18,10 @@
         <style>
             @font-face { font-family: 'Inter'; font-style: normal; font-weight: 100 900; font-display: swap; src: url('./fonts/inter-latin.woff2') format('woff2'); unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
         </style>
-        <link rel="stylesheet" href="./index.css">
+        <!-- Versioned: the JS bundles are hash-named, but this file is not —
+             iOS Safari happily serves a stale cached copy across deploys.
+             Bump ?v= whenever the stylesheet changes. -->
+        <link rel="stylesheet" href="./index.css?v=2">
         <script type="module">
             // ---- On-screen diagnostics (only with ?diag) ---------------------
             // Prints boot stages + any error straight onto the screen so a device
@@ -486,7 +489,12 @@
         <div id="bootSplash" aria-hidden="true">
             <!-- ?v bumped whenever the film changes, so browsers never play a stale cut. -->
             <div id="bootFilm">
-                <video id="bootDoor" src="./door-open.mp4?v=5" muted playsinline preload="auto"></video>
+                <!-- poster: iOS in low-power mode refuses autoplay, and without
+                     a decoded frame the element renders BLACK — the visitor saw
+                     no film at all. The poster keeps the door on screen (the
+                     Ken-Burns drift animates it); the first touch retries
+                     playback (a real gesture, which iOS accepts). -->
+                <video id="bootDoor" src="./door-open.mp4?v=5" poster="./door-open-poster.jpg?v=1" muted playsinline preload="auto"></video>
             </div>
             <div class="bootFocus"></div>
             <div class="bootScrim"></div>
@@ -1642,10 +1650,20 @@
                         setTimeout(fadeIn, HEAD_START_MS);
                     }).catch(() => {
                         // Autoplay refused (iOS low-power mode etc.): surface the
-                        // still rather than nothing — the Ken Burns drift keeps it
-                        // alive — and cue the SFX fallback path.
+                        // still rather than nothing — the poster + Ken Burns
+                        // drift keep it alive — and cue the SFX fallback path.
                         fadeIn();
                         signalDoorVideo();
+                        // The next touch is a REAL gesture, which iOS accepts
+                        // even in low-power mode: retry playback there, so one
+                        // tap turns the held door still back into the film.
+                        const retryPlay = () => {
+                            window.removeEventListener('touchstart', retryPlay, true);
+                            if (!bootHidden && doorVideo.paused && !doorVideo.ended) {
+                                doorVideo.play().catch(() => { /* poster stands */ });
+                            }
+                        };
+                        window.addEventListener('touchstart', retryPlay, { passive: true, capture: true });
                     });
                     // Buffering stall after the start attempt: surface the frame
                     // and cue the sound (and the parent's fallback logic) anyway,

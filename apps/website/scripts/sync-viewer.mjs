@@ -44,6 +44,7 @@ for (const f of readdirSync(src)) {
     f === 'index.html' || f === 'index.css' || f === 'index.js' ||
     f === 'chat.html' ||  // standalone concierge chat page (phone handoff)
     f === 'door-open.mp4' ||  // arrival film behind the boot-splash loader
+    f === 'door-open-poster.jpg' ||  // film poster (iOS low-power: autoplay refused -> element renders black without it)
     /^(index-|tour-generator-|maplibre-gl-).*\.js$/.test(f) ||
     f === 'settings.json';
   if (isArtifact) {
