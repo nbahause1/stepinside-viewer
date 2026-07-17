@@ -21,6 +21,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import type { KnowledgeLoader } from './knowledge.js';
 import type { RateLimiter, RateLimitResult } from './ratelimit.js';
 import { validateRequest, ValidationError } from './validation.js';
+import type { ConciergeRequest } from './validation.js';
 import { buildSystemBlocks, buildRoomContextLine } from './prompt.js';
 import { findPlace, PLACE_CATEGORIES } from './places.js';
 import type { FoundPlace } from './places.js';
@@ -95,6 +96,29 @@ function getClient(apiKey: string): Anthropic {
     clientCache.set(apiKey, client);
   }
   return client;
+}
+
+/**
+ * Dimension-intent detector for the bird's-eye backstop. The model is reliable
+ * about setting `showDimensions` when it can actually answer a size question,
+ * but on a *fallback* answer it occasionally sets it false anyway (~1 in 4 for
+ * borderline questions like "wie groß ist der Balkon?"). Since a size question
+ * should still fly to the measurement overlay, we detect the intent from the
+ * visitor's own words and force the flag in the fallback case (see below).
+ * Kept deliberately broad on size vocabulary, so false negatives are rare; the
+ * cost of a false positive is only a bird's-eye glide, never a wrong answer.
+ */
+const DIMENSION_INTENT_RE =
+  /wie\s+(groß|breit|lang|hoch|tief|weit)|größe|abmessung|\bmaße\b|quadratmeter|\bqm\b|m²|fläche|deckenhöhe|raumhöhe|wandhöhe|passt\s+(mein|ein|der|die|das|meine)|how\s+(big|large|tall|wide|long|high|deep)|dimension|square\s+met(er|re)|\barea\b|ceiling\s+height/i;
+
+/** The last user turn's text, for the dimension-intent backstop. */
+function lastUserText(messages: ConciergeRequest['messages']): string {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === 'user' && typeof messages[i].content === 'string') {
+      return messages[i].content;
+    }
+  }
+  return '';
 }
 
 /**
@@ -320,9 +344,20 @@ export async function handleConcierge(
         mapPlace: answeredFromPlace && foundPlace
           ? { name: foundPlace.name, address: foundPlace.address, lngLat: foundPlace.lngLat }
           : null,
-        // Only ride along on a real answer: flying to the dimensions view
-        // while the text says "I don't know" would contradict it.
-        showDimensions: parsed.showDimensions && !parsed.fallback && !usedServerFallback,
+        // A size/dimension question flies to the bird's-eye measurement view
+        // regardless of whether the text could cite the exact number: the
+        // overlaid room measurements ARE the answer. So this is decoupled from
+        // `parsed.fallback` on purpose — the model sometimes falls back on a
+        // borderline size question (e.g. "wie groß ist die Wand?"), and the
+        // measurement overlay is exactly what helps there. On such a fallback
+        // the model also occasionally drops `showDimensions` itself, so we back
+        // it up with an intent match on the visitor's own words. Still
+        // suppressed on a server-side fallback (empty/unparseable model
+        // output), which is a genuine error rather than a real answer.
+        showDimensions:
+          (parsed.showDimensions ||
+            (parsed.fallback && DIMENSION_INTENT_RE.test(lastUserText(request.messages)))) &&
+          !usedServerFallback,
         fallback: parsed.fallback || usedServerFallback,
         usage: usageTotal,
       },
