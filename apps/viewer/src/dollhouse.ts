@@ -42,9 +42,18 @@ const PARKED_Y = 1000;
 // Entry/exit tween pacing (m/s toward the target, exponential ease).
 const TWEEN_RATE = 6;
 
+// Footprint (XZ) crop feather (m). Splats outside the room rectangle + margin
+// fade out — this is what removes the outliers flying OUTSIDE the walls
+// (window/balcony reflections, sensor noise) that the Y cut can't reach.
+const FOOT_FEATHER_M = 0.12;
+
 const wgslChunk = `
 uniform uClipY: f32;
 uniform uFloorY: f32;
+uniform uMinX: f32;
+uniform uMaxX: f32;
+uniform uMinZ: f32;
+uniform uMaxZ: f32;
 fn modifySplatCenter(center: ptr<function, vec3f>) {
 }
 fn modifySplatRotationScale(originalCenter: vec3f, modifiedCenter: vec3f, rotation: ptr<function, vec4f>, scale: ptr<function, vec3f>) {
@@ -55,13 +64,21 @@ fn modifySplatRotationScale(originalCenter: vec3f, modifiedCenter: vec3f, rotati
 fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
     let above = clamp((uniform.uClipY - center.y) / ${FEATHER_M}, 0.0, 1.0);
     let below = clamp((center.y - uniform.uFloorY) / ${FEATHER_M}, 0.0, 1.0);
-    (*color).a = (*color).a * above * below;
+    let insideX = clamp((center.x - uniform.uMinX) / ${FOOT_FEATHER_M}, 0.0, 1.0)
+                * clamp((uniform.uMaxX - center.x) / ${FOOT_FEATHER_M}, 0.0, 1.0);
+    let insideZ = clamp((center.z - uniform.uMinZ) / ${FOOT_FEATHER_M}, 0.0, 1.0)
+                * clamp((uniform.uMaxZ - center.z) / ${FOOT_FEATHER_M}, 0.0, 1.0);
+    (*color).a = (*color).a * above * below * insideX * insideZ;
 }
 `;
 
 const glslChunk = `
 uniform float uClipY;
 uniform float uFloorY;
+uniform float uMinX;
+uniform float uMaxX;
+uniform float uMinZ;
+uniform float uMaxZ;
 void modifySplatCenter(inout vec3 center) {
 }
 void modifySplatRotationScale(vec3 originalCenter, vec3 modifiedCenter, inout vec4 rotation, inout vec3 scale) {
@@ -71,7 +88,11 @@ void modifySplatRotationScale(vec3 originalCenter, vec3 modifiedCenter, inout ve
 void modifySplatColor(vec3 center, inout vec4 color) {
     float above = clamp((uClipY - center.y) / ${FEATHER_M}, 0.0, 1.0);
     float below = clamp((center.y - uFloorY) / ${FEATHER_M}, 0.0, 1.0);
-    color.a *= above * below;
+    float insideX = clamp((center.x - uMinX) / ${FOOT_FEATHER_M}, 0.0, 1.0)
+                  * clamp((uMaxX - center.x) / ${FOOT_FEATHER_M}, 0.0, 1.0);
+    float insideZ = clamp((center.z - uMinZ) / ${FOOT_FEATHER_M}, 0.0, 1.0)
+                  * clamp((uMaxZ - center.z) / ${FOOT_FEATHER_M}, 0.0, 1.0);
+    color.a *= above * below * insideX * insideZ;
 }
 `;
 
@@ -91,7 +112,40 @@ const initDollhouse = (global: Global) => {
     // (world floor height), so a plane just beneath them clips the sparkle.
     // Not animated — it sits under the visible floor either way.
     let floorClip = -PARKED_Y;
+    // Footprint (XZ) crop bounds, parked to a huge box (no-op) when closed.
+    const PARKED_XZ = { minX: -PARKED_Y, maxX: PARKED_Y, minZ: -PARKED_Y, maxZ: PARKED_Y };
+    let foot = { ...PARKED_XZ };
     let installed = false;
+
+    // The room rectangle in world XZ, from the authored floor lines, grown by
+    // a margin so the WALLS (which sit on/just outside the floor outline) stay
+    // while the outliers flying further out get cut. null when unauthored ->
+    // the crop stays parked (no XZ clipping, only the Y cut).
+    const FOOT_MARGIN_M = 0.5;
+    const resolveFootprint = (): typeof PARKED_XZ | null => {
+        const rooms = settings.rooms;
+        if (!Array.isArray(rooms)) return null;
+        let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+        let found = false;
+        for (const room of rooms) {
+            const lines = (room as { lines?: { a?: number[], b?: number[] }[] }).lines;
+            if (!Array.isArray(lines)) continue;
+            for (const line of lines) {
+                for (const p of [line.a, line.b]) {
+                    if (Array.isArray(p) && typeof p[0] === 'number' && typeof p[2] === 'number') {
+                        minX = Math.min(minX, p[0]); maxX = Math.max(maxX, p[0]);
+                        minZ = Math.min(minZ, p[2]); maxZ = Math.max(maxZ, p[2]);
+                        found = true;
+                    }
+                }
+            }
+        }
+        if (!found) return null;
+        return {
+            minX: minX - FOOT_MARGIN_M, maxX: maxX + FOOT_MARGIN_M,
+            minZ: minZ - FOOT_MARGIN_M, maxZ: maxZ + FOOT_MARGIN_M
+        };
+    };
 
     const resolveFloorY = (): number | null => {
         const rooms = settings.rooms;
@@ -171,6 +225,10 @@ const initDollhouse = (global: Global) => {
         if (!mat) return;
         mat.setParameter('uClipY', current);
         mat.setParameter('uFloorY', floorClip);
+        mat.setParameter('uMinX', foot.minX);
+        mat.setParameter('uMaxX', foot.maxX);
+        mat.setParameter('uMinZ', foot.minZ);
+        mat.setParameter('uMaxZ', foot.maxZ);
         mat.update();
     };
 
@@ -218,6 +276,7 @@ const initDollhouse = (global: Global) => {
         if (current === PARKED_Y) current = top;
         target = y;
         floorClip = resolveFloorY() ?? -PARKED_Y;
+        foot = resolveFootprint() ?? { ...PARKED_XZ };
         pushUniform();
         app.renderNextFrame = true;
     });
@@ -240,6 +299,7 @@ const initDollhouse = (global: Global) => {
                 current = PARKED_Y;
                 target = PARKED_Y;
                 floorClip = -PARKED_Y;
+                foot = { ...PARKED_XZ };
                 pushUniform();
             }
         }
