@@ -23,7 +23,7 @@ interface Window {
         angles: [number, number, number];
         distance: number;
         fov: number;
-        mode: 'orbit' | 'anim' | 'fly' | 'walk' | 'aerial';
+        mode: 'orbit' | 'anim' | 'fly' | 'walk' | 'aerial' | 'dollhouse';
     };
 
     setCameraState?: (snapshot: {
@@ -31,7 +31,7 @@ interface Window {
         angles: [number, number, number];
         distance: number;
         fov: number;
-        mode: 'orbit' | 'anim' | 'fly' | 'walk' | 'aerial';
+        mode: 'orbit' | 'anim' | 'fly' | 'walk' | 'aerial' | 'dollhouse';
     }) => void;
 }
 

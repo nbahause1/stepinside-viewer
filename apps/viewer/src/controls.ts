@@ -17,6 +17,8 @@ const initControls = (global: Global) => {
     const aerialExit = document.getElementById('domeAerialExit');
     const prev = document.getElementById('domePrev');
     const next = document.getElementById('domeNext');
+    const dollhouse = document.getElementById('domeDollhouse');
+    const dollhouseExit = document.getElementById('domeDollhouseExit');
 
     reset?.addEventListener('click', (event) => {
         events.fire('inputEvent', 'reset', event);
@@ -46,9 +48,16 @@ const initControls = (global: Global) => {
     prev?.addEventListener('click', () => events.fire('inputEvent', 'aerialPrev'));
     next?.addEventListener('click', () => events.fire('inputEvent', 'aerialNext'));
 
-    // swap the whole bottom bar with the mode (walk controls <-> view paging)
+    // dollhouse ("Puppenhaus"): same toggle pattern as the drone pair — the
+    // house button opens the model, the walk figure seals it and returns
+    dollhouse?.addEventListener('click', () => events.fire('inputEvent', 'dollhouse'));
+    dollhouseExit?.addEventListener('click', () => events.fire('inputEvent', 'dollhouse'));
+
+    // swap the whole bottom bar with the mode (walk controls <-> view paging
+    // <-> dollhouse exit)
     events.on('cameraMode:changed', (mode: string) => {
         dome.classList.toggle('is-aerial', mode === 'aerial');
+        dome.classList.toggle('is-dollhouse', mode === 'dollhouse');
     });
 
     // Measurement tool: toggles measure mode (handled in measure.ts, which also

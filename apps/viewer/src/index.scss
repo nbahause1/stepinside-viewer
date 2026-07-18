@@ -625,8 +625,10 @@ body.tutorial-active #walkHint {
     }
 
     // the bottom bar swaps its whole row with the mode: walk controls (measure /
-    // home / drone) vs bird's-eye paging (‹ / return / ›)
-    .controlDome__row--aerial {
+    // home / drone / dollhouse) vs bird's-eye paging (‹ / return / ›) vs the
+    // dollhouse's single "return to walking" button
+    .controlDome__row--aerial,
+    .controlDome__row--dollhouse {
         display: none;
     }
 
@@ -636,6 +638,16 @@ body.tutorial-active #walkHint {
         }
 
         .controlDome__row--aerial {
+            display: flex;
+        }
+    }
+
+    &.is-dollhouse {
+        .controlDome__row--walk {
+            display: none;
+        }
+
+        .controlDome__row--dollhouse {
             display: flex;
         }
     }

@@ -129,6 +129,7 @@ class CameraManager {
             fly: new FlyController(),
             walk: new WalkController(),
             aerial: new AerialController(),
+            dollhouse: new OrbitController(),
             anim: animTrack ? new AnimController(animTrack) : null
         };
 
@@ -136,6 +137,33 @@ class CameraManager {
         controllers.fly.fov = resetCamera.fov;
         controllers.fly.collision = collision;
         controllers.walk.collision = collision;
+
+        // Dollhouse ("Puppenhaus"): a free orbit around the flat's centre,
+        // seen from above with the ceiling sliced away (dollhouse.ts drives
+        // the clip plane around the mode transitions). The pitch clamp keeps
+        // the camera meaningfully ABOVE the model — flat or upward angles
+        // would look straight at the sliced-open ceiling edge and break the
+        // model illusion. Zoom is bounded by the flat's footprint. A tighter
+        // fov than first-person reads more like a physical scale model.
+        {
+            const footprint = Math.max(bbox.halfExtents.x, bbox.halfExtents.z);
+            controllers.dollhouse.fov = 55;
+            controllers.dollhouse.controller.pitchRange.set(-80, -22);
+            controllers.dollhouse.controller.zoomRange.set(Math.max(2.5, footprint * 1.1), footprint * 6);
+        }
+        const dollhouseCamera = () => {
+            const floorY = bbox.center.y - bbox.halfExtents.y;
+            const footprint = Math.max(bbox.halfExtents.x, bbox.halfExtents.z);
+            const dist = Math.max(6, footprint * 2.7);
+            const el = (52 * Math.PI) / 180;   // entry elevation
+            const az = (35 * Math.PI) / 180;   // pleasing diagonal, not axis-aligned
+            const position = new Vec3(
+                bbox.center.x + Math.cos(el) * Math.cos(az) * dist,
+                floorY + Math.sin(el) * dist,
+                bbox.center.z + Math.cos(el) * Math.sin(az) * dist
+            );
+            return createCamera(position, new Vec3(bbox.center.x, floorY + 0.8, bbox.center.z), 55);
+        };
 
         const walkSource = new WalkSource();
         const flySource = new FlySource();
@@ -173,6 +201,11 @@ class CameraManager {
         // bird's-eye (aerial) toggle state: the mode + exact pose to glide back to
         let preAerialMode: CameraMode = defaultMode;
         const preAerialCamera = new Camera(this.camera);
+
+        // dollhouse toggle state, same pattern: leaving the model glides back
+        // to exactly where the visitor stood when they opened it
+        let preDollhouseMode: CameraMode = defaultMode;
+        const preDollhouseCamera = new Camera(this.camera);
 
         // enter the initial controller
         getController(state.cameraMode).onEnter(this.camera);
@@ -368,6 +401,27 @@ class CameraManager {
                     startTransition();
                     break;
                 }
+                case 'dollhouse':
+                    if (state.cameraMode === 'dollhouse') {
+                        // exit: the ceiling seals while the camera glides back
+                        // to exactly where the visitor left off
+                        state.cameraMode = preDollhouseMode;
+                        (controllers[preDollhouseMode] as { goto?: (c: Camera) => void } | null)?.goto?.(preDollhouseCamera);
+                        startTransition();
+                        events.fire('dollhouse:close');
+                    } else {
+                        // enter: remember the spot, rise to the model vantage
+                        // while dollhouse.ts sweeps the ceiling open in sync
+                        preDollhouseMode = state.cameraMode;
+                        preDollhouseCamera.copy(this.camera);
+                        events.fire('orbitTarget:clear');
+                        sourcesByMode[state.cameraMode]?.cancel();
+                        state.cameraMode = 'dollhouse';
+                        controllers.dollhouse.goto(dollhouseCamera());
+                        startTransition();
+                        events.fire('dollhouse:open');
+                    }
+                    break;
                 case 'reset':
                     if (state.cameraMode === 'walk') {
                         walkSource.cancel();

@@ -143,6 +143,15 @@ type ExperienceSettings = {
         fov?: number
     }[],
 
+    // Dollhouse ("Puppenhaus") cutaway, PER PROPERTY: the world-space height
+    // at which the ceiling is sliced away while orbiting the flat from above.
+    // Absent = bbox-derived fallback (see dollhouse.ts). Author this alongside
+    // aerialViews during onboarding — the right cut sits just above door
+    // frames, below the ceiling shadow line.
+    dollhouse?: {
+        clipY?: number
+    },
+
     // Guided-tour ("Rundgang") pacing, relative to the authored track time.
     // `speed` is the normal playback rate (default 1.5 — the authored tracks
     // are deliberately slow), `revealSpeed` the slow-motion rate while a

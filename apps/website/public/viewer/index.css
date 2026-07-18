@@ -495,13 +495,20 @@ body.tutorial-active #walkHint {
 #controlDome #domeTour.active .domeIcon--tourStop {
   display: block;
 }
-#controlDome .controlDome__row--aerial {
+#controlDome .controlDome__row--aerial,
+#controlDome .controlDome__row--dollhouse {
   display: none;
 }
 #controlDome.is-aerial .controlDome__row--walk {
   display: none;
 }
 #controlDome.is-aerial .controlDome__row--aerial {
+  display: flex;
+}
+#controlDome.is-dollhouse .controlDome__row--walk {
+  display: none;
+}
+#controlDome.is-dollhouse .controlDome__row--dollhouse {
   display: flex;
 }
 

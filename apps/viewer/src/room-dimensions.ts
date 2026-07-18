@@ -120,10 +120,11 @@ const initRoomDimensions = (global: Global) => {
 
     app.on('update', render);
 
-    // Visible exactly while the camera is in the bird's-eye mode (including
-    // the glide in/out — the lines settle with the camera).
+    // Visible exactly while the camera is in a top-down context — the
+    // bird's-eye mode and the dollhouse model (including the glide in/out —
+    // the lines settle with the camera).
     const update = () => {
-        const on = state.cameraMode === 'aerial';
+        const on = state.cameraMode === 'aerial' || state.cameraMode === 'dollhouse';
         if (on === active) return;
         active = on;
         overlay.classList.toggle('hidden', !on);

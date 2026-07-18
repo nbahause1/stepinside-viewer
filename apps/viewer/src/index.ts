@@ -23,6 +23,7 @@ import { getZoom, registerZoomNotifier, resetZoom } from './cameras/zoom';
 import type { Collision } from './collision';
 import { MeshCollision, loadVoxelCollision } from './collision';
 import { initConcierge } from './concierge';
+import { initDollhouse } from './dollhouse';
 import { initSurroundings } from './surroundings';
 import { initControls } from './controls';
 import { observe } from './core/observe';
@@ -422,6 +423,7 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
     initControls(global);
     initConcierge(global);
     initSurroundings(global);
+    initDollhouse(global);
     initStaging(global);
     initInquiry(global);
     initZoomIndicator(global);
