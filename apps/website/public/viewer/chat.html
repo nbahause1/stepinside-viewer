@@ -214,26 +214,33 @@
             const sendBtn = document.getElementById('send');
             const back = document.getElementById('back');
 
-            // Back = browser back when we came from the viewer (bfcache makes
-            // that instant, the scene doesn't reload); plain link otherwise.
-            // The action chips below take the same route, so the tour resumes
-            // seamlessly before the viewer executes the stored camera action.
-            // Detection is the explicit flag the viewer sets right before it
-            // navigates here — the old referrer sniff for 'index.html' was
-            // ALWAYS false on the live /viewer/ URL (clean path), so the back
-            // button fell through to a fresh location.href navigation and cold-
-            // reloaded the scan + intro every time. Referrer stays as a fallback.
+            // This page runs in two shapes: as a full-screen IFRAME OVERLAY
+            // inside the live viewer (the touch concierge — the viewer stays
+            // mounted behind it), or, as a fallback, as a standalone page.
+            // Embedded is the normal case; it's how the return can be instant
+            // (just close the overlay — no navigation, no scan reload, no intro).
+            const embedded = window.self !== window.top;
+            const postToViewer = (msg) => {
+                try { window.parent.postMessage(msg, window.location.origin); } catch (e) { /* cross-origin/none */ }
+            };
+
+            // Return to the tour. Embedded: ask the parent viewer to close the
+            // overlay — it drops straight back into the live, still-loaded scan.
+            // Standalone fallback: browser-back when we came from the viewer
+            // (referrer/flag), else a plain link to index.html.
             let fromViewerFlag = false;
             try { fromViewerFlag = sessionStorage.getItem('conciergeFromViewer') === '1'; } catch (e) { /* storage blocked */ }
             const cameFromViewer = (fromViewerFlag || document.referrer.includes('index.html')) && window.history.length > 1;
             const goBackToTour = () => {
-                if (cameFromViewer) {
+                if (embedded) {
+                    postToViewer({ type: 'concierge:close' });
+                } else if (cameFromViewer) {
                     window.history.back();
                 } else {
                     window.location.href = 'index.html';
                 }
             };
-            if (cameFromViewer) {
+            if (embedded || cameFromViewer) {
                 back.addEventListener('click', (e) => {
                     e.preventDefault();
                     goBackToTour();
@@ -315,9 +322,10 @@
 
             // Action chip: a camera-coupled answer (measurement view, map
             // route, POI focus) can't run on this plain page — the chip stores
-            // the action in sessionStorage and returns to the tour, where the
-            // viewer's concierge picks it up (instant via bfcache, after load
-            // otherwise).
+            // the action in sessionStorage and hands control back to the viewer,
+            // which picks it up. Embedded: post 'concierge:action' so the parent
+            // closes the overlay AND runs it live against the still-loaded scan.
+            // Standalone: return to the tour, where init consumes it on load.
             const appendActionChip = (label, action) => {
                 const el = document.createElement('div');
                 el.className = 'msg msg--bot msg--action';
@@ -328,8 +336,12 @@
                 btn.addEventListener('click', () => {
                     try {
                         sessionStorage.setItem('conciergeAction', JSON.stringify({ ...action, ts: Date.now() }));
-                    } catch { /* storage blocked — still return to the tour */ }
-                    goBackToTour();
+                    } catch { /* storage blocked — still hand back to the viewer */ }
+                    if (embedded) {
+                        postToViewer({ type: 'concierge:action' });
+                    } else {
+                        goBackToTour();
+                    }
                 });
                 el.appendChild(btn);
                 messages.appendChild(el);

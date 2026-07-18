@@ -94,29 +94,51 @@ const initConcierge = (global: Global) => {
         return el;
     };
 
+    // Touch handoff, as an IN-PAGE OVERLAY (not a navigation). chat.html is the
+    // one shape the iOS keyboard can't break (a plain scrolling document), but
+    // opening it as its own PAGE meant the return relied on the browser's back/
+    // forward cache to restore the scan instantly — and iOS refuses to bfcache
+    // this heavy WebGPU page, so every return cold-reloaded and replayed the
+    // whole entrance intro. Loading the SAME chat.html in a full-screen iframe
+    // keeps the viewer document alive underneath: closing the overlay drops you
+    // straight back into the live tour — no reload, no intro. chat.html detects
+    // the iframe and talks back via postMessage (close + camera actions).
+    let chatFrame: HTMLIFrameElement | null = null;
+    const openChatOverlay = () => {
+        if (chatFrame) return;
+        const frame = document.createElement('iframe');
+        frame.id = 'conciergeFrame';
+        frame.src = 'chat.html';
+        frame.title = 'Concierge';
+        // Opaque full-viewport cover so the live scan behind it never shows
+        // through; the iframe's own document handles the keyboard natively.
+        frame.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;border:0;z-index:2147483000;background:#0b0b0d;';
+        document.body.appendChild(frame);
+        chatFrame = frame;
+    };
+    const closeChatOverlay = () => {
+        if (!chatFrame) return;
+        chatFrame.remove();
+        chatFrame = null;
+        // The overlay's taps landed inside the iframe, never on the viewer's
+        // window, so the on-demand render loop may be parked — wake it so the
+        // tour is responsive the instant the overlay clears.
+        app.renderNextFrame = true;
+        (app as unknown as { tick?: () => void }).tick?.();
+    };
+
     // Open/close is state-driven so anything else (e.g. Esc handling) can toggle
     // it; the Proxy fires `chatOpen:changed`. Shared by both modes.
     toggle.addEventListener('click', () => {
-        // Touch devices in AI mode hand off to the standalone chat page
-        // (chat.html, same directory). The in-viewer overlay lost a five-round
-        // war against the iOS on-screen keyboard — every fixed-position chat
-        // over the WebGL canvas gets displaced or cancels the keyboard; a
-        // plain scrolling document has none of these problems. Back button
-        // returns to the tour (bfcache keeps the scene alive). Desktop keeps
-        // the overlay panel — no on-screen keyboard, no war.
+        // Touch + AI mode → the chat.html overlay. Desktop (fine pointer) keeps
+        // the small in-viewer glass panel — no on-screen keyboard there.
         if (mode !== 'scripted' && window.matchMedia('(pointer: coarse)').matches) {
-            // Carry the current room over so the standalone chat can send the
-            // same room context the in-viewer panel would. Also drop an explicit
-            // "you came from the viewer" flag: chat.html's back button must do a
-            // history.back() (bfcache-instant, no reload) rather than a fresh
-            // navigation — and its old referrer sniff for 'index.html' is always
-            // false on the live /viewer/ URL (clean path, no 'index.html' in the
-            // referrer), so the return cold-reloaded the scan + intro every time.
+            // Carry the current room over so the overlay chat sends the same
+            // room context the in-viewer panel would.
             try {
                 sessionStorage.setItem('conciergeRoom', currentRoom() ?? '');
-                sessionStorage.setItem('conciergeFromViewer', '1');
             } catch { /* storage blocked (private mode) — chat just omits it */ }
-            window.location.href = 'chat.html';
+            openChatOverlay();
             return;
         }
         state.chatOpen = !state.chatOpen;
@@ -527,6 +549,20 @@ const initConcierge = (global: Global) => {
     // load may fire pageshow before this init ran, hence the direct call too.
     window.addEventListener('pageshow', runWhenReady);
     runWhenReady();
+
+    // Messages from the touch overlay's chat.html (same origin, its own
+    // contentWindow): close the overlay, and for a camera-coupled answer run
+    // the action it stored — live, against the still-loaded scan.
+    window.addEventListener('message', (e: MessageEvent) => {
+        if (e.origin !== window.location.origin || !chatFrame || e.source !== chatFrame.contentWindow) return;
+        const data = e.data as { type?: string } | null;
+        if (data?.type === 'concierge:close') {
+            closeChatOverlay();
+        } else if (data?.type === 'concierge:action') {
+            closeChatOverlay();
+            runPendingAction();
+        }
+    });
 };
 
 export { initConcierge };
