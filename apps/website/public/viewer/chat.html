@@ -112,24 +112,43 @@
             text-decoration: none;
             font-size: 14px;
         }
-        /* Action chip: tap-able jump back into the tour (bubble-shaped button;
-           overrides the round 48px send-button base styles below). */
-        .msg--action { padding: 6px; }
+        /* Action chip: a camera-coupled call-to-action (open the map, show the
+           dimensions, fly to a spot). It used to be a white pill INSIDE the
+           white bot bubble — invisible, nobody read it as tappable. Now it's a
+           filled accent CTA that clearly pops off the dark thread: leading icon,
+           label, trailing chevron. Strips the inherited bubble styling. */
+        .msg--action {
+            background: none;
+            padding: 0;
+            max-width: 92%;
+            box-shadow: none;
+        }
         .action-chip {
-            display: block;
+            display: flex;
+            align-items: center;
+            gap: 11px;
             width: 100%;
             height: auto;
             flex: none;
-            border: 1px solid rgba(20, 20, 20, 0.3);
-            border-radius: 80px;
-            background: #ffffff;
-            color: #141414;
-            padding: 9px 16px;
+            border: none;
+            border-radius: 15px;
+            background: var(--accent, #F60);
+            color: #fff;
+            padding: 13px 15px;
             font-family: inherit;
-            font-size: 14px;
+            font-size: 15px;
+            font-weight: 600;
+            line-height: 1.25;
+            text-align: left;
             cursor: pointer;
+            box-shadow: 0 8px 20px -8px rgba(255, 102, 0, 0.55);
+            transition: transform 120ms ease, filter 120ms ease;
         }
-        .action-chip:active { background: #ebebee; }
+        .action-chip:active { transform: scale(0.98); filter: brightness(0.93); }
+        .action-chip__label { flex: 1 1 auto; min-width: 0; }
+        .action-chip__icon, .action-chip__arrow { flex: 0 0 auto; display: flex; }
+        .action-chip__arrow { opacity: 0.85; }
+        .action-chip svg { display: block; fill: none; stroke: #fff; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
         .dots span {
             display: inline-block;
             width: 6px;
@@ -326,13 +345,27 @@
             // which picks it up. Embedded: post 'concierge:action' so the parent
             // closes the overlay AND runs it live against the still-loaded scan.
             // Standalone: return to the tour, where init consumes it on load.
+            // Leading icon per action kind, so the CTA reads at a glance (map
+            // pin for routes, ruler for the measured view, target for a fly-to).
+            const ACTION_ICONS = {
+                mapPoi: '<svg width="19" height="19" viewBox="0 0 24 24"><path d="M12 21s-6-5.686-6-10a6 6 0 0 1 12 0c0 4.314-6 10-6 10Z"/><circle cx="12" cy="11" r="2.3"/></svg>',
+                dimensions: '<svg width="19" height="19" viewBox="0 0 24 24"><rect x="3" y="8" width="18" height="8" rx="1.5"/><path d="M8 8v2.6M12 8v3.4M16 8v2.6"/></svg>',
+                focus: '<svg width="19" height="19" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 4v2.4M12 17.6V20M4 12h2.4M17.6 12H20"/></svg>'
+            };
+            const CHIP_ARROW = '<svg width="17" height="17" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg>';
             const appendActionChip = (label, action) => {
                 const el = document.createElement('div');
                 el.className = 'msg msg--bot msg--action';
                 const btn = document.createElement('button');
                 btn.type = 'button';
                 btn.className = 'action-chip';
-                btn.textContent = label;
+                const icon = ACTION_ICONS[action && action.type] || ACTION_ICONS.focus;
+                // icons/arrow are fixed markup; the label is set via textContent
+                // below so model/owner text can never inject HTML.
+                btn.innerHTML = '<span class="action-chip__icon">' + icon + '</span>'
+                    + '<span class="action-chip__label"></span>'
+                    + '<span class="action-chip__arrow">' + CHIP_ARROW + '</span>';
+                btn.querySelector('.action-chip__label').textContent = label;
                 btn.addEventListener('click', () => {
                     try {
                         sessionStorage.setItem('conciergeAction', JSON.stringify({ ...action, ts: Date.now() }));
