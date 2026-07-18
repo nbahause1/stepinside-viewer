@@ -87,7 +87,13 @@ class InputController {
         const { state } = this._global;
         const cameraComponent = this._global.camera.camera!;
 
-        const isOrbit = state.cameraMode === 'orbit';
+        // Dollhouse uses an OrbitController under the hood, so for input it IS
+        // orbit — drag rotates around the model, pinch/wheel zooms. Every
+        // device's orbit branch (and the z-flip in shared.ts) keys off this,
+        // so folding dollhouse in here is all it takes to make the model
+        // spinnable on both touch and desktop. The controller's own
+        // pitch/zoom clamps keep it a tasteful "walk around it" orbit.
+        const isOrbit = state.cameraMode === 'orbit' || state.cameraMode === 'dollhouse';
         const isFly = state.cameraMode === 'fly';
         const isWalk = state.cameraMode === 'walk';
         const isAerial = state.cameraMode === 'aerial';

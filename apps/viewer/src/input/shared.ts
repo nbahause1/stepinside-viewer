@@ -70,7 +70,7 @@ const screenToWorld = (
  * @param z - The raw forward/back z-component.
  * @returns The z-component flipped for orbit mode, unchanged otherwise.
  */
-const flipZForOrbit = (mode: CameraMode, z: number) => (mode === 'orbit' ? -z : z);
+const flipZForOrbit = (mode: CameraMode, z: number) => ((mode === 'orbit' || mode === 'dollhouse') ? -z : z);
 
 /**
  * The per-frame view of the world that every device's `update()` reads
