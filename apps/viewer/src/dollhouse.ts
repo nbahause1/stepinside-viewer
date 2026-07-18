@@ -27,14 +27,21 @@ import type { Global } from './types';
 
 const tmpCorner = new Vec3();
 
-// Feather band (m) over which a splat fades out at the cut. Kept tight so the
-// edge reads as a deliberate section cut, not a gradient.
+// Feather band (m) over which a splat fades out at the FLOOR cut. Kept tight.
 const FEATHER_M = 0.06;
 
-// Splats within this band BELOW the cut shrink (down to SHRINK_MIN of their
-// size at the plane itself) — kills the upward smear of large wall-top splats.
-const SHRINK_BAND_M = 0.35;
-const SHRINK_MIN = 0.3;
+// Top-edge treatment (all runtime-tunable uniforms, defaults dialled in on the
+// demo scan): the wall top is where the ceiling-junction splats are noisiest,
+// so a razor line always frays. Instead the top of the wall is made to
+// dissolve cleanly — splats shrink hard toward the cut (uEdgeMin of their size
+// at the plane, over uEdgeBand below it) AND their alpha tapers over uTopFade
+// below the cut. Together the frizzy elongated wall-top splats collapse to a
+// soft, deliberate fade rather than a jagged line.
+const EDGE_MIN_DEFAULT = 0.05;   // scale at the cut (near-point → no upward smear)
+const EDGE_BAND_DEFAULT = 0.5;   // m below cut over which shrink ramps back to 1
+const TOP_FADE_DEFAULT = 0.28;   // m below cut over which alpha tapers to 0 at cut
+const MAX_SCALE_DEFAULT = 0.2;   // per-axis splat scale cap (m) — collapses needle spikes
+const MAX_SCALE_PARKED = 1000;   // no-op cap while NOT in dollhouse (walk stays untouched)
 
 // Parked height: far above any interior — the clip is a no-op there.
 const PARKED_Y = 1000;
@@ -54,15 +61,29 @@ uniform uMinX: f32;
 uniform uMaxX: f32;
 uniform uMinZ: f32;
 uniform uMaxZ: f32;
+uniform uEdgeMin: f32;
+uniform uEdgeBand: f32;
+uniform uTopFade: f32;
+uniform uMaxScale: f32;
 fn modifySplatCenter(center: ptr<function, vec3f>) {
 }
 fn modifySplatRotationScale(originalCenter: vec3f, modifiedCenter: vec3f, rotation: ptr<function, vec4f>, scale: ptr<function, vec3f>) {
-    let edge = clamp((uniform.uClipY - originalCenter.y) / ${SHRINK_BAND_M}, 0.0, 1.0);
-    let s = mix(${SHRINK_MIN}, 1.0, edge);
+    // 1) Global spike cap: the "Fransen" are individual splats with one huge
+    // axis (needle-like) that stab out from walls/corners. Clamping the per-
+    // axis scale to uMaxScale collapses those needles while normal splats
+    // (well under the cap) are untouched. This is the main de-frizz lever.
+    (*scale) = min(*scale, vec3f(uniform.uMaxScale));
+    // 2) Shrink toward BOTH the ceiling cut and the footprint boundary, so
+    // edge splats collapse to points (uEdgeMin) instead of smearing past.
+    let yEdge = clamp((uniform.uClipY - originalCenter.y) / uniform.uEdgeBand, 0.0, 1.0);
+    let xzDist = min(min(originalCenter.x - uniform.uMinX, uniform.uMaxX - originalCenter.x),
+                     min(originalCenter.z - uniform.uMinZ, uniform.uMaxZ - originalCenter.z));
+    let xzEdge = clamp(xzDist / uniform.uEdgeBand, 0.0, 1.0);
+    let s = mix(uniform.uEdgeMin, 1.0, min(yEdge, xzEdge));
     (*scale) = (*scale) * s;
 }
 fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
-    let above = clamp((uniform.uClipY - center.y) / ${FEATHER_M}, 0.0, 1.0);
+    let above = clamp((uniform.uClipY - center.y) / uniform.uTopFade, 0.0, 1.0);
     let below = clamp((center.y - uniform.uFloorY) / ${FEATHER_M}, 0.0, 1.0);
     let insideX = clamp((center.x - uniform.uMinX) / ${FOOT_FEATHER_M}, 0.0, 1.0)
                 * clamp((uniform.uMaxX - center.x) / ${FOOT_FEATHER_M}, 0.0, 1.0);
@@ -79,14 +100,22 @@ uniform float uMinX;
 uniform float uMaxX;
 uniform float uMinZ;
 uniform float uMaxZ;
+uniform float uEdgeMin;
+uniform float uEdgeBand;
+uniform float uTopFade;
+uniform float uMaxScale;
 void modifySplatCenter(inout vec3 center) {
 }
 void modifySplatRotationScale(vec3 originalCenter, vec3 modifiedCenter, inout vec4 rotation, inout vec3 scale) {
-    float edge = clamp((uClipY - originalCenter.y) / ${SHRINK_BAND_M}, 0.0, 1.0);
-    scale *= mix(${SHRINK_MIN}, 1.0, edge);
+    scale = min(scale, vec3(uMaxScale));
+    float yEdge = clamp((uClipY - originalCenter.y) / uEdgeBand, 0.0, 1.0);
+    float xzDist = min(min(originalCenter.x - uMinX, uMaxX - originalCenter.x),
+                       min(originalCenter.z - uMinZ, uMaxZ - originalCenter.z));
+    float xzEdge = clamp(xzDist / uEdgeBand, 0.0, 1.0);
+    scale *= mix(uEdgeMin, 1.0, min(yEdge, xzEdge));
 }
 void modifySplatColor(vec3 center, inout vec4 color) {
-    float above = clamp((uClipY - center.y) / ${FEATHER_M}, 0.0, 1.0);
+    float above = clamp((uClipY - center.y) / uTopFade, 0.0, 1.0);
     float below = clamp((center.y - uFloorY) / ${FEATHER_M}, 0.0, 1.0);
     float insideX = clamp((center.x - uMinX) / ${FOOT_FEATHER_M}, 0.0, 1.0)
                   * clamp((uMaxX - center.x) / ${FOOT_FEATHER_M}, 0.0, 1.0);
@@ -112,6 +141,15 @@ const initDollhouse = (global: Global) => {
     // (world floor height), so a plane just beneath them clips the sparkle.
     // Not animated — it sits under the visible floor either way.
     let floorClip = -PARKED_Y;
+    // Top-edge shaping constants (exposed for live tuning; window.__dollhouseEdge
+    // can override them in a ?debug session). Authorable per property later.
+    let edgeMin = EDGE_MIN_DEFAULT;
+    let edgeBand = EDGE_BAND_DEFAULT;
+    let topFade = TOP_FADE_DEFAULT;
+    // Parked by default so the scale cap NEVER touches walk mode — the chunk
+    // stays installed after the first dollhouse visit, and an un-parked cap
+    // would then quietly soften the first-person view too.
+    let maxScale = MAX_SCALE_PARKED;
     // Footprint (XZ) crop bounds, parked to a huge box (no-op) when closed.
     const PARKED_XZ = { minX: -PARKED_Y, maxX: PARKED_Y, minZ: -PARKED_Y, maxZ: PARKED_Y };
     let foot = { ...PARKED_XZ };
@@ -201,6 +239,17 @@ const initDollhouse = (global: Global) => {
         return { floor: min, top: max };
     };
 
+    // Live edge-tuning hook (dev only): __dhEdge(min, band, fade) in a ?debug
+    // console dials the top-edge shaping without a rebuild.
+    if (global.config.devtools) {
+        (window as unknown as { __dhEdge?: (m: number, b: number, f: number, cap?: number) => void }).__dhEdge =
+            (m: number, b: number, f: number, cap?: number) => {
+                edgeMin = m; edgeBand = b; topFade = f;
+                if (typeof cap === 'number') maxScale = cap;
+                pushUniform(); app.renderNextFrame = true;
+            };
+    }
+
     const resolveClipY = (): number => {
         if (clipY !== null) return clipY;
         const bounds = worldBounds();
@@ -229,6 +278,10 @@ const initDollhouse = (global: Global) => {
         mat.setParameter('uMaxX', foot.maxX);
         mat.setParameter('uMinZ', foot.minZ);
         mat.setParameter('uMaxZ', foot.maxZ);
+        mat.setParameter('uEdgeMin', edgeMin);
+        mat.setParameter('uEdgeBand', edgeBand);
+        mat.setParameter('uTopFade', topFade);
+        mat.setParameter('uMaxScale', maxScale);
         mat.update();
     };
 
@@ -277,6 +330,7 @@ const initDollhouse = (global: Global) => {
         target = y;
         floorClip = resolveFloorY() ?? -PARKED_Y;
         foot = resolveFootprint() ?? { ...PARKED_XZ };
+        maxScale = MAX_SCALE_DEFAULT;
         pushUniform();
         app.renderNextFrame = true;
     });
@@ -300,6 +354,7 @@ const initDollhouse = (global: Global) => {
                 target = PARKED_Y;
                 floorClip = -PARKED_Y;
                 foot = { ...PARKED_XZ };
+                maxScale = MAX_SCALE_PARKED;
                 pushUniform();
             }
         }
