@@ -561,7 +561,18 @@ export class Annotation extends Script {
         // opacity actually changes (marker hidden toggles, fade in/out) — not
         // every frame for every annotation. Skipping the redundant
         // setParameter avoids per-frame shader-uniform churn.
-        const markerOpacity = Annotation.markersHidden ? 0 : Annotation.opacity;
+        //
+        // Hidden markers get ONE exception: on phones the tooltip is a
+        // bottom-centre sheet decoupled from its 3D point (see
+        // _updatePositions), so nothing shows WHICH feature the text is about.
+        // While the visitor is actively browsing a highlight (its tooltip is
+        // up → it is the activeAnnotation), reveal just that one point's dot so
+        // the card is anchored again. Not persistent: only the active one, only
+        // in sheet layout. Desktop keeps markers hidden — there the card sits
+        // at the point with an arrow already.
+        const activeSheetDot =
+            Annotation.activeAnnotation === this && window.innerWidth <= 520;
+        const markerOpacity = (Annotation.markersHidden && !activeSheetDot) ? 0 : Annotation.opacity;
         if (markerOpacity !== this._lastMarkerOpacity) {
             this._lastMarkerOpacity = markerOpacity;
             this.materials[0].opacity = markerOpacity;

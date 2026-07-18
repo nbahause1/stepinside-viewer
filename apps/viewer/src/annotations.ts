@@ -78,10 +78,15 @@ class Annotations {
             // handle an annotation being activated/shown
             script.annotation.on('show', () => {
                 global.events.fire('annotation.activate', ann);
+                // the active highlight's anchor dot flips on (sheet layout) —
+                // the navigator doesn't move the camera, so force one frame
+                global.app.renderNextFrame = true;
             });
 
             script.annotation.on('hide', () => {
                 global.events.fire('annotation.deactivate');
+                // ...and off again when the highlight closes
+                global.app.renderNextFrame = true;
             });
 
             // re-render if hover state changes
@@ -95,6 +100,9 @@ class Annotations {
             const script = scriptMap.get(ann);
             if (script) {
                 script.showTooltip();
+                // browsing to another highlight: repaint so the previous dot
+                // clears and the new one appears in the same frame
+                global.app.renderNextFrame = true;
             }
         });
 
