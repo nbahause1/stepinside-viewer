@@ -2,7 +2,6 @@ import {
     type AppBase,
     CULLFACE_NONE,
     FILTER_LINEAR,
-    FILTER_LINEAR_MIPMAP_LINEAR,
     PIXELFORMAT_RGBA8,
     BlendState,
     Color,
@@ -315,11 +314,7 @@ export class Annotation extends Script {
      * @returns {Texture} The hotspot texture
      * @private
      */
-    static _createHotspotTexture(app: AppBase, label: string, size = 256, borderWidth = 24) {
-        // 256px (was 64): the marker renders over the splat canvas, which on
-        // phones is resolution-capped — a small texture upscaled there read as
-        // pixelated. 256 + mipmaps stays crisp at every zoom/DPR. All draw
-        // constants below scale with `size`, so bumping it needs no other edit.
+    static _createHotspotTexture(app: AppBase, label: string, size = 64, borderWidth = 6) {
         // Create canvas for hotspot texture
         const canvas = document.createElement('canvas');
         canvas.width = size;
@@ -335,7 +330,7 @@ export class Annotation extends Script {
         // Draw dark circle with light border
         const centerX = size / 2;
         const centerY = size / 2;
-        const radius = (size / 2) - borderWidth - 4; // Leave space for border
+        const radius = (size / 2) - 4; // Leave space for border
 
         // Draw main circle
         ctx.beginPath();
@@ -350,12 +345,12 @@ export class Annotation extends Script {
         ctx.strokeStyle = 'white';
         ctx.stroke();
 
-        // Draw text (font scales with the texture size so it stays crisp)
-        ctx.font = `bold ${Math.round(size * 0.5)}px Arial`;
+        // Draw text
+        ctx.font = 'bold 32px Arial';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillStyle = 'white';
-        ctx.fillText(label, Math.floor(canvas.width / 2), Math.floor(canvas.height / 2) + Math.round(size / 64));
+        ctx.fillText(label, Math.floor(canvas.width / 2), Math.floor(canvas.height / 2) + 1);
 
         // get pixel data
         const imageData = ctx.getImageData(0, 0, size, size);
@@ -377,10 +372,8 @@ export class Annotation extends Script {
             height: size,
             format: PIXELFORMAT_RGBA8,
             magFilter: FILTER_LINEAR,
-            // trilinear + mipmaps: crisp when the marker is small/far (aerial,
-            // walking away) instead of the aliased shimmer of a single level
-            minFilter: FILTER_LINEAR_MIPMAP_LINEAR,
-            mipmaps: true,
+            minFilter: FILTER_LINEAR,
+            mipmaps: false,
             levels: [new Uint8Array(data.buffer)]
         });
 
@@ -568,18 +561,7 @@ export class Annotation extends Script {
         // opacity actually changes (marker hidden toggles, fade in/out) — not
         // every frame for every annotation. Skipping the redundant
         // setParameter avoids per-frame shader-uniform churn.
-        //
-        // Hidden markers get ONE exception: on phones the tooltip is a
-        // bottom-centre sheet decoupled from its 3D point (see
-        // _updatePositions), so nothing shows WHICH feature the text is about.
-        // While the visitor is actively browsing a highlight (its tooltip is
-        // up → it is the activeAnnotation), reveal just that one point's dot so
-        // the card is anchored again. Not persistent: only the active one, only
-        // in sheet layout. Desktop keeps markers hidden — there the card sits
-        // at the point with an arrow already.
-        const activeSheetDot =
-            Annotation.activeAnnotation === this && window.innerWidth <= 520;
-        const markerOpacity = (Annotation.markersHidden && !activeSheetDot) ? 0 : Annotation.opacity;
+        const markerOpacity = Annotation.markersHidden ? 0 : Annotation.opacity;
         if (markerOpacity !== this._lastMarkerOpacity) {
             this._lastMarkerOpacity = markerOpacity;
             this.materials[0].opacity = markerOpacity;
