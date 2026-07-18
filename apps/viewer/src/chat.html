@@ -132,7 +132,9 @@
             flex: none;
             border: none;
             border-radius: 15px;
-            background: var(--accent, #F60);
+            /* the deep red of the map's location pins (surroundings.ts
+               MAP_ACCENT #8c3a2f), so the CTA reads as "this is about a place" */
+            background: #8c3a2f;
             color: #fff;
             padding: 13px 15px;
             font-family: inherit;
@@ -141,7 +143,7 @@
             line-height: 1.25;
             text-align: left;
             cursor: pointer;
-            box-shadow: 0 8px 20px -8px rgba(255, 102, 0, 0.55);
+            box-shadow: 0 8px 20px -8px rgba(140, 58, 47, 0.6);
             transition: transform 120ms ease, filter 120ms ease;
         }
         .action-chip:active { transform: scale(0.98); filter: brightness(0.93); }
