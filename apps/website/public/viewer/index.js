@@ -1,2 +1,2 @@
-export{m as main}from"./index-CGAl52B0.js";
+export{m as main}from"./index-xjifXBng.js";
 //# sourceMappingURL=index.js.map

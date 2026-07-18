@@ -69,6 +69,17 @@ const initRoomDimensions = (global: Global) => {
         return tmpA.distance(tmpB);
     };
 
+    // A near-vertical line is the ROOM HEIGHT (its endpoints differ mostly in
+    // Y). In the dollhouse the ceiling is sliced away, so a full-height line
+    // shoots up into empty space — pointing at a ceiling that isn't there. So
+    // it's hidden in dollhouse mode. In the bird's-eye view the ceiling is
+    // still present (no cut), so the height line reaches it and stays.
+    const isHeightLine = (l: RoomLine): boolean => {
+        const dy = Math.abs(l.a[1] - l.b[1]);
+        const dxz = Math.hypot(l.a[0] - l.b[0], l.a[2] - l.b[2]);
+        return dy > 0.5 && dy > dxz;
+    };
+
     const build = () => {
         for (let i = 0; i < allLines.length; i++) {
             const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
@@ -85,7 +96,14 @@ const initRoomDimensions = (global: Global) => {
     const render = () => {
         if (!active) return;
 
+        const inDollhouse = state.cameraMode === 'dollhouse';
         allLines.forEach((l: RoomLine, i: number) => {
+            // Height line into the void: hide it while the ceiling is cut away.
+            if (inDollhouse && isHeightLine(l)) {
+                lineEls[i].classList.add('hidden');
+                labelEls[i].classList.add('hidden');
+                return;
+            }
             tmpA.set(l.a[0], l.a[1], l.a[2]);
             tmpB.set(l.b[0], l.b[1], l.b[2]);
             // A room-sized line can have one end behind the camera during the
