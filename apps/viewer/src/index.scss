@@ -625,8 +625,8 @@ body.tutorial-active #walkHint {
     }
 
     // the bottom bar swaps its whole row with the mode: walk controls (measure /
-    // home / drone / dollhouse) vs bird's-eye paging (‹ / return / ›) vs the
-    // dollhouse's single "return to walking" button
+    // home / drone) vs bird's-eye paging (‹ / dollhouse / return / measure / ›)
+    // vs the dollhouse's single "return to walking" button
     .controlDome__row--aerial,
     .controlDome__row--dollhouse {
         display: none;

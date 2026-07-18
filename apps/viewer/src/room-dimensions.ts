@@ -16,15 +16,17 @@ type RoomSettings = {
     area?: number
 };
 
-// Authored room dimensions ("Raummaße"). In the bird's-eye view (aerial mode)
+// Authored room dimensions ("Raummaße"). In the dollhouse ("Puppenhaus") view
 // every authored room presents its dimensions by itself: solid hairlines
 // along the wall bases with metric length labels — the floor-plan moment.
-// Deliberately NOT shown in walk mode: down there the ruler button is the
-// visitor's own two-point measurement, and mixing both reads as noise. Data
-// comes from settings.rooms, authored once per property from the calibrated
-// scan (console helper roomEntry() in measure.ts), so the numbers are curated,
-// never guessed live. Own overlay (#roomDimsOverlay, below #measureOverlay):
-// the measure overlay's visibility tracks measure mode, not the camera mode.
+// The bird's-eye (drone) mode deliberately shows NO dimensions any more: the
+// dollhouse is now the one measured overview, and duplicating the labels in
+// both read as noise. Also NOT shown in walk mode: down there the ruler button
+// is the visitor's own two-point measurement. Data comes from settings.rooms,
+// authored once per property from the calibrated scan (console helper
+// roomEntry() in measure.ts), so the numbers are curated, never guessed live.
+// Own overlay (#roomDimsOverlay, below #measureOverlay): the measure overlay's
+// visibility tracks measure mode, not the camera mode.
 const initRoomDimensions = (global: Global) => {
     const { app, events, settings, state, camera } = global;
 
@@ -71,9 +73,9 @@ const initRoomDimensions = (global: Global) => {
 
     // A near-vertical line is the ROOM HEIGHT (its endpoints differ mostly in
     // Y). In the dollhouse the ceiling is sliced away, so a full-height line
-    // shoots up into empty space — pointing at a ceiling that isn't there. So
-    // it's hidden in dollhouse mode. In the bird's-eye view the ceiling is
-    // still present (no cut), so the height line reaches it and stays.
+    // shoots up into empty space — pointing at a ceiling that isn't there. The
+    // dollhouse is now the only mode that shows dimensions, so these height
+    // lines are always suppressed here.
     const isHeightLine = (l: RoomLine): boolean => {
         const dy = Math.abs(l.a[1] - l.b[1]);
         const dxz = Math.hypot(l.a[0] - l.b[0], l.a[2] - l.b[2]);
@@ -138,11 +140,11 @@ const initRoomDimensions = (global: Global) => {
 
     app.on('update', render);
 
-    // Visible exactly while the camera is in a top-down context — the
-    // bird's-eye mode and the dollhouse model (including the glide in/out —
-    // the lines settle with the camera).
+    // Visible exactly while the camera is in the dollhouse model (including the
+    // glide in/out — the lines settle with the camera). The bird's-eye/drone
+    // mode no longer carries the dimensions.
     const update = () => {
-        const on = state.cameraMode === 'aerial' || state.cameraMode === 'dollhouse';
+        const on = state.cameraMode === 'dollhouse';
         if (on === active) return;
         active = on;
         overlay.classList.toggle('hidden', !on);

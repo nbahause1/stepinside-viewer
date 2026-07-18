@@ -820,20 +820,24 @@
                             <circle cx="11" cy="11" r="1.5" />
                         </svg>
                     </button>
-                    <button id="domeDollhouse" class="domeBtn" type="button" aria-label="Puppenhaus" title="Puppenhaus">
-                        <!-- house with a lifted-off roof: the cutaway model -->
-                        <svg width="25" height="25" viewBox="0 0 22 22" aria-hidden="true">
-                            <path d="M4 7.6 L11 2.8 L18 7.6" />
-                            <path d="M5 11 H17 M5 11 V18 H17 V11" />
-                            <path d="M9.4 18 V14.4 H12.6 V18" />
-                        </svg>
-                    </button>
                 </div>
-                <!-- bird's-eye mode: page views (‹), return to walking, page views (›) -->
+                <!-- bird's-eye mode: page views (‹), open the dollhouse (the
+                     measured cutaway), return to walking (centre), measure,
+                     page views (›) -->
                 <div class="controlDome__row controlDome__row--aerial">
                     <button id="domePrev" class="domeBtn" type="button" aria-label="Vorige Ansicht" title="Vorige Ansicht">
                         <svg width="25" height="25" viewBox="0 0 22 22" aria-hidden="true">
                             <path d="M13.5 4.5 L8 11 L13.5 17.5" />
+                        </svg>
+                    </button>
+                    <button id="domeDollhouse" class="domeBtn" type="button" aria-label="Puppenhaus" title="Puppenhaus">
+                        <!-- cutaway "dollhouse": roof lifted clear of an open-top
+                             body with an interior wall — reads as a sectioned model,
+                             deliberately distinct from the solid home/reset house. -->
+                        <svg width="25" height="25" viewBox="0 0 22 22" aria-hidden="true">
+                            <path d="M4.6 6.2 L11 2.6 L17.4 6.2" />
+                            <path d="M5.6 9.6 V18 H16.4 V9.6" />
+                            <path d="M11 12.6 V18" />
                         </svg>
                     </button>
                     <button id="domeAerialExit" class="domeBtn" type="button" aria-label="Zurück zum Laufen" title="Zurück zum Laufen">

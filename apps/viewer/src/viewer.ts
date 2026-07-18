@@ -685,29 +685,37 @@ class Viewer {
 
             // Wake the render loop the INSTANT a finger lands. With
             // autoRender off, after the 4 s idle window nothing renders, and
-            // iOS Safari then throttles rAF hard — so a control tap was
-            // registered immediately but its visible response (the mode
-            // transition) waited for the next throttled frame, reading as a
-            // multi-second lag. Kicking renderNextFrame + resetting the idle
-            // clock from the pointer/touch DOWN event (capture phase, before
-            // any target handler) makes the very next frame render, so the
-            // transition starts on contact. Cheap: it only fires on real input.
-            const wake = () => {
+            // iOS Safari then throttles/parks rAF hard — and here is the trap:
+            // the engine only ever schedules the NEXT rAF from *inside* its own
+            // tick (app.tick calls requestAnimationFrame at the top). Once the
+            // browser stops firing the pending rAF, no tick runs, so nothing
+            // re-schedules it — and setting `renderNextFrame = true` is then a
+            // pure no-op (proven: after 5 s idle the flag was true yet zero
+            // frames rendered; a single app.tick() produced exactly one). So
+            // the old wake armed a flag no running loop was left to read, and
+            // the visible response waited for the browser to resume rAF on its
+            // own — the multi-second lag on e.g. the dollhouse exit.
+            //
+            // Fix: drive ONE frame synchronously on contact. That restarts the
+            // stalled loop, renders (which resumes the browser's rAF cadence
+            // now that the page paints again), and re-schedules the next frame
+            // from within the tick — so the transition begins on the touch, not
+            // seconds later. Guarded against re-entrancy; only fires on real
+            // discrete input, so the synchronous frame is cheap and rare.
+            const engine = app as unknown as { tick: () => void; _inFrameUpdate?: boolean };
+            const kick = () => {
                 idleTime = 0;
                 this.forceRenderNextFrame = true;
                 app.renderNextFrame = true;
+                if (!engine._inFrameUpdate) engine.tick();
             };
-            window.addEventListener('pointerdown', wake, { capture: true, passive: true });
-            window.addEventListener('touchstart', wake, { capture: true, passive: true });
+            window.addEventListener('pointerdown', kick, { capture: true, passive: true });
+            window.addEventListener('touchstart', kick, { capture: true, passive: true });
 
+            // A discrete action (button tap, mode switch) that isn't a raw
+            // pointer/touch — same treatment, so it can't wait on a parked rAF.
             events.on('inputEvent', (type: string) => {
-                if (type !== 'interact') {
-                    idleTime = 0;
-                    // A discrete action (button tap, mode switch): render now,
-                    // don't wait for the next update tick to re-arm rendering.
-                    this.forceRenderNextFrame = true;
-                    app.renderNextFrame = true;
-                }
+                if (type !== 'interact') kick();
             });
 
             // While LOD chunks stream/decode, frame times spike for reasons

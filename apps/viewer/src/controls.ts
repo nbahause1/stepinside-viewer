@@ -1,8 +1,11 @@
 import type { Global } from './types';
 
-// Bottom control dome. Two rows that swap with the camera mode:
-//   walk mode   : reset · measure · enter bird's-eye (drone)
-//   bird's-eye  : previous view (‹) · return to walking · next view (›)
+// Bottom control dome. Rows that swap with the camera mode:
+//   walk mode   : (tour ·) measure · reset · enter bird's-eye (drone)
+//   bird's-eye  : ‹ prev · open dollhouse · return to walking · measure · next ›
+//   dollhouse   : return to walking
+// The dollhouse ("Puppenhaus") lives INSIDE the drone row, not the walk row —
+// the drone is the overview hub, and nesting it there keeps the walk bar lean.
 const initControls = (global: Global) => {
     const { events, settings } = global;
 
@@ -48,8 +51,8 @@ const initControls = (global: Global) => {
     prev?.addEventListener('click', () => events.fire('inputEvent', 'aerialPrev'));
     next?.addEventListener('click', () => events.fire('inputEvent', 'aerialNext'));
 
-    // dollhouse ("Puppenhaus"): same toggle pattern as the drone pair — the
-    // house button opens the model, the walk figure seals it and returns
+    // dollhouse ("Puppenhaus"): opened from the drone row (the overview hub),
+    // sealed by the walk figure which drops straight back into the walk/tour.
     dollhouse?.addEventListener('click', () => events.fire('inputEvent', 'dollhouse'));
     dollhouseExit?.addEventListener('click', () => events.fire('inputEvent', 'dollhouse'));
 

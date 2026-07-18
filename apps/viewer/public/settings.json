@@ -161,6 +161,9 @@
         }
     ],
     "startMode": "default",
+    "dollhouse": {
+        "clipY": 2.4
+    },
     "staging": {
         "enabled": true,
         "mode": "demo",

@@ -202,11 +202,6 @@ class CameraManager {
         let preAerialMode: CameraMode = defaultMode;
         const preAerialCamera = new Camera(this.camera);
 
-        // dollhouse toggle state, same pattern: leaving the model glides back
-        // to exactly where the visitor stood when they opened it
-        let preDollhouseMode: CameraMode = defaultMode;
-        const preDollhouseCamera = new Camera(this.camera);
-
         // enter the initial controller
         getController(state.cameraMode).onEnter(this.camera);
 
@@ -409,20 +404,23 @@ class CameraManager {
                 }
                 case 'dollhouse':
                     if (state.cameraMode === 'dollhouse') {
-                        // EXIT (dollhouse -> walk): snappy. The vantage is ~10 m
-                        // up, so the default 1 s ease crept into place and felt
-                        // laggy on the way back; ~0.35 s reads as "drop straight
-                        // back into the tour". Only this direction is sped up —
-                        // the ENTER below keeps its cinematic reveal.
-                        state.cameraMode = preDollhouseMode;
-                        (controllers[preDollhouseMode] as { goto?: (c: Camera) => void } | null)?.goto?.(preDollhouseCamera);
+                        // EXIT (dollhouse -> walk): snappy, and a straight drop
+                        // back down to where the overview was opened FROM — the
+                        // model is reached from the drone row, so it returns to
+                        // the same pose the drone's own "return to walking" button
+                        // uses (preAerialCamera, captured on the walk->drone step).
+                        // A controller needs an explicit goto to reset its pose on
+                        // resume — without it the walker inherits the ~10 m model
+                        // vantage and floats. This drops straight into the walk/
+                        // tour, matching the walk-figure exit icon. ~0.35 s ease.
+                        state.cameraMode = preAerialMode;
+                        (controllers[preAerialMode] as { goto?: (c: Camera) => void } | null)?.goto?.(preAerialCamera);
                         startTransition(2.8);
                         events.fire('dollhouse:close');
                     } else {
-                        // enter: remember the spot, rise to the model vantage
-                        // while dollhouse.ts sweeps the ceiling open in sync
-                        preDollhouseMode = state.cameraMode;
-                        preDollhouseCamera.copy(this.camera);
+                        // enter: rise to the model vantage while dollhouse.ts
+                        // sweeps the ceiling open in sync. Reached from the drone
+                        // row (controls.ts) — the drone is the overview hub.
                         events.fire('orbitTarget:clear');
                         sourcesByMode[state.cameraMode]?.cancel();
                         state.cameraMode = 'dollhouse';

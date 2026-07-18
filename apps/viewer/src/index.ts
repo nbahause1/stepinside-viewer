@@ -723,6 +723,32 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
         });
     }
 
+    // bfcache eligibility — the concierge return path depends on it. On touch
+    // the concierge hands off to the standalone chat.html (concierge.ts), and
+    // its back button does history.back() expecting the browser's back/forward
+    // cache to restore this whole page instantly (scan + camera pose intact).
+    // A RUNNING AudioContext silently disqualifies a page from bfcache in both
+    // Safari and Chrome — and Howler opens one the first time any SFX unlocks —
+    // so without this the return cold-reloads the viewer and replays the whole
+    // entrance intro (the "not fluent" report). Suspend the context as the page
+    // is hidden (freeing bfcache) and resume it when shown again. pagehide/
+    // pageshow are the bfcache-correct events (unload would itself block it).
+    type BfCacheCtx = { suspend?: () => void; resume?: () => void };
+    const audioContext = (): BfCacheCtx | null => (Howler as unknown as { ctx?: BfCacheCtx }).ctx ?? null;
+    window.addEventListener('pagehide', () => {
+        audioContext()?.suspend?.();
+    });
+    window.addEventListener('pageshow', (e: PageTransitionEvent) => {
+        audioContext()?.resume?.();
+        // Restored FROM bfcache: the rAF loop may be parked (see viewer.ts) and
+        // the audio context just resumed — kick one frame so the scan is live
+        // and interactive the instant the tour comes back, no blank beat.
+        if (e.persisted) {
+            app.renderNextFrame = true;
+            (app as unknown as { tick: () => void }).tick();
+        }
+    });
+
     // Create the viewer
     return new Viewer(global, gsplatLoad, skyboxLoad, collisionLoad);
 };
