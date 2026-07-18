@@ -219,9 +219,9 @@ class CameraManager {
         controllers.walk.resetToSpawn(homeCamera);
 
         // transition state. transitionSpeed is per-transition: startTransition()
-        // resets it to the default, callers that want a snappier glide pass a
-        // faster value (e.g. leaving the far dollhouse vantage — a 1 s ease
-        // from ~10 m up crept into place and felt laggy).
+        // resets it to the default; a caller can pass a faster value for a
+        // snappier glide (the dollhouse EXIT does — its vantage is ~10 m up, so
+        // the default 1 s ease crept into place and felt laggy on the way back).
         const DEFAULT_TRANSITION_SPEED = 1.0;
         let transitionSpeed = DEFAULT_TRANSITION_SPEED;
         let transitionTimer = 1;
@@ -409,14 +409,14 @@ class CameraManager {
                 }
                 case 'dollhouse':
                     if (state.cameraMode === 'dollhouse') {
-                        // exit: the ceiling seals while the camera glides back
-                        // to exactly where the visitor left off. Snappier than
-                        // the default — the vantage is ~10 m up, so a 1 s ease
-                        // crept in and felt laggy; ~0.45 s reads as "drop back
-                        // in" without losing the motion entirely.
+                        // EXIT (dollhouse -> walk): snappy. The vantage is ~10 m
+                        // up, so the default 1 s ease crept into place and felt
+                        // laggy on the way back; ~0.35 s reads as "drop straight
+                        // back into the tour". Only this direction is sped up —
+                        // the ENTER below keeps its cinematic reveal.
                         state.cameraMode = preDollhouseMode;
                         (controllers[preDollhouseMode] as { goto?: (c: Camera) => void } | null)?.goto?.(preDollhouseCamera);
-                        startTransition(2.4);
+                        startTransition(2.8);
                         events.fire('dollhouse:close');
                     } else {
                         // enter: remember the spot, rise to the model vantage
