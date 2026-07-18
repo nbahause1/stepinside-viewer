@@ -218,8 +218,12 @@ class CameraManager {
         const homeCamera = new Camera(this.camera);
         controllers.walk.resetToSpawn(homeCamera);
 
-        // transition state
-        const transitionSpeed = 1.0;
+        // transition state. transitionSpeed is per-transition: startTransition()
+        // resets it to the default, callers that want a snappier glide pass a
+        // faster value (e.g. leaving the far dollhouse vantage — a 1 s ease
+        // from ~10 m up crept into place and felt laggy).
+        const DEFAULT_TRANSITION_SPEED = 1.0;
+        let transitionSpeed = DEFAULT_TRANSITION_SPEED;
         let transitionTimer = 1;
         let clearOrbitTargetOnTransitionEnd = false;
 
@@ -230,10 +234,12 @@ class CameraManager {
         // must not (re)fire 'tour:complete'.
         let tourStarted = false;
 
-        // start a new camera transition from the current pose
-        const startTransition = () => {
+        // start a new camera transition from the current pose. Optional speed
+        // multiplier (1 = ~1 s glide); higher = snappier.
+        const startTransition = (speed: number = DEFAULT_TRANSITION_SPEED) => {
             from.copy(this.camera);
             transitionTimer = 0;
+            transitionSpeed = speed;
         };
 
         this.snap = () => {
@@ -404,10 +410,13 @@ class CameraManager {
                 case 'dollhouse':
                     if (state.cameraMode === 'dollhouse') {
                         // exit: the ceiling seals while the camera glides back
-                        // to exactly where the visitor left off
+                        // to exactly where the visitor left off. Snappier than
+                        // the default — the vantage is ~10 m up, so a 1 s ease
+                        // crept in and felt laggy; ~0.45 s reads as "drop back
+                        // in" without losing the motion entirely.
                         state.cameraMode = preDollhouseMode;
                         (controllers[preDollhouseMode] as { goto?: (c: Camera) => void } | null)?.goto?.(preDollhouseCamera);
-                        startTransition();
+                        startTransition(2.4);
                         events.fire('dollhouse:close');
                     } else {
                         // enter: remember the spot, rise to the model vantage
