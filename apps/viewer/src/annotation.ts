@@ -2,6 +2,7 @@ import {
     type AppBase,
     CULLFACE_NONE,
     FILTER_LINEAR,
+    FILTER_LINEAR_MIPMAP_LINEAR,
     PIXELFORMAT_RGBA8,
     BlendState,
     Color,
@@ -314,7 +315,11 @@ export class Annotation extends Script {
      * @returns {Texture} The hotspot texture
      * @private
      */
-    static _createHotspotTexture(app: AppBase, label: string, size = 64, borderWidth = 6) {
+    static _createHotspotTexture(app: AppBase, label: string, size = 256, borderWidth = 24) {
+        // 256px (was 64): the marker renders over the splat canvas, which on
+        // phones is resolution-capped — a small texture upscaled there read as
+        // pixelated. 256 + mipmaps stays crisp at every zoom/DPR. All draw
+        // constants below scale with `size`, so bumping it needs no other edit.
         // Create canvas for hotspot texture
         const canvas = document.createElement('canvas');
         canvas.width = size;
@@ -330,7 +335,7 @@ export class Annotation extends Script {
         // Draw dark circle with light border
         const centerX = size / 2;
         const centerY = size / 2;
-        const radius = (size / 2) - 4; // Leave space for border
+        const radius = (size / 2) - borderWidth - 4; // Leave space for border
 
         // Draw main circle
         ctx.beginPath();
@@ -345,12 +350,12 @@ export class Annotation extends Script {
         ctx.strokeStyle = 'white';
         ctx.stroke();
 
-        // Draw text
-        ctx.font = 'bold 32px Arial';
+        // Draw text (font scales with the texture size so it stays crisp)
+        ctx.font = `bold ${Math.round(size * 0.5)}px Arial`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillStyle = 'white';
-        ctx.fillText(label, Math.floor(canvas.width / 2), Math.floor(canvas.height / 2) + 1);
+        ctx.fillText(label, Math.floor(canvas.width / 2), Math.floor(canvas.height / 2) + Math.round(size / 64));
 
         // get pixel data
         const imageData = ctx.getImageData(0, 0, size, size);
@@ -372,8 +377,10 @@ export class Annotation extends Script {
             height: size,
             format: PIXELFORMAT_RGBA8,
             magFilter: FILTER_LINEAR,
-            minFilter: FILTER_LINEAR,
-            mipmaps: false,
+            // trilinear + mipmaps: crisp when the marker is small/far (aerial,
+            // walking away) instead of the aliased shimmer of a single level
+            minFilter: FILTER_LINEAR_MIPMAP_LINEAR,
+            mipmaps: true,
             levels: [new Uint8Array(data.buffer)]
         });
 
