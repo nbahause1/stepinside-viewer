@@ -218,7 +218,14 @@
             // that instant, the scene doesn't reload); plain link otherwise.
             // The action chips below take the same route, so the tour resumes
             // seamlessly before the viewer executes the stored camera action.
-            const cameFromViewer = document.referrer.includes('index.html') && window.history.length > 1;
+            // Detection is the explicit flag the viewer sets right before it
+            // navigates here — the old referrer sniff for 'index.html' was
+            // ALWAYS false on the live /viewer/ URL (clean path), so the back
+            // button fell through to a fresh location.href navigation and cold-
+            // reloaded the scan + intro every time. Referrer stays as a fallback.
+            let fromViewerFlag = false;
+            try { fromViewerFlag = sessionStorage.getItem('conciergeFromViewer') === '1'; } catch (e) { /* storage blocked */ }
+            const cameFromViewer = (fromViewerFlag || document.referrer.includes('index.html')) && window.history.length > 1;
             const goBackToTour = () => {
                 if (cameFromViewer) {
                     window.history.back();

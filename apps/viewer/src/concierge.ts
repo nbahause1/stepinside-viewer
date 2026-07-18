@@ -106,9 +106,15 @@ const initConcierge = (global: Global) => {
         // the overlay panel — no on-screen keyboard, no war.
         if (mode !== 'scripted' && window.matchMedia('(pointer: coarse)').matches) {
             // Carry the current room over so the standalone chat can send the
-            // same room context the in-viewer panel would.
+            // same room context the in-viewer panel would. Also drop an explicit
+            // "you came from the viewer" flag: chat.html's back button must do a
+            // history.back() (bfcache-instant, no reload) rather than a fresh
+            // navigation — and its old referrer sniff for 'index.html' is always
+            // false on the live /viewer/ URL (clean path, no 'index.html' in the
+            // referrer), so the return cold-reloaded the scan + intro every time.
             try {
                 sessionStorage.setItem('conciergeRoom', currentRoom() ?? '');
+                sessionStorage.setItem('conciergeFromViewer', '1');
             } catch { /* storage blocked (private mode) — chat just omits it */ }
             window.location.href = 'chat.html';
             return;
