@@ -683,9 +683,30 @@ class Viewer {
                 this.forceRenderNextFrame = idleTime < 4;
             });
 
+            // Wake the render loop the INSTANT a finger lands. With
+            // autoRender off, after the 4 s idle window nothing renders, and
+            // iOS Safari then throttles rAF hard — so a control tap was
+            // registered immediately but its visible response (the mode
+            // transition) waited for the next throttled frame, reading as a
+            // multi-second lag. Kicking renderNextFrame + resetting the idle
+            // clock from the pointer/touch DOWN event (capture phase, before
+            // any target handler) makes the very next frame render, so the
+            // transition starts on contact. Cheap: it only fires on real input.
+            const wake = () => {
+                idleTime = 0;
+                this.forceRenderNextFrame = true;
+                app.renderNextFrame = true;
+            };
+            window.addEventListener('pointerdown', wake, { capture: true, passive: true });
+            window.addEventListener('touchstart', wake, { capture: true, passive: true });
+
             events.on('inputEvent', (type: string) => {
                 if (type !== 'interact') {
                     idleTime = 0;
+                    // A discrete action (button tap, mode switch): render now,
+                    // don't wait for the next update tick to re-arm rendering.
+                    this.forceRenderNextFrame = true;
+                    app.renderNextFrame = true;
                 }
             });
 
