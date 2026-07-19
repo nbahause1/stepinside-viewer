@@ -404,18 +404,21 @@ class CameraManager {
                 }
                 case 'dollhouse':
                     if (state.cameraMode === 'dollhouse') {
-                        // EXIT (dollhouse -> walk): snappy, and a straight drop
-                        // back down to where the overview was opened FROM — the
-                        // model is reached from the drone row, so it returns to
-                        // the same pose the drone's own "return to walking" button
-                        // uses (preAerialCamera, captured on the walk->drone step).
-                        // A controller needs an explicit goto to reset its pose on
-                        // resume — without it the walker inherits the ~10 m model
-                        // vantage and floats. This drops straight into the walk/
-                        // tour, matching the walk-figure exit icon. ~0.35 s ease.
+                        // EXIT (dollhouse -> walk): a deliberate cinematic DIVE
+                        // back down into the room, not a cut. It returns to where
+                        // the overview was opened FROM — the model is reached from
+                        // the drone row, so it lands on the same pose the drone's
+                        // own "return to walking" uses (preAerialCamera, captured
+                        // on the walk->drone step). A controller needs an explicit
+                        // goto to reset its pose on resume — without it the walker
+                        // inherits the ~10 m model vantage and floats. Paced (~0.6 s
+                        // vs the old ~0.35 s snap) so the descent is VISIBLE and
+                        // roughly matches dollhouse.ts sealing the ceiling shut
+                        // (TWEEN_RATE 6): you sink into the flat as the roof closes
+                        // over you. easeOut settles it gently on arrival.
                         state.cameraMode = preAerialMode;
                         (controllers[preAerialMode] as { goto?: (c: Camera) => void } | null)?.goto?.(preAerialCamera);
-                        startTransition(2.8);
+                        startTransition(1.6);
                         events.fire('dollhouse:close');
                     } else {
                         // enter: rise to the model vantage while dollhouse.ts
