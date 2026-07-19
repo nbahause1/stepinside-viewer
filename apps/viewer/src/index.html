@@ -11,7 +11,25 @@
              status-bar and toolbar zones white around the dark viewer. -->
         <meta name="color-scheme" content="dark">
         <meta name="theme-color" content="#0b0b0d">
-        <base href="">
+        <!-- Trailing-slash guard. Vercel (trailingSlash:false) 308-redirects
+             /viewer/ -> /viewer, and at that slash-less URL EVERY ./relative
+             resource resolves against the parent dir: index.js/css/settings all
+             404 and the boot shows the "device too old" card. If the path has no
+             trailing slash and no file extension, re-anchor with a <base> so ./
+             points back at this directory. Served as /viewer/ or /…/index.html
+             it's already correct, so this no-ops. Must run before the first
+             relative resource below. -->
+        <script>
+            (function () {
+                var p = location.pathname;
+                var last = p.slice(p.lastIndexOf('/') + 1);
+                if (!p.endsWith('/') && last.indexOf('.') === -1) {
+                    var b = document.createElement('base');
+                    b.href = p + '/';
+                    document.head.appendChild(b);
+                }
+            })();
+        </script>
         <!-- Inter self-hosted (latin subset, variable → one file covers all
              weights): no render-blocking Google roundtrip, no visitor-IP leak to
              fonts.googleapis.com (GDPR). License-free (SIL OFL). -->
