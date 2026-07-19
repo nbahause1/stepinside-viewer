@@ -7,7 +7,14 @@
          overlay lost a five-round war against the iOS on-screen keyboard
          (see concierge.ts + git log); a boring page is the one shape where
          the keyboard is native form behavior and simply works. -->
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <!-- interactive-widget=resizes-content: when the on-screen keyboard opens,
+         the browser SHRINKS this page's viewport to the area above it instead
+         of leaving the page tall and scrolling to reveal the input. Without it
+         iOS scrolls the outer documents (this page is a nested iframe inside the
+         viewer inside the site) — which let the website behind peek through and
+         even be scrolled. With it, the header/messages/input just reflow above
+         the keyboard; nothing outside moves. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content">
     <meta name="color-scheme" content="dark">
     <!-- Tints Safari's status-bar/toolbar zones dark — without it they render
          as white bars around the dark page. -->
@@ -28,6 +35,10 @@
                scrolls; long chats scroll naturally. */
             min-height: 100vh; /* fallback for pre-svh browsers */
             min-height: 100svh;
+            /* with interactive-widget=resizes-content the viewport shrinks when
+               the keyboard opens; dvh tracks that so the page fills exactly the
+               space above the keyboard (sticky input stays put, nothing scrolls) */
+            min-height: 100dvh;
             display: flex;
             flex-direction: column;
         }
