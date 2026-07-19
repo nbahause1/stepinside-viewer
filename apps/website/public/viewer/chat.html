@@ -253,6 +253,34 @@
         </button>
     </form>
     <script>
+        // iOS keyboard handling. interactive-widget=resizes-content (in the
+        // viewport meta) covers Chromium/Android, but iOS Safari IGNORES it —
+        // there the on-screen keyboard leaves this page tall and the browser
+        // scrolls the (nested) outer documents to reveal the input, dragging the
+        // light website into view behind the chat ("man sieht Weiss"). The fix
+        // that actually holds on iOS: pin the page to the VISUAL viewport, so it
+        // always fills exactly the area above the keyboard and nothing outside
+        // ever needs to scroll. visualViewport reports the keyboard-adjusted
+        // size even inside a nested iframe.
+        (() => {
+            const vv = window.visualViewport;
+            if (!vv) return;
+            const root = document.documentElement;
+            const fit = () => {
+                const h = Math.round(vv.height);
+                document.body.style.height = h + 'px';
+                document.body.style.minHeight = h + 'px';
+                root.style.height = h + 'px';
+            };
+            vv.addEventListener('resize', fit);
+            vv.addEventListener('scroll', fit);
+            // iOS raises/settles the keyboard asynchronously — refit a beat after
+            // focus/blur so we catch the final size.
+            window.addEventListener('focusin', () => setTimeout(fit, 120));
+            window.addEventListener('focusout', () => setTimeout(fit, 120));
+            fit();
+        })();
+
         (async () => {
             const messages = document.getElementById('messages');
             const form = document.getElementById('form');
