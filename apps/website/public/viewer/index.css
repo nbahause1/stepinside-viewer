@@ -937,7 +937,8 @@ body.tutorial-active #walkHint {
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
-  transition: opacity 0.4s var(--ease-out), transform 0.4s var(--ease-out), visibility 0s linear 0.4s;
+  transform: translate(-50%, calc(-50% + 18px)) scale(0.92);
+  transition: opacity 0.26s ease, transform 0.3s cubic-bezier(0.4, 0, 0.9, 1), visibility 0s linear 0.3s;
 }
 #surroundingsOverlay,
 #surroundingsOverlay * {
@@ -948,14 +949,14 @@ body.tutorial-active #walkHint {
   transform: translate(-50%, -50%) scale(1);
   visibility: visible;
   pointer-events: auto;
-  transition: opacity 0.4s var(--ease-out), transform 0.4s var(--ease-out), visibility 0s;
+  transition: opacity 0.3s ease, transform 0.46s cubic-bezier(0.34, 1.32, 0.42, 1), visibility 0s;
 }
 #surroundingsOverlay.is-cinematic {
-  transform: translate(-50%, -46%) scale(0.9);
+  transform: translate(-50%, calc(-50% + 34px)) scale(0.86);
 }
 #surroundingsOverlay.is-cinematic.is-open {
   transform: translate(-50%, -50%) scale(1);
-  transition: opacity 0.55s cubic-bezier(0.22, 1.2, 0.36, 1), transform 0.7s cubic-bezier(0.22, 1.2, 0.36, 1), visibility 0s;
+  transition: opacity 0.5s cubic-bezier(0.22, 1, 0.36, 1), transform 0.66s cubic-bezier(0.26, 1.3, 0.38, 1), visibility 0s;
 }
 #surroundingsOverlay #surroundingsHeader {
   flex-shrink: 0;
