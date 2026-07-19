@@ -104,34 +104,64 @@ const initConcierge = (global: Global) => {
     // straight back into the live tour — no reload, no intro. chat.html detects
     // the iframe and talks back via postMessage (close + camera actions).
     let chatFrame: HTMLIFrameElement | null = null;
+    let chatBackdrop: HTMLDivElement | null = null;
     const CHAT_HIDDEN = 'translateY(100%)';
+    // A solid dark cover that sits UNDER the chat and snaps on INSTANTLY (no
+    // slide, no fade). The scan behind is a bright white Altbau — without this,
+    // the split second while the chat slides up / the iframe first paints let
+    // those white walls flash through ("man sieht das Weiß durch"). The backdrop
+    // hides them from frame one; the chat glides in on top of solid black.
+    const ensureBackdrop = (): HTMLDivElement => {
+        if (chatBackdrop) return chatBackdrop;
+        const bd = document.createElement('div');
+        bd.id = 'conciergeBackdrop';
+        bd.style.cssText = 'position:fixed;inset:0;background:#0b0b0d;z-index:2147482999;';
+        document.body.appendChild(bd);
+        chatBackdrop = bd;
+        return bd;
+    };
     const openChatOverlay = () => {
+        ensureBackdrop().style.display = '';
         if (chatFrame) {
             // Reopen: the iframe was only HIDDEN, never destroyed — so the whole
             // conversation, the half-typed message and the scroll position are
-            // all still there. Just bring it back.
-            chatFrame.style.transform = '';
+            // all still there. Bring it back with the same slide.
             chatFrame.style.visibility = '';
+            void chatFrame.offsetHeight;      // commit the parked translate...
+            chatFrame.style.transform = '';   // ...then release it -> transition
             return;
         }
         const frame = document.createElement('iframe');
         frame.id = 'conciergeFrame';
         frame.src = 'chat.html';
         frame.title = 'Concierge';
-        // Opaque full-viewport cover so the live scan behind it never shows
-        // through; the iframe's own document handles the keyboard natively.
-        frame.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;border:0;z-index:2147483000;background:#0b0b0d;transition:transform 220ms cubic-bezier(0.22,1,0.36,1);';
+        // Opaque full-viewport cover; the iframe's own document handles the
+        // keyboard natively. Starts off-screen and slides up over the backdrop.
+        frame.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;border:0;z-index:2147483000;background:#0b0b0d;transform:translateY(100%);transition:transform 260ms cubic-bezier(0.22,1,0.36,1);';
         document.body.appendChild(frame);
         chatFrame = frame;
+        // Trigger the slide via a FORCED REFLOW, not rAF: the viewer parks its
+        // render loop on demand, and a throttled rAF would leave the iframe
+        // stuck off-screen (hidden). Committing the layout then clearing the
+        // transform sets the visible end state synchronously — the animation is
+        // a bonus, never a requirement for the chat to actually show.
+        void frame.offsetHeight;
+        frame.style.transform = '';
     };
     const closeChatOverlay = () => {
         if (!chatFrame || chatFrame.style.transform === CHAT_HIDDEN) return;
         // HIDE, never destroy: keeping the iframe alive preserves the chat state
         // (messages + typed text) for the next open, and keeps the viewer behind
-        // untouched. Slide it out, then park it fully hidden so it can't be hit.
+        // untouched. Slide it out, then park it hidden and drop the backdrop.
         chatFrame.style.transform = CHAT_HIDDEN;
         const frame = chatFrame;
-        setTimeout(() => { if (frame.style.transform === CHAT_HIDDEN) frame.style.visibility = 'hidden'; }, 240);
+        const bd = chatBackdrop;
+        setTimeout(() => {
+            if (frame.style.transform === CHAT_HIDDEN) {
+                frame.style.visibility = 'hidden';
+                if (bd) bd.style.display = 'none';
+            }
+        }, 300);
         // The overlay's taps landed inside the iframe, never on the viewer's
         // window, so the on-demand render loop may be parked — wake it so the
         // tour is responsive the instant the overlay clears.
