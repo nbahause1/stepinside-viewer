@@ -2295,15 +2295,20 @@ body.measure-active #controlDome {
         0 8px 24px -10px rgba(0, 0, 0, 0.4),
         inset 0 1px 0 0 rgba(255, 255, 255, 0.14);
 
-    // Asymmetric on purpose. Arriving is the moment that has to be NOTICED —
-    // this pill is how a visitor learns the highlights exist at all — so it
-    // comes in briskly. Leaving happens while the visitor is already moving and
-    // looking elsewhere, so it stays a soft, unhurried fade that never pulls
-    // the eye away from the room.
+    // What makes this feel right is the WAIT being short, not the fade being
+    // fast: the pill has to arrive while the pause still reads as the same
+    // moment (see PILL_SETTLE_MS), but the fade itself stays unhurried so the
+    // eye is never snapped at. A quick fade on this element also looked
+    // especially harsh on iOS — the backdrop blur gets re-rasterised while the
+    // opacity moves, and the shorter the ramp the more that stepping shows.
+    // will-change keeps the fade on the composited layer, which is what makes
+    // it read as smooth there rather than steppy.
+    will-change: opacity;
+
     &.faded-in {
         visibility: visible;
         opacity: 1;
-        transition: opacity 0.28s ease-out;
+        transition: opacity 0.45s cubic-bezier(0.22, 1, 0.36, 1);
     }
 
     &.faded-out {

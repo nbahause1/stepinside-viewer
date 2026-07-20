@@ -1847,11 +1847,12 @@ body.measure-active #controlDome #domeMeasureAerial .domeIcon--measureExit {
   -webkit-backdrop-filter: blur(20px) saturate(150%);
   border: 1px solid rgba(255, 255, 255, 0.1);
   box-shadow: 0 8px 24px -10px rgba(0, 0, 0, 0.4), inset 0 1px 0 0 rgba(255, 255, 255, 0.14);
+  will-change: opacity;
 }
 #annotationNav.faded-in {
   visibility: visible;
   opacity: 1;
-  transition: opacity 0.28s ease-out;
+  transition: opacity 0.45s cubic-bezier(0.22, 1, 0.36, 1);
 }
 #annotationNav.faded-out {
   visibility: hidden;
