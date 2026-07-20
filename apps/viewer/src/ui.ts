@@ -192,11 +192,21 @@ const initAnnotationNav = (
         dom.annotationNav.classList.toggle('faded-out', !visible);
     };
 
+    // Pinned while a highlight is open: there the pill is not decoration, it IS
+    // the way through the set. Without this the camera flying to the highlight
+    // you just picked counts as movement and takes the ‹ › away mid-tour, so
+    // you can't reach the next one.
+    let annotationOpen = false;
+
     const updateFade = () => {
         if (!state.loaded) return;
         if (pillTimer) {
             clearTimeout(pillTimer);
             pillTimer = null;
+        }
+        if (annotationOpen) {
+            setPillVisible(true);
+            return;
         }
         if (!state.heroStill) {
             setPillVisible(false);
@@ -204,7 +214,7 @@ const initAnnotationNav = (
         }
         pillTimer = setTimeout(() => {
             pillTimer = null;
-            if (state.heroStill) setPillVisible(true);
+            setPillVisible(true);
         }, PILL_SETTLE_MS);
     };
 
@@ -238,6 +248,18 @@ const initAnnotationNav = (
             currentIndex = idx;
             updateDisplay();
         }
+    });
+
+    // Highlight opened/closed → pin or release the pill. 'show' fires as the
+    // tooltip opens (not on camera arrival), so there is no gap where the flight
+    // to the highlight could hide the nav.
+    events.on('annotation.activate', () => {
+        annotationOpen = true;
+        updateFade();
+    });
+    events.on('annotation.deactivate', () => {
+        annotationOpen = false;
+        updateFade();
     });
 
     // React to state changes
