@@ -1637,10 +1637,9 @@
                 }, { once: true });
 
                 doorVideo.addEventListener('playing', () => {
-                    // Only re-anchor the reveal hold when this start is also the
-                    // SFX start — if the stall timeout already cued the sound,
-                    // shifting the clock now would desync reveal and audio.
-                    if (!doorSignalled) loaderStart = Date.now();
+                    // Reveal-hold anchoring now happens in fadeIn() (the film's
+                    // visible start), so it survives iOS's late/buffered starts;
+                    // here we just picture-lock the door SFX to real playback.
                     signalDoorVideo();
                     // Never let the film END on screen (a stopped frame kills
                     // the premium feel): as it nears its end — because the
@@ -1696,6 +1695,12 @@
                     const fadeIn = () => {
                         if (faded) return;
                         faded = true;
+                        // Anchor the reveal hold to the film's VISIBLE start, not
+                        // page load: on iOS the film can start seconds late (see
+                        // beginFilm), and anchoring here — rather than gated on the
+                        // SFX signal in 'playing' — guarantees the film its full
+                        // arc instead of being flooded away the instant it appears.
+                        loaderStart = Date.now();
                         doorVideo.classList.add('is-on');
                     };
                     doorVideo.play().then(() => {
@@ -1723,11 +1728,16 @@
                     // so the arrival never waits on a broken film.
                     setTimeout(() => { fadeIn(); signalDoorVideo(); }, 2000);
                 };
-                if (doorVideo.readyState >= 2) beginFilm();
-                else doorVideo.addEventListener('loadeddata', beginFilm, { once: true });
-                // First frame never becomes decodable (slow network, broken
-                // file): keep the arrival alive — run the act anyway, which
-                // also arms the SFX fallback above.
+                // Start playback IMMEDIATELY rather than waiting for
+                // readyState>=2/loadeddata: iOS Safari ignores `preload` and
+                // never buffers until play() runs, so the old gate stranded the
+                // film on the 3s fallback below — the "intro fades in ~3s late"
+                // bug. play() itself kicks off buffering; the fade-in still waits
+                // for real motion ('playing' + head-start), so no black frame.
+                // beginFilm is idempotent (filmBegun), so the redundant triggers
+                // below are harmless safety nets for the odd browser.
+                beginFilm();
+                doorVideo.addEventListener('loadeddata', beginFilm, { once: true });
                 setTimeout(beginFilm, 3000);
             } else {
                 document.getElementById('bootDoor')?.remove();
