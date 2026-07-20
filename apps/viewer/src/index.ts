@@ -24,6 +24,7 @@ import type { Collision } from './collision';
 import { MeshCollision, loadVoxelCollision } from './collision';
 import { initConcierge } from './concierge';
 import { initDollhouse } from './dollhouse';
+import { initDollhouseLoader } from './dollhouse-loader';
 import { initSurroundings } from './surroundings';
 import { initControls } from './controls';
 import { observe } from './core/observe';
@@ -424,6 +425,7 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
     initConcierge(global);
     initSurroundings(global);
     initDollhouse(global);
+    initDollhouseLoader(global);
     initStaging(global);
     initInquiry(global);
     initZoomIndicator(global);

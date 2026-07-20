@@ -230,6 +230,26 @@ export default function Demos() {
     body.style.right = "0";
     body.style.width = "100%";
     body.style.overflow = "hidden";
+
+    // Safari paints its OWN chrome — the collapsed toolbar/URL zone and the
+    // keyboard's form-assistant bar (‹ › ✓) — from the TOP document's
+    // appearance. This site is light (color-scheme: light, no theme-color), so
+    // those bars rendered as a white band under the dark full-screen viewer,
+    // most visibly beneath the concierge chat once the keyboard opened. Flip
+    // the document dark for as long as the viewer owns the screen.
+    const root = document.documentElement;
+    const prevColorScheme = root.style.colorScheme;
+    root.style.colorScheme = "dark";
+    let themeMeta = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
+    const themeMetaWasMissing = !themeMeta;
+    const prevThemeColor = themeMeta?.getAttribute("content") ?? null;
+    if (!themeMeta) {
+      themeMeta = document.createElement("meta");
+      themeMeta.name = "theme-color";
+      document.head.appendChild(themeMeta);
+    }
+    themeMeta.setAttribute("content", "#0b0b0d");
+
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") setExpanded(false);
     };
@@ -242,6 +262,12 @@ export default function Demos() {
       body.style.width = prev.width;
       body.style.overflow = prev.overflow;
       window.scrollTo(0, scrollY);
+      root.style.colorScheme = prevColorScheme;
+      if (themeMetaWasMissing) {
+        themeMeta?.remove();
+      } else if (prevThemeColor !== null) {
+        themeMeta?.setAttribute("content", prevThemeColor);
+      }
       window.removeEventListener("keydown", onKey);
     };
   }, [expanded]);
