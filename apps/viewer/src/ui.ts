@@ -142,7 +142,7 @@ const initJoystick = (
 const initAnnotationNav = (
     dom: Record<string, HTMLElement>,
     events: EventHandler,
-    state: { loaded: boolean; inputMode: string; controlsHidden: boolean },
+    state: { loaded: boolean; inputMode: string; controlsHidden: boolean; heroStill: boolean },
     annotations: Annotation[]
 ) => {
     // Only show navigator when there are at least 2 annotations
@@ -167,10 +167,40 @@ const initAnnotationNav = (
         dom.annotationNav.classList.add(state.inputMode);
     };
 
+    // The Highlights pill runs INVERTED against the rest of the chrome: while the
+    // visitor is moving it gets out of the way (the tour is about the room, not
+    // the UI), and it returns about a second after the camera comes to rest. So
+    // the screen is clear for most of the walk-through.
+    //
+    // Driven by camera stillness, not the shared 4 s idle timer — that one reacts
+    // to INPUT, and "standing still" is what this should answer to. heroStill on
+    // its own is too twitchy (it flips after 200 ms and drops on the tiniest
+    // nudge), so the two directions are asymmetric: hiding is immediate, showing
+    // is debounced. Motion clears the screen at once; the pill only comes back
+    // after a real pause, never flickering during a look-around.
+    // (Staging is unaffected — body.staging-open hides #annotationNav via CSS.)
+    const PILL_SETTLE_MS = 1000;
+    let pillTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const setPillVisible = (visible: boolean) => {
+        dom.annotationNav.classList.toggle('faded-in', visible);
+        dom.annotationNav.classList.toggle('faded-out', !visible);
+    };
+
     const updateFade = () => {
         if (!state.loaded) return;
-        dom.annotationNav.classList.toggle('faded-in', !state.controlsHidden);
-        dom.annotationNav.classList.toggle('faded-out', state.controlsHidden);
+        if (pillTimer) {
+            clearTimeout(pillTimer);
+            pillTimer = null;
+        }
+        if (!state.heroStill) {
+            setPillVisible(false);
+            return;
+        }
+        pillTimer = setTimeout(() => {
+            pillTimer = null;
+            if (state.heroStill) setPillVisible(true);
+        }, PILL_SETTLE_MS);
     };
 
     const goTo = (index: number) => {
@@ -211,7 +241,7 @@ const initAnnotationNav = (
         updateFade();
     });
     events.on('inputMode:changed', updateMode);
-    events.on('controlsHidden:changed', updateFade);
+    events.on('heroStill:changed', updateFade);
 
     // Initial state
     updateDisplay();
