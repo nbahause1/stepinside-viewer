@@ -1,5 +1,6 @@
 import {
     type BoundingBox,
+    Vec2,
     Vec3
 } from 'playcanvas';
 
@@ -36,6 +37,13 @@ const shareCharByMode: Partial<Record<CameraMode, string>> = {
 // minimum (in metres); below it walk mode is hidden and the viewer falls
 // back to fly as the default first-person mode.
 const WALK_MIN_HORIZONTAL_RANGE = 5;
+
+// Dollhouse zoom bounds, as multiples of the flat's footprint (its larger
+// horizontal half-extent). The entry pose sits at 2.7x, so the near stop is
+// just inside it — the flat fills the frame without the camera pushing through
+// the walls — and the far stop keeps it a model on a table instead of a speck.
+const DOLLHOUSE_ZOOM_IN = 2.6;
+const DOLLHOUSE_ZOOM_OUT = 9.0;
 
 const isWalkAllowed = (bbox: BoundingBox, collision: Collision | null): boolean => {
     const { x, z } = bbox.halfExtents;
@@ -149,7 +157,22 @@ class CameraManager {
             const footprint = Math.max(bbox.halfExtents.x, bbox.halfExtents.z);
             controllers.dollhouse.fov = 55;
             controllers.dollhouse.controller.pitchRange.set(-80, -22);
-            controllers.dollhouse.controller.zoomRange.set(Math.max(2.5, footprint * 1.1), footprint * 6);
+            // ASSIGN, never mutate: the engine's zoomRange setter writes to the
+            // child pose (what the zoom actually clamps against) while its getter
+            // returns the ROOT pose's range — two different objects. A
+            // `zoomRange.set(...)` therefore goes through the getter and lands on
+            // an object nothing reads, leaving the real clamp at its constructor
+            // default of Infinity: the model could be zoomed out to hundreds of
+            // thousands of units. Assigning routes through the setter and sticks.
+            // pitchRange has no such split, so mutating that one is fine.
+            //
+            // Bounds are framing-based: the near end stops where the flat fills
+            // the frame (just inside the entry pose) and the far end where it
+            // still reads as a model on the table rather than a speck.
+            controllers.dollhouse.controller.zoomRange = new Vec2(
+                Math.max(2.5, footprint * DOLLHOUSE_ZOOM_IN),
+                footprint * DOLLHOUSE_ZOOM_OUT
+            );
         }
         const dollhouseCamera = () => {
             const floorY = bbox.center.y - bbox.halfExtents.y;
