@@ -897,6 +897,18 @@
                 </div>
             </div>
 
+            <!-- Tools anchor: the bottom-left corner rests as ONE bubble. Tapping
+                 it fans the concierge, the neighbourhood map and share upwards;
+                 tapping again (or anywhere outside) folds them back. The plus
+                 rotates into a cross while open. Wired in tools-cluster.ts. -->
+            <div id="toolsAnchor" class="hidden">
+                <button id="toolsToggle" type="button" aria-label="Werkzeuge öffnen" title="Werkzeuge öffnen" aria-expanded="false">
+                    <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M12 5.5V18.5M5.5 12H18.5" />
+                    </svg>
+                </button>
+            </div>
+
             <!-- AI concierge: a dark-glass pill bottom-right that expands into a
                  chat panel. The server answers strictly from owner facts; the
                  browser only POSTs {propertyId, messages, room}. Wired in

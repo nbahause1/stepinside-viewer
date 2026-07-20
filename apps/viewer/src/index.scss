@@ -3484,10 +3484,9 @@ body.staging-open {
     #sharePill #shareTrigger { width: 40px; height: 40px; }
     // The neighbourhood map shares the bottom-left stack with the concierge and
     // was simply missed here, so on a phone it sat 4px larger than every other
-    // bubble — the one visibly odd one out. Its stack offset follows the
-    // (now smaller) toggle beneath it, keeping the same 10px gap as elsewhere.
+    // bubble — the one visibly odd one out. (Stack spacing is owned by the
+    // tools-cluster block further down, via --tool-step.)
     #surroundingsPill #surroundingsToggle { width: 40px; height: 40px; }
-    #surroundingsPill { bottom: calc(max(14px, env(safe-area-inset-bottom)) + 50px); }
 
     // lead-capture pill (top-right) collapses to its calendar icon — the full
     // label would run into the centred brand pill on a portrait phone. The
@@ -3535,11 +3534,109 @@ body.staging-open {
   --lgl-blur: 30px;   --lgl-sat: 180%;   --lgl-bright: 1.08;   /* helles  Glas */
 }
 
+// ---- Tools cluster (bottom-left) -------------------------------------------
+// The corner rests as ONE bubble: the concierge, the neighbourhood map and
+// share fan upwards out of it on tap and fold back on the next tap (or any tap
+// outside). One --tool-step drives the whole stack, so the spacing stays even
+// and shrinks together with the bubbles on a narrow phone.
+:root { --tool-step: 54px; }
+
+#toolsAnchor {
+    position: fixed;
+    left: max(14px, env(safe-area-inset-left));
+    bottom: max(14px, env(safe-area-inset-bottom));
+    z-index: 17;                 // above the tools it reveals, below brandDome (20)
+    pointer-events: none;
+
+    #toolsToggle {
+        pointer-events: auto;
+        width: 44px;
+        height: 44px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0;
+        border-radius: 50%;
+        cursor: pointer;
+        color: rgba(255, 255, 255, 0.9);
+
+        svg {
+            fill: none;
+            stroke: currentColor;
+            stroke-width: 2;
+            stroke-linecap: round;
+            // the plus turns into a cross while the cluster is open
+            transition: transform 0.34s cubic-bezier(0.22, 1, 0.36, 1);
+        }
+    }
+}
+
+body.tools-open #toolsAnchor #toolsToggle svg { transform: rotate(45deg); }
+
+// The three tools live in the stack above the anchor. Share moves down from the
+// top-left corner, which frees that corner entirely.
+#chatPill {
+    bottom: calc(max(14px, env(safe-area-inset-bottom)) + var(--tool-step));
+}
+#surroundingsPill {
+    bottom: calc(max(14px, env(safe-area-inset-bottom)) + var(--tool-step) * 2);
+}
+#sharePill {
+    top: auto;
+    bottom: calc(max(14px, env(safe-area-inset-bottom)) + var(--tool-step) * 3);
+    left: max(14px, env(safe-area-inset-left));
+
+    // ...and its popover has to open UPWARD now that it sits near the bottom
+    #sharePopover {
+        top: auto;
+        bottom: calc(100% + 10px);
+    }
+}
+
+// The chat panel hangs off the chat bubble, which now sits one step higher —
+// take that step off its height so a short screen can still contain it.
+#chatPill #chatPanel {
+    height: min(520px, calc(100vh - 120px - var(--tool-step)));
+}
+
+// Folded: each tool drops back onto the anchor and fades. Staggered by distance
+// so they unfold as a sequence instead of one block.
+#chatPill,
+#surroundingsPill,
+#sharePill {
+    transition:
+        transform 0.4s cubic-bezier(0.22, 1, 0.36, 1),
+        opacity 0.28s ease;
+    will-change: transform, opacity;
+}
+
+body:not(.tools-open) {
+    #chatPill { transform: translateY(var(--tool-step)); opacity: 0; }
+    #surroundingsPill { transform: translateY(calc(var(--tool-step) * 2)); opacity: 0; }
+    #sharePill { transform: translateY(calc(var(--tool-step) * 3)); opacity: 0; }
+
+    // the wrappers are already inert; the live buttons inside must go too
+    #chatPill #chatToggle,
+    #surroundingsPill #surroundingsToggle,
+    #sharePill #shareTrigger { pointer-events: none; }
+}
+
+body.tools-open {
+    #surroundingsPill { transition-delay: 0.045s; }
+    #sharePill { transition-delay: 0.09s; }
+}
+
+@media (max-width: 600px) {
+    :root { --tool-step: 50px; }
+    #toolsAnchor #toolsToggle { width: 40px; height: 40px; }
+}
+
 /* -- dunkles Glas: Pillen & Panels ueber der Szene (weisser Inhalt) -- */
 #brandDome .brandMark,
 #controlDome,
 #annotationNav,
 #controlsWrap > #timelineContainer,
+#toolsAnchor #toolsToggle,
 #chatPill #chatToggle,
 #chatPill #chatPanel,
 #surroundingsPill #surroundingsToggle,
