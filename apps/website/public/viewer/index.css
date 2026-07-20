@@ -1851,7 +1851,7 @@ body.measure-active #controlDome #domeMeasureAerial .domeIcon--measureExit {
 #annotationNav.faded-in {
   visibility: visible;
   opacity: 1;
-  transition: opacity 0.5s ease-out;
+  transition: opacity 0.28s ease-out;
 }
 #annotationNav.faded-out {
   visibility: hidden;

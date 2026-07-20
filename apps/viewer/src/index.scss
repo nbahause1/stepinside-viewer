@@ -2295,10 +2295,15 @@ body.measure-active #controlDome {
         0 8px 24px -10px rgba(0, 0, 0, 0.4),
         inset 0 1px 0 0 rgba(255, 255, 255, 0.14);
 
+    // Asymmetric on purpose. Arriving is the moment that has to be NOTICED —
+    // this pill is how a visitor learns the highlights exist at all — so it
+    // comes in briskly. Leaving happens while the visitor is already moving and
+    // looking elsewhere, so it stays a soft, unhurried fade that never pulls
+    // the eye away from the room.
     &.faded-in {
         visibility: visible;
         opacity: 1;
-        transition: opacity 0.5s ease-out;
+        transition: opacity 0.28s ease-out;
     }
 
     &.faded-out {

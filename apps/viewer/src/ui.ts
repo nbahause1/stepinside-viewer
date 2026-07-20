@@ -179,7 +179,12 @@ const initAnnotationNav = (
     // is debounced. Motion clears the screen at once; the pill only comes back
     // after a real pause, never flickering during a look-around.
     // (Staging is unaffected — body.staging-open hides #annotationNav via CSS.)
-    const PILL_SETTLE_MS = 1000;
+    // Kept short on purpose: the pill is also how a visitor DISCOVERS that the
+    // highlights exist, so it has to arrive while the pause still feels like the
+    // same moment. Together with heroStill's own 200 ms that lands at ~0.6 s
+    // after the camera stops — quick enough to be noticed, long enough that a
+    // micro-pause mid-look-around doesn't flash it.
+    const PILL_SETTLE_MS = 400;
     let pillTimer: ReturnType<typeof setTimeout> | null = null;
 
     const setPillVisible = (visible: boolean) => {
