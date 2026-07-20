@@ -2882,6 +2882,13 @@ body.staging-open #surveyCard {
     width: 40px;
     height: 40px;
   }
+  #surroundingsPill #surroundingsToggle {
+    width: 40px;
+    height: 40px;
+  }
+  #surroundingsPill {
+    bottom: calc(max(14px, env(safe-area-inset-bottom)) + 50px);
+  }
   #inquiryPill #inquiryTrigger {
     height: 40px;
     padding: 0 9px;

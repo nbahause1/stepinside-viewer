@@ -3482,6 +3482,12 @@ body.staging-open {
     #chatPill #chatToggle { width: 40px; height: 40px; }
     #stagePill #stageTrigger { height: 40px; padding: 0 9px; }
     #sharePill #shareTrigger { width: 40px; height: 40px; }
+    // The neighbourhood map shares the bottom-left stack with the concierge and
+    // was simply missed here, so on a phone it sat 4px larger than every other
+    // bubble — the one visibly odd one out. Its stack offset follows the
+    // (now smaller) toggle beneath it, keeping the same 10px gap as elsewhere.
+    #surroundingsPill #surroundingsToggle { width: 40px; height: 40px; }
+    #surroundingsPill { bottom: calc(max(14px, env(safe-area-inset-bottom)) + 50px); }
 
     // lead-capture pill (top-right) collapses to its calendar icon — the full
     // label would run into the centred brand pill on a portrait phone. The
