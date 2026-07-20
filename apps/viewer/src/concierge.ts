@@ -129,6 +129,7 @@ const initConcierge = (global: Global) => {
             chatFrame.style.visibility = '';
             void chatFrame.offsetHeight;      // commit the parked translate...
             chatFrame.style.transform = '';   // ...then release it -> transition
+            document.body.classList.add('chat-open');
             return;
         }
         const frame = document.createElement('iframe');
@@ -140,6 +141,7 @@ const initConcierge = (global: Global) => {
         frame.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;border:0;z-index:2147483000;background:#0b0b0d;transform:translateY(100%);transition:transform 260ms cubic-bezier(0.22,1,0.36,1);';
         document.body.appendChild(frame);
         chatFrame = frame;
+        document.body.classList.add('chat-open');
         // Trigger the slide via a FORCED REFLOW, not rAF: the viewer parks its
         // render loop on demand, and a throttled rAF would leave the iframe
         // stuck off-screen (hidden). Committing the layout then clearing the
@@ -154,6 +156,7 @@ const initConcierge = (global: Global) => {
         // (messages + typed text) for the next open, and keeps the viewer behind
         // untouched. Slide it out, then park it hidden and drop the backdrop.
         chatFrame.style.transform = CHAT_HIDDEN;
+        document.body.classList.remove('chat-open');
         const frame = chatFrame;
         const bd = chatBackdrop;
         setTimeout(() => {
@@ -189,6 +192,9 @@ const initConcierge = (global: Global) => {
         state.chatOpen = false;
     });
     events.on('chatOpen:changed', (open: boolean) => {
+        // One flag for BOTH shapes of the chat (this panel and the touch
+        // overlay) so the rest of the tools cluster can clear the corner.
+        document.body.classList.toggle('chat-open', open);
         panel.classList.toggle('is-open', open);
         pill.classList.toggle('is-open', open);
         if (mode === 'scripted') return;

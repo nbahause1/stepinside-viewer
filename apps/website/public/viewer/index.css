@@ -911,7 +911,7 @@ body.tutorial-active #walkHint {
 #surroundingsPill #surroundingsToggle:active {
   transform: scale(0.94);
 }
-#surroundingsPill.is-open #surroundingsToggle, #surroundingsPill.is-chat-open #surroundingsToggle {
+#surroundingsPill.is-chat-open #surroundingsToggle {
   opacity: 0;
   pointer-events: none;
 }
@@ -2045,7 +2045,7 @@ body.measure-active #controlDome #domeMeasureAerial .domeIcon--measureExit {
 #inquiryPill {
   position: fixed;
   top: max(14px, env(safe-area-inset-top));
-  right: max(14px, env(safe-area-inset-right));
+  left: max(14px, env(safe-area-inset-left));
   z-index: 16;
   pointer-events: none;
 }
@@ -3012,6 +3012,23 @@ body.tools-open #surroundingsPill {
 }
 body.tools-open #sharePill {
   transition-delay: 0.09s;
+}
+
+body.chat-open #surroundingsPill,
+body.chat-open #sharePill {
+  opacity: 0;
+  pointer-events: none;
+}
+
+body.chat-open #chatPill,
+body #surroundingsPill.is-open {
+  transform: none;
+  opacity: 1;
+}
+
+body.chat-open #chatPill #chatToggle,
+body #surroundingsPill.is-open #surroundingsToggle {
+  pointer-events: auto;
 }
 
 @media (max-width: 600px) {

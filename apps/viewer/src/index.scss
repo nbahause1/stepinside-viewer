@@ -1133,11 +1133,11 @@ body.tutorial-active #walkHint {
         }
     }
 
-    // while the panel is open the pill hides (the panel has its own close);
-    // same while the CHAT panel is open — the pin sits inside the chat's
-    // footprint and would float over the conversation (.is-chat-open is
-    // toggled by surroundings.ts on chatOpen:changed)
-    &.is-open #surroundingsToggle,
+    // Hidden only while the CHAT is open — the pin sits inside the chat's
+    // footprint and would float over the conversation (.is-chat-open is toggled
+    // by surroundings.ts on chatOpen:changed). It deliberately STAYS visible
+    // while the map itself is open: it is the anchor the map belongs to, and
+    // having it vanish under the finger that just opened it read as a glitch.
     &.is-chat-open #surroundingsToggle {
         opacity: 0;
         pointer-events: none;
@@ -2560,7 +2560,10 @@ body.measure-active #controlDome {
 #inquiryPill {
     position: fixed;
     top: max(14px, env(safe-area-inset-top));
-    right: max(14px, env(safe-area-inset-right));
+    // Top-LEFT: the corner freed when share moved into the tools cluster. The
+    // top-right belongs to the host page's close button when the viewer runs
+    // embedded full-screen — sitting there meant the two overlapped.
+    left: max(14px, env(safe-area-inset-left));
     z-index: 16;                 // above controlDome (15), below brandDome (20)
     pointer-events: none;        // wrapper is inert; only the trigger is live
 
@@ -3625,6 +3628,37 @@ body.tools-open {
     #surroundingsPill { transition-delay: 0.045s; }
     #sharePill { transition-delay: 0.09s; }
 }
+
+// While the conversation is up, the rest of the cluster gets out of its way —
+// the chat panel occupies exactly this corner, and map/share would float on top
+// of the messages. The chat bubble itself deliberately stays: the panel hangs
+// off it. Covers both shapes of the chat (desktop panel and the touch overlay),
+// since concierge.ts sets the flag for either.
+body.chat-open {
+    #surroundingsPill,
+    #sharePill {
+        opacity: 0;
+        pointer-events: none;
+    }
+}
+
+// A tool that is actually OPEN stays put even when the cluster folds around it.
+// Folding is triggered by any press outside the bubbles — which includes the
+// scene and the map overlay — and without this the chat PANEL (it hangs off the
+// chat bubble) would vanish mid-conversation, and the map would lose the anchor
+// it belongs to. Overrides the folded transform/opacity; the chat-open rule
+// above still wins for the tools that must clear the corner.
+// The `body` prefix is load-bearing: the folding rule above is
+// `body:not(.tools-open) #surroundingsPill` (0,1,1,1), so a bare
+// `#surroundingsPill.is-open` (0,1,1,0) would lose to it and the open map would
+// still fold away. Matching the weight and coming later wins on source order.
+body.chat-open #chatPill,
+body #surroundingsPill.is-open {
+    transform: none;
+    opacity: 1;
+}
+body.chat-open #chatPill #chatToggle,
+body #surroundingsPill.is-open #surroundingsToggle { pointer-events: auto; }
 
 @media (max-width: 600px) {
     :root { --tool-step: 50px; }
