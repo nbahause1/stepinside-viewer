@@ -3804,17 +3804,16 @@ body #surroundingsPill.is-open #surroundingsToggle { pointer-events: auto; }
         mostly-opaque dark gradient (~0.74-0.8) so white text/icons hold
         >= 7:1 contrast even over a bright white wall. A faint top
         radial keeps the "light catching the glass" look statically. -- */
+  // Only the genuinely LARGE surfaces still drop their blur on touch — that is
+  // where backdrop-filter behind the live 3D scene actually costs GPU. The
+  // frequently-seen chrome (control dome, highlights tab, the corner buttons,
+  // the map overlay, the staging pill) keeps its light base glass so nothing
+  // reads as a dark, cheap charcoal blob next to the rest. If a device chokes,
+  // the fallback is to give THESE the same light STATIC background below — not
+  // to go back to the dark one.
   #brandDome .brandMark,
-  #controlDome,
-  #annotationNav,
   #controlsWrap > #timelineContainer,
-  #chatPill #chatToggle,
   #chatPill #chatPanel,
-  #surroundingsPill #surroundingsToggle,
-  #surroundingsOverlay,
-  #stagePill #stageTrigger,
-  #inquiryPill #inquiryTrigger,
-  #sharePill #shareTrigger,
   #sharePill #sharePopover,
   #sharePill #shareToast,
   #stageOverlay #stageBar,
@@ -3965,30 +3964,5 @@ body #surroundingsPill.is-open #surroundingsToggle { pointer-events: auto; }
         animation: none;
         clip-path: inset(0 0 0 0);
         transition: clip-path 0.35s ease-out;
-    }
-}
-
-
-// ---- Small corner buttons: LIVE glass on touch too --------------------------
-// The mobile static-glass block above kills backdrop-filter on every pill to
-// save GPU behind the live 3D scene — a real cost, but it scales with the
-// blurred AREA. For the big panels (chat, map overlay, staging bar) that matters
-// and they stay static. For the handful of 40px corner buttons it doesn't: the
-// tools "+" already ran live glass on iOS without trouble, so the whole small-
-// button set now matches it instead of one standing out while the rest read as
-// a dark, cheap charcoal blob. Placed AFTER the static block so it wins on
-// source order and re-enables the light base glass for exactly these buttons.
-@media (pointer: coarse) {
-    #toolsAnchor #toolsToggle,
-    #chatPill #chatToggle,
-    #surroundingsPill #surroundingsToggle,
-    #sharePill #shareTrigger,
-    #inquiryPill #inquiryTrigger {
-        background:
-            radial-gradient(130% 120% at 50% -15%, rgba(255, 255, 255, 0.24), rgba(255, 255, 255, 0) 60%),
-            linear-gradient(180deg, rgba(92, 94, 102, 0.22), rgba(42, 44, 52, 0.22));
-        backdrop-filter: blur(24px) saturate(180%) brightness(1.08);
-        -webkit-backdrop-filter: blur(24px) saturate(180%) brightness(1.08);
-        border: 1px solid rgba(255, 255, 255, 0.2);
     }
 }
