@@ -240,6 +240,16 @@ export default function Demos() {
     const root = document.documentElement;
     const prevColorScheme = root.style.colorScheme;
     root.style.colorScheme = "dark";
+    // color-scheme/theme-color only hint the browser — they do NOT change the
+    // pixels this page actually paints, and that is a light paper tone. Any
+    // sliver of it that ends up outside the viewer (the iOS keyboard shifting
+    // things, rubber-band overscroll) reads as a white band. Paint the page
+    // itself dark for as long as the viewer is on top, so anything that peeks
+    // out is the viewer's own black rather than the site's white.
+    const prevRootBg = root.style.background;
+    const prevBodyBg = body.style.background;
+    root.style.background = "#0b0b0d";
+    body.style.background = "#0b0b0d";
     let themeMeta = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
     const themeMetaWasMissing = !themeMeta;
     const prevThemeColor = themeMeta?.getAttribute("content") ?? null;
@@ -263,6 +273,8 @@ export default function Demos() {
       body.style.overflow = prev.overflow;
       window.scrollTo(0, scrollY);
       root.style.colorScheme = prevColorScheme;
+      root.style.background = prevRootBg;
+      body.style.background = prevBodyBg;
       if (themeMetaWasMissing) {
         themeMeta?.remove();
       } else if (prevThemeColor !== null) {
