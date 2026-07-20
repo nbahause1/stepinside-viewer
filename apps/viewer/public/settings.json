@@ -9,12 +9,12 @@
         "gap": 0,
         "footsteps": "sfx/footsteps.mp3?v=3",
         "footstepSet": [
-            "sfx/step1.mp3?v=3",
-            "sfx/step2.mp3?v=3",
-            "sfx/step3.mp3?v=3",
-            "sfx/step4.mp3?v=3",
-            "sfx/step5.mp3?v=3",
-            "sfx/step6.mp3?v=3"
+            "sfx/step1.mp3?v=4",
+            "sfx/step2.mp3?v=4",
+            "sfx/step3.mp3?v=4",
+            "sfx/step4.mp3?v=4",
+            "sfx/step5.mp3?v=4",
+            "sfx/step6.mp3?v=4"
         ],
         "footstepsVolume": 0.17,
         "measureStart": "sfx/measure-start.mp3",
