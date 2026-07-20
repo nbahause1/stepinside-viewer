@@ -867,15 +867,6 @@ body.tutorial-active #walkHint {
   bottom: calc(max(14px, env(safe-area-inset-bottom)) + 54px);
   z-index: 16;
   pointer-events: none;
-  transition: transform 0.42s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.42s cubic-bezier(0.22, 1, 0.36, 1);
-  will-change: transform, opacity;
-}
-#surroundingsPill.is-tucked {
-  transform: translateY(50px);
-  opacity: 0;
-}
-#surroundingsPill.is-tucked #surroundingsToggle {
-  pointer-events: none;
 }
 #surroundingsPill,
 #surroundingsPill * {

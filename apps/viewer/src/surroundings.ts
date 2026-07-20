@@ -74,7 +74,7 @@ const ROUTE_DRAW_MS = 1400;
 const MAP_ACCENT = '#8c3a2f';
 
 const initSurroundings = (global: Global) => {
-    const { settings, events, config, state } = global;
+    const { settings, events, config } = global;
 
     const cfg = settings.surroundings as SurroundingsSettings | undefined;
     const pill = document.getElementById('surroundingsPill');
@@ -118,50 +118,17 @@ const initSurroundings = (global: Global) => {
 
 
     // -- open/close ----------------------------------------------------------
-    // The bottom-left corner rests as ONE bubble, not a stack: the map tucks
-    // down behind the concierge while the visitor is moving and slides back out
-    // shortly after the camera settles. Deliberately the same rhythm (and the
-    // same debounce) as the highlights pill in ui.ts — hiding is immediate so
-    // motion clears the screen at once, showing is debounced so a micro-pause
-    // mid-look-around never makes it flicker. It never tucks while the map
-    // itself is open, otherwise its own toggle would slide away under the hand.
-    const TUCK_SETTLE_MS = 400;
-    let tuckTimer: ReturnType<typeof setTimeout> | null = null;
-
-    const updateTuck = () => {
-        if (tuckTimer) {
-            clearTimeout(tuckTimer);
-            tuckTimer = null;
-        }
-        if (open) {
-            pill.classList.remove('is-tucked');
-            return;
-        }
-        if (!state.heroStill) {
-            pill.classList.add('is-tucked');
-            return;
-        }
-        tuckTimer = setTimeout(() => {
-            tuckTimer = null;
-            pill.classList.remove('is-tucked');
-        }, TUCK_SETTLE_MS);
-    };
-
     const setOpen = (next: boolean) => {
         if (open === next) return;
         open = next;
         overlay.classList.toggle('is-open', open);
         pill.classList.toggle('is-open', open);
-        updateTuck();
         if (open) {
             bringMapFront();
             events.fire('analytics', 'surroundings', { action: 'open' });
             void ensureMap();
         }
     };
-
-    events.on('heroStill:changed', updateTuck);
-    updateTuck();
 
     // Layering dance with the concierge: the map (z 18) may overlap the chat
     // (z 16) — whichever panel was touched last wins the front. A tap anywhere
