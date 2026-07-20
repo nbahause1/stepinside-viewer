@@ -653,25 +653,9 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
         events.on('measureComplete', () => mEnd?.play());
     }
 
-    // Drone (aerial) SFX: just the take-off swoosh — the SAME sound on entering
-    // aerial and on every view switch. No separate ambient bed/swell (any
-    // constant or trailing tone read as laggy/nagging); one crisp action sound
-    // everywhere is tighter.
-    const droneSwitchUrl = sfx?.droneSwitch;
-    if (droneSwitchUrl) {
-        const swVol = clamp01(sfx?.droneSwitchVolume ?? 0.5);
-        const sw = new Howl({ src: [droneSwitchUrl], volume: swVol, preload: true });
-
-        events.on('cameraMode:changed', () => {
-            if (state.cameraMode === 'aerial') sw.play(); // take-off on entering aerial
-        });
-
-        events.on('inputEvent', (name: string) => {
-            if ((name === 'aerialNext' || name === 'aerialPrev') && state.cameraMode === 'aerial') {
-                sw.play();
-            }
-        });
-    }
+    // Drone (aerial) take-off SFX intentionally removed — no sound on entering
+    // the bird's-eye view or paging between viewpoints, on any platform. (The
+    // settings.sfx.droneSwitch value is simply left unused.)
 
     // Drone view-switch polish — a subtle AUTOFOCUS HUNT. On a view change the
     // camera briefly loses focus and quickly hunts to lock it (defocus → rack in
