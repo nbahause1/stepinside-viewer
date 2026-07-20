@@ -849,13 +849,18 @@
                         </svg>
                     </button>
                     <button id="domeDollhouse" class="domeBtn" type="button" aria-label="Puppenhaus" title="Puppenhaus">
-                        <!-- cutaway "dollhouse": roof lifted clear of an open-top
-                             body with an interior wall — reads as a sectioned model,
-                             deliberately distinct from the solid home/reset house. -->
+                        <!-- Dollhouse = the roof lifted CLEAR of an OPEN-TOP body
+                             you look down into. The gap above the walls + the
+                             open top (no ceiling edge) + the two interior rooms
+                             read as a sectioned model, not the solid home/reset
+                             house (which is a closed roof-on-box). -->
                         <svg width="25" height="25" viewBox="0 0 22 22" aria-hidden="true">
-                            <path d="M4.6 6.2 L11 2.6 L17.4 6.2" />
-                            <path d="M5.6 9.6 V18 H16.4 V9.6" />
-                            <path d="M11 12.6 V18" />
+                            <!-- lifted-off roof, hovering above with a clear gap -->
+                            <path d="M3.2 5.4 L11 1.8 L18.8 5.4" />
+                            <!-- open-top body: side walls + floor, NO top edge -->
+                            <path d="M5 9.6 V18.4 H17 V9.6" />
+                            <!-- interior: a T of walls = the rooms seen from above -->
+                            <path d="M11 9.6 V18.4 M11 14 H17" />
                         </svg>
                     </button>
                     <button id="domeAerialExit" class="domeBtn" type="button" aria-label="Zurück zum Laufen" title="Zurück zum Laufen">
