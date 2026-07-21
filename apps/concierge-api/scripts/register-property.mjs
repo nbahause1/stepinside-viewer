@@ -8,9 +8,14 @@
  * token (old report links stop working — that is the "revoke" story).
  *
  * Usage (from apps/concierge-api):
- *   node scripts/register-property.mjs <property-id> "<Label>" [owner-email]
+ *   node scripts/register-property.mjs <property-id> "<Label>" [owner-email] [lead-webhook-url]
  * Example:
  *   node scripts/register-property.mjs demo-altbau "Altbau-Etage Eppendorf" makler@example.com
+ *   node scripts/register-property.mjs demo-altbau "Altbau-Etage Eppendorf" makler@example.com https://hooks.zapier.com/hooks/catch/123/abc
+ *
+ * The lead-webhook-url is the broker's OWN inbound hook (CRM / Zapier / Make /
+ * n8n / GHL). When set, leads for this property forward there instead of the
+ * global GHL_HOTLEAD_WEBHOOK_URL. Omit it to keep the global default.
  *
  * Add --local to target the local wrangler dev database instead of production.
  */
@@ -22,14 +27,18 @@ const DB_NAME = 'innsyn-analytics';
 
 const args = process.argv.slice(2).filter((a) => a !== '--local');
 const local = process.argv.includes('--local');
-const [propertyId, label, ownerEmail] = args;
+const [propertyId, label, ownerEmail, leadWebhookUrl] = args;
 
 if (!propertyId || !label) {
-  console.error('Usage: node scripts/register-property.mjs <property-id> "<Label>" [owner-email] [--local]');
+  console.error('Usage: node scripts/register-property.mjs <property-id> "<Label>" [owner-email] [lead-webhook-url] [--local]');
   process.exit(1);
 }
 if (!/^[a-z0-9-]{1,64}$/.test(propertyId)) {
   console.error('property-id must match ^[a-z0-9-]{1,64}$ (lowercase, digits, hyphens).');
+  process.exit(1);
+}
+if (leadWebhookUrl && !/^https:\/\//.test(leadWebhookUrl)) {
+  console.error('lead-webhook-url must be an https:// URL.');
   process.exit(1);
 }
 
@@ -40,10 +49,10 @@ const token = randomBytes(32).toString('hex');
 // SQLite rules. propertyId is already shape-checked above.
 const q = (v) => (v == null ? 'NULL' : `'${String(v).replace(/'/g, "''")}'`);
 const sql =
-  `INSERT INTO properties (property_id, report_token, label, owner_email) ` +
-  `VALUES (${q(propertyId)}, ${q(token)}, ${q(label)}, ${q(ownerEmail ?? null)}) ` +
+  `INSERT INTO properties (property_id, report_token, label, owner_email, lead_webhook_url) ` +
+  `VALUES (${q(propertyId)}, ${q(token)}, ${q(label)}, ${q(ownerEmail ?? null)}, ${q(leadWebhookUrl ?? null)}) ` +
   `ON CONFLICT(property_id) DO UPDATE SET report_token=excluded.report_token, ` +
-  `label=excluded.label, owner_email=excluded.owner_email;`;
+  `label=excluded.label, owner_email=excluded.owner_email, lead_webhook_url=excluded.lead_webhook_url;`;
 
 execFileSync(
   'npx',
@@ -52,6 +61,6 @@ execFileSync(
 );
 
 console.log('');
-console.log(`Registriert: ${propertyId} ("${label}")${ownerEmail ? ` · Makler: ${ownerEmail}` : ''}`);
+console.log(`Registriert: ${propertyId} ("${label}")${ownerEmail ? ` · Makler: ${ownerEmail}` : ''}${leadWebhookUrl ? ` · Lead-Webhook: ${leadWebhookUrl}` : ''}`);
 console.log('Privater Report-Link (an den Makler geben, gilt bis zur nächsten Registrierung):');
 console.log(`  ${WORKER_BASE}/report/${propertyId}?token=${token}`);

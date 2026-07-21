@@ -60,13 +60,20 @@ export interface AnalyticsResult {
 export type DailyBudget = { consume(): Promise<RateLimitResult> };
 
 /**
- * Hot-lead alarm (Flaggschiff 2): after a lead is stored, POST it to a GHL
- * inbound webhook so the property's broker is notified within minutes.
- * Fire-and-forget — a webhook failure must never break /lead or the viewer.
+ * Hot-lead alarm (Flaggschiff 2): after a lead is stored, POST it to an inbound
+ * webhook so the property's broker is notified within minutes. The destination
+ * is resolved per property (properties.lead_webhook_url — the broker's own CRM /
+ * Zapier / Make / n8n / GHL hook), falling back to the global `webhookUrl` when
+ * the property has none. Fire-and-forget — a webhook failure must never break
+ * /lead or the viewer.
  */
 export interface HotLeadForward {
-  /** GHL inbound-webhook URL (env GHL_HOTLEAD_WEBHOOK_URL). */
-  webhookUrl: string;
+  /**
+   * Global fallback inbound-webhook URL (env GHL_HOTLEAD_WEBHOOK_URL). Optional:
+   * a property with its own lead_webhook_url forwards there even when no global
+   * default is set; with neither, nothing is forwarded.
+   */
+  webhookUrl?: string;
   /** Keeps the POST alive past the response (ctx.waitUntil on Workers). */
   waitUntil?: (task: Promise<unknown>) => void;
   /** Injectable for tests; defaults to the global fetch. */
@@ -289,21 +296,31 @@ async function forwardHotLead(
 ): Promise<void> {
   let propertyLabel: string | null = null;
   let ownerEmail: string | null = null;
+  let propertyWebhookUrl: string | null = null;
   try {
     const row = await db
-      .prepare('SELECT label, owner_email FROM properties WHERE property_id = ?1')
+      .prepare('SELECT label, owner_email, lead_webhook_url FROM properties WHERE property_id = ?1')
       .bind(lead.propertyId)
       .first();
     if (row) {
       propertyLabel = typeof row['label'] === 'string' ? (row['label'] as string) : null;
       ownerEmail = typeof row['owner_email'] === 'string' ? (row['owner_email'] as string) : null;
+      propertyWebhookUrl = typeof row['lead_webhook_url'] === 'string' && row['lead_webhook_url']
+        ? (row['lead_webhook_url'] as string)
+        : null;
     }
   } catch (err) {
+    // Also covers an unmigrated DB (no lead_webhook_url column yet): degrades to
+    // the global fallback rather than dropping the alarm.
     console.warn('[analytics] hot-lead property lookup failed:', String(err));
   }
+  // The property's own inbound webhook wins; the global GHL default is the
+  // fallback. With neither there is nowhere to forward — nothing to do.
+  const target = propertyWebhookUrl ?? forward.webhookUrl ?? null;
+  if (!target) return;
   try {
     const doFetch = forward.fetchImpl ?? (fetch as unknown as NonNullable<HotLeadForward['fetchImpl']>);
-    const res = await doFetch(forward.webhookUrl, {
+    const res = await doFetch(target, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({

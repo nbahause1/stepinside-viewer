@@ -83,9 +83,11 @@ interface Env {
   /** Optional shared secret; when set, /stage requires the x-stage-token header. */
   STAGE_AUTH_TOKEN?: string;
   /**
-   * Optional GHL inbound-webhook URL for the hot-lead alarm (Flaggschiff 2):
-   * every stored lead is forwarded there fire-and-forget so the property's
-   * broker gets notified. Set as a secret (the URL embeds a token):
+   * Optional GLOBAL fallback inbound-webhook URL for the hot-lead alarm
+   * (Flaggschiff 2): a stored lead is forwarded fire-and-forget so the broker
+   * gets notified. A property with its own properties.lead_webhook_url overrides
+   * this; this is the default for properties without one. Set as a secret (the
+   * URL embeds a token):
    *   wrangler secret put GHL_HOTLEAD_WEBHOOK_URL
    */
   GHL_HOTLEAD_WEBHOOK_URL?: string;
@@ -468,12 +470,15 @@ export default {
               'spend:lead',
             )
           : undefined,
-        env.GHL_HOTLEAD_WEBHOOK_URL
-          ? {
-              webhookUrl: env.GHL_HOTLEAD_WEBHOOK_URL,
-              waitUntil: ctx ? (task) => ctx.waitUntil(task) : undefined,
-            }
-          : undefined,
+        // Always pass the forward: the destination is resolved per property
+        // (properties.lead_webhook_url), with GHL_HOTLEAD_WEBHOOK_URL as the
+        // optional global fallback. A property with its own webhook is notified
+        // even when no global default is configured; with neither, forwardHotLead
+        // simply does nothing.
+        {
+          webhookUrl: env.GHL_HOTLEAD_WEBHOOK_URL,
+          waitUntil: ctx ? (task) => ctx.waitUntil(task) : undefined,
+        },
       );
       return jsonResponse(result.status, result.body, cors, result.retryAfterSeconds);
     }

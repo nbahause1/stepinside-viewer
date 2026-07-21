@@ -66,6 +66,57 @@ describe('handleLead hot-lead forward', () => {
     });
   });
 
+  it('forwards to the property OWN webhook, overriding the global default', async () => {
+    const { forward, calls, settle } = capturingForward();
+    const db = fakeDb({
+      label: 'Altbau Eppendorf',
+      owner_email: 'makler@example.com',
+      lead_webhook_url: 'https://hooks.zapier.com/hooks/catch/1/xyz',
+    });
+
+    const result = await handleLead(VALID_LEAD, db, undefined, forward);
+    await settle();
+
+    expect(result.status).toBe(202);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].url).toBe('https://hooks.zapier.com/hooks/catch/1/xyz');
+    expect(calls[0].body).toMatchObject({ signal: 'lead', propertyId: 'demo-altbau' });
+  });
+
+  it('falls back to the global webhook when the property has no own URL', async () => {
+    const { forward, calls, settle } = capturingForward();
+    const db = fakeDb({ label: 'Altbau', owner_email: null, lead_webhook_url: null });
+
+    await handleLead(VALID_LEAD, db, undefined, forward);
+    await settle();
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].url).toBe('https://ghl.example.com/hook/abc');
+  });
+
+  it('forwards to the property webhook even with NO global default set', async () => {
+    const { forward, calls, settle } = capturingForward({ webhookUrl: undefined });
+    const db = fakeDb({ label: 'Altbau', owner_email: null, lead_webhook_url: 'https://crm.example.com/in/9' });
+
+    const result = await handleLead(VALID_LEAD, db, undefined, forward);
+    await settle();
+
+    expect(result.status).toBe(202);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].url).toBe('https://crm.example.com/in/9');
+  });
+
+  it('does NOT fire when there is neither a property URL nor a global default', async () => {
+    const { forward, calls, settle } = capturingForward({ webhookUrl: undefined });
+    const db = fakeDb({ label: 'Altbau', owner_email: null, lead_webhook_url: null });
+
+    const result = await handleLead(VALID_LEAD, db, undefined, forward);
+    await settle();
+
+    expect(result.status).toBe(202); // lead still stored — only the alarm is skipped
+    expect(calls).toHaveLength(0);
+  });
+
   it('still fires (with null owner fields) when the property is unregistered', async () => {
     const { forward, calls, settle } = capturingForward();
 
