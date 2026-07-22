@@ -186,7 +186,7 @@
                 // WebGPU iPad + phones from the 14 Pro class up have the fill
                 // rate for high; other WebGPU phones get the balanced mid.
                 (isIPadOS ? 'high' :
-                    (shortSide >= 393 && window.devicePixelRatio >= 3 && renderer === 'webgpu') ? 'high' : 'mid');
+                    (shortSide >= 390 && window.devicePixelRatio >= 3 && renderer === 'webgpu') ? 'high' : 'mid');
 
             diag('detected: iPad=' + isIPadOS + ' mobile=' + isMobileUA + ' renderer=' + renderer + ' tier=' + tier + ' fillrate=' + fillrate);
 
