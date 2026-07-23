@@ -195,6 +195,13 @@ const initCanvas = (global: Global) => {
     // Effective touch/constrained flag (iPad-aware; see isMobile).
     const mobile = isMobile(config);
 
+    // In-motion render-scale override for A/B tuning on-device (?wscale=1 =
+    // "permanently sharp": full res while BOTH looking around and walking).
+    // The reduced-while-moving scale is the biggest in-motion softness; this
+    // param overrides it wholesale so it can be tuned on a real device. (0,1].
+    const wscaleParam = Number(new URL(location.href).searchParams.get('wscale'));
+    const walkScaleOverride = Number.isFinite(wscaleParam) && wscaleParam > 0 && wscaleParam <= 1 ? wscaleParam : null;
+
     // maximum pixel dimension we will allow along the shortest screen dimension.
     // WebGL (Safari) can't GPU-sort splats and is fill-rate bound on Retina, so
     // cap the render resolution much harder there to keep it smooth. WebGPU
@@ -271,9 +278,16 @@ const initCanvas = (global: Global) => {
         // phone-like fill-rate ceilings) borrow the same trick: reduced scale
         // only while the camera moves, full resolution the moment it settles.
         // Other desktops keep the static performanceMode scale.
-        const movingScale = state.positionStable ?
-            (state.deviceTier === 'high' ? 0.85 : (state.deviceTier === 'mid' ? 0.7 : 0.5)) :
-            0.5;
+        // High-tier devices (iPhone 12/13/14 + up on WebGPU, WebGPU iPads,
+        // desktops): PERMANENTLY SHARP — full render scale even while moving,
+        // both looking around AND walking. It's the premium look the product
+        // wants and A14+ has the fill-rate for it; the runtime tier-demotion
+        // drops them to mid if they ever thermal-throttle, so smoothness holds.
+        // mid/low keep the reduced-while-moving scale to protect FPS (rotating
+        // gets the milder cut, walking the harder). ?wscale= overrides all.
+        const movingScale = walkScaleOverride ?? (
+            state.deviceTier === 'high' ? 1.0 :
+                state.positionStable ? (state.deviceTier === 'mid' ? 0.7 : 0.5) : 0.5);
         const s = mobile || config.fillrate ?
             (global.cameraMoving ? movingScale : 1.0) :
             (state.performanceMode ? 0.5 : 1.0);
