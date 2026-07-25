@@ -31,7 +31,7 @@ import { initControls } from './controls';
 import { observe } from './core/observe';
 import { initInquiry } from './inquiry';
 import { initLocalization } from './localization';
-import { importSettings } from './settings';
+import { importSettingsSafe } from './settings';
 import { initShare } from './share';
 import { initStaging } from './staging';
 import { initSurvey } from './survey';
@@ -167,6 +167,53 @@ const createApp = async (canvas: HTMLCanvasElement, config: Config) => {
     // texture asset starts loading, otherwise the <img> is fetched without the
     // crossorigin attribute and WebGL rejects it with SecurityError)
     (app.loader.getHandler('texture') as TextureHandler).imgParser.crossOrigin = 'anonymous';
+
+    // GPU context-loss recovery. With autoRender off (render-on-demand), a lost
+    // WebGL/WebGPU context otherwise leaves a permanently black canvas: nothing
+    // repaints even after the browser restores it. The engine preventDefaults
+    // the WebGL context-loss (so it CAN restore) and fires device events; we
+    // drive a full-screen overlay from them so the visitor is never stuck at a
+    // black frame, and force a repaint once the context is back.
+    {
+        let overlay: HTMLDivElement | null = null;
+        const showOverlay = () => {
+            if (overlay) return;
+            overlay = document.createElement('div');
+            overlay.setAttribute('role', 'alert');
+            Object.assign(overlay.style, {
+                position: 'fixed', inset: '0', zIndex: '99999',
+                display: 'flex', flexDirection: 'column', gap: '18px',
+                alignItems: 'center', justifyContent: 'center', textAlign: 'center',
+                padding: '24px', background: 'rgba(12,12,14,0.9)', color: '#f5f5f7',
+                font: '500 15px/1.5 -apple-system, system-ui, sans-serif'
+            });
+            const msg = document.createElement('div');
+            msg.textContent = 'Die 3D-Ansicht wurde kurz unterbrochen und wird wiederhergestellt …';
+            const btn = document.createElement('button');
+            btn.textContent = 'Neu laden';
+            Object.assign(btn.style, {
+                padding: '10px 22px', borderRadius: '999px', border: '0',
+                background: '#f5f5f7', color: '#0c0c0e', font: '600 14px system-ui, sans-serif',
+                cursor: 'pointer'
+            });
+            btn.addEventListener('click', () => window.location.reload());
+            overlay.append(msg, btn);
+            document.body.appendChild(overlay);
+        };
+        const hideOverlay = () => { overlay?.remove(); overlay = null; };
+
+        device.on('devicelost', showOverlay);
+        device.on('devicerestored', () => { hideOverlay(); app.renderNextFrame = true; });
+
+        // WebGPU loss is not auto-restored; surface it via the underlying
+        // GPUDevice.lost promise (best-effort — internal handle, guarded).
+        try {
+            const wgpu = (device as unknown as { wgpu?: { lost?: Promise<{ reason?: string }> } }).wgpu;
+            wgpu?.lost?.then((info) => {
+                if (info?.reason !== 'destroyed') showOverlay(); // 'destroyed' = intentional teardown
+            });
+        } catch { /* best-effort; device events above are the primary path */ }
+    }
 
     // Create entity hierarchy
     const cameraRoot = new Entity('camera root');
@@ -393,7 +440,7 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
 
     const global: Global = {
         app,
-        settings: importSettings(settingsJson),
+        settings: importSettingsSafe(settingsJson),
         config,
         state,
         events,
