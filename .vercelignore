@@ -1,0 +1,9 @@
+.git
+node_modules
+**/node_modules
+apps/trailer-render
+apps/viewer/public
+apps/viewer/dist
+experiments
+**/.next
+**/*.log

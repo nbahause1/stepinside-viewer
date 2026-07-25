@@ -11,10 +11,13 @@ concurrency:
 
 jobs:
   website:
-    # Full production build: exercises the prebuild hook, which installs and
-    # builds the viewer and syncs its artifacts — so a broken viewer build or
-    # a broken sync fails HERE, not on the Vercel prod deploy.
-    name: website (typecheck + build)
+    # Rebuilds the viewer from source and RE-SYNCS its artifacts, then asserts
+    # the committed public/viewer matches that fresh build. Vercel serves the
+    # committed artifacts (there is no prebuild hook), so this is what catches a
+    # broken viewer build, a dropped chunk (sync reference-integrity assertion),
+    # or stale committed artifacts (drift guard) — HERE, not on the prod deploy.
+    # (This is the maplibre-gl incident class made into a red build.)
+    name: website (viewer rebuild + typecheck + build)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -29,6 +32,28 @@ jobs:
             apps/website/package-lock.json
             apps/viewer/package-lock.json
       - run: npm ci
+      - name: install viewer deps
+        # sync:viewer builds the viewer (cd ../viewer && npm run build); its deps
+        # (e.g. maplibre-gl) must be present or the build silently drops a chunk.
+        run: npm ci --prefix ../viewer
+      - name: rebuild + sync viewer
+        # Runs the sync's reference-integrity assertion: any `./X.js` referenced
+        # by the HTML/chunks but missing from the output fails the build.
+        run: npm run sync:viewer
+      - name: viewer artifact drift guard
+        # A fresh build of unchanged source yields identical content-hashed
+        # chunks, so a clean tree here proves the committed artifacts are current.
+        # `git status --porcelain` (NOT `git diff`) so a brand-NEW untracked chunk
+        # — the maplibre incident class — also trips the guard, not just modified
+        # tracked files. If this fails: run `npm run sync:viewer` locally and
+        # commit public/viewer.
+        run: |
+          drift=$(git status --porcelain -- public/viewer)
+          if [ -n "$drift" ]; then
+            echo "Committed public/viewer is out of sync with a fresh build:"
+            echo "$drift"
+            exit 1
+          fi
       - run: npx tsc --noEmit
       - run: npm run build
       - name: bundle size guard
