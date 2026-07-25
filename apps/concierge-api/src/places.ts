@@ -25,8 +25,12 @@ const OVERPASS_ENDPOINTS = [
 const OSRM_FOOT = 'https://routing.openstreetmap.de/routed-foot/route/v1/foot';
 const OSRM_CAR = 'https://routing.openstreetmap.de/routed-car/route/v1/driving';
 
-/** Keep third-party lookups snappy: the visitor is waiting on a chat answer. */
-const LOOKUP_TIMEOUT_MS = 6000;
+/** Keep third-party lookups snappy: the visitor is waiting on a chat answer.
+ *  Overpass is raced across two mirrors and OSRM degrades to null on failure,
+ *  so they get the tight budget; a Photon geocode failure sinks the whole
+ *  lookup, so the name/brand geocode gets a little more headroom. */
+const LOOKUP_TIMEOUT_MS = 3500;
+const PHOTON_TIMEOUT_MS = 5000;
 
 /** Category search radius around the property, in meters. */
 const CATEGORY_RADIUS_M = 3000;
@@ -81,9 +85,9 @@ function haversineMeters(a: [number, number], b: [number, number]): number {
   return Math.round(2 * R * Math.asin(Math.sqrt(s)));
 }
 
-async function fetchJson(url: string): Promise<unknown> {
+async function fetchJson(url: string, timeoutMs: number = LOOKUP_TIMEOUT_MS): Promise<unknown> {
   const res = await fetch(url, {
-    signal: AbortSignal.timeout(LOOKUP_TIMEOUT_MS),
+    signal: AbortSignal.timeout(timeoutMs),
     headers: { 'user-agent': 'innsyn-concierge/1.0 (place lookup, one per chat question)' },
   });
   if (!res.ok) {
@@ -119,30 +123,34 @@ async function findByCategory(
   // Header quirks matter: overpass-api.de's WAF rejects URLSearchParams
   // bodies (the `;charset=UTF-8` content-type suffix) and asks for an
   // identifying User-Agent. Same lesson as apps/viewer/scripts/fetch-surroundings.mjs.
-  const query = `[out:json][timeout:6];nwr(around:${CATEGORY_RADIUS_M},${location.lat},${location.lng})${filter};out center;`;
-  let res: Response | null = null;
-  let lastErr: unknown = null;
-  for (const endpoint of OVERPASS_ENDPOINTS) {
-    try {
-      const attempt = await fetch(endpoint, {
-        method: 'POST',
-        signal: AbortSignal.timeout(LOOKUP_TIMEOUT_MS),
-        headers: {
-          'content-type': 'application/x-www-form-urlencoded',
-          'user-agent': 'innsyn-concierge/1.0 (place lookup, one per chat question)',
-        },
-        body: `data=${encodeURIComponent(query)}`,
-      });
-      if (attempt.ok) {
-        res = attempt;
-        break;
-      }
-      lastErr = new Error(`overpass ${attempt.status}`);
-    } catch (err) {
-      lastErr = err;   // timeout / network — try the mirror
-    }
+  // Server-side query budget kept at/below the client abort (LOOKUP_TIMEOUT_MS)
+  // so we never abort a response the server was still allowed to compute.
+  const query = `[out:json][timeout:3];nwr(around:${CATEGORY_RADIUS_M},${location.lat},${location.lng})${filter};out center;`;
+  // Race BOTH community mirrors in parallel and take the first that answers OK.
+  // Previously they were tried serially: a slow/busy primary made the visitor
+  // wait out its full timeout before the mirror was even attempted (up to ~2×
+  // the timeout). Promise.any resolves on the first success and only rejects
+  // (AggregateError) when every mirror fails.
+  const fetchOverpass = async (endpoint: string): Promise<Response> => {
+    const attempt = await fetch(endpoint, {
+      method: 'POST',
+      signal: AbortSignal.timeout(LOOKUP_TIMEOUT_MS),
+      headers: {
+        'content-type': 'application/x-www-form-urlencoded',
+        'user-agent': 'innsyn-concierge/1.0 (place lookup, one per chat question)',
+      },
+      body: `data=${encodeURIComponent(query)}`,
+    });
+    if (!attempt.ok) throw new Error(`overpass ${attempt.status}`);
+    return attempt;
+  };
+  let res: Response;
+  try {
+    res = await Promise.any(OVERPASS_ENDPOINTS.map(fetchOverpass));
+  } catch (err) {
+    const first = err instanceof AggregateError ? err.errors[0] : err;
+    throw first instanceof Error ? first : new Error('overpass unavailable');
   }
-  if (!res) throw lastErr instanceof Error ? lastErr : new Error('overpass unavailable');
   const data = (await res.json()) as {
     elements?: {
       lat?: number; lon?: number;
@@ -200,7 +208,7 @@ export async function findPlace(
   const url =
     `${PHOTON_ENDPOINT}?q=${encodeURIComponent(query)}&lang=de&limit=5` +
     `&lat=${location.lat}&lon=${location.lng}`;
-  const data = (await fetchJson(url)) as {
+  const data = (await fetchJson(url, PHOTON_TIMEOUT_MS)) as {
     features?: {
       geometry?: { coordinates?: [number, number] };
       properties?: Record<string, unknown>;
