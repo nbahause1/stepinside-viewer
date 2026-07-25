@@ -18,6 +18,10 @@ export default function Contact() {
   const { t } = useLang();
   const year = new Date().getFullYear();
   const [status, setStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
+  // Explicit opt-in gate: the form only submits once the visitor has consented
+  // to their data being stored and mirrored to the CRM (GoHighLevel). The form
+  // is noValidate, so this is enforced in JS, not by the native `required`.
+  const [consented, setConsented] = useState(false);
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -27,6 +31,7 @@ export default function Contact() {
       setStatus("error");
       return;
     }
+    if (!consented) return;
     setStatus("loading");
 
     // Mirror the lead into the CRM (GHL Speed-to-Lead workflow) via our own
@@ -41,6 +46,7 @@ export default function Contact() {
         name: lead.get("name"),
         email: lead.get("email"),
         message: lead.get("message"),
+        consent: true,
       }),
     }).catch(() => {});
 
@@ -122,12 +128,39 @@ export default function Contact() {
                 </div>
               </div>
 
-              <div className="mt-6">
+              <div className="mt-6 flex items-start gap-3">
+                <input
+                  id="consent"
+                  name="consent"
+                  type="checkbox"
+                  checked={consented}
+                  onChange={(e) => setConsented(e.target.checked)}
+                  className="mt-1 size-4 shrink-0 cursor-pointer accent-ink"
+                />
+                <label htmlFor="consent" className="text-[13px] leading-[1.5] text-pewter">
+                  {t.contact.consent.split("{link}").flatMap((part, i) =>
+                    i === 0
+                      ? [part]
+                      : [
+                          <Link
+                            key="dp"
+                            href="/datenschutz"
+                            className="text-ink underline underline-offset-2 transition-colors hover:text-ember"
+                          >
+                            {t.contact.consentLink}
+                          </Link>,
+                          part,
+                        ],
+                  )}
+                </label>
+              </div>
+
+              <div className="mt-5">
                 <PillButton
                   type="submit"
                   variant="filled"
                   tone="ink"
-                  disabled={status === "loading"}
+                  disabled={status === "loading" || !consented}
                 >
                   {status === "loading" ? t.contact.sending : t.contact.send}
                 </PillButton>

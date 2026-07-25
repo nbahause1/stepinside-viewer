@@ -105,6 +105,8 @@ interface ContactD {
   sending: string;
   success: string;
   error: string;
+  consent: string;
+  consentLink: string;
   directLabel: string;
   bookLabel: string;
 }
@@ -279,6 +281,9 @@ const de: Dict = {
     success: "Danke. Wir melden uns in Kürze.",
     error:
       "Etwas ist schiefgelaufen. Bitte versuchen Sie es erneut oder schreiben Sie uns direkt.",
+    consent:
+      "Ich willige ein, dass meine hier eingegebenen Angaben zur Bearbeitung meiner Anfrage gespeichert und an unser CRM (GoHighLevel, USA) übermittelt werden. Details in der {link}.",
+    consentLink: "Datenschutzerklärung",
     directLabel: "Direkt erreichen",
     bookLabel: "Termin buchen",
   },
@@ -441,6 +446,9 @@ const en: Dict = {
     sending: "Sending...",
     success: "Thank you. We will be in touch shortly.",
     error: "Something went wrong. Please try again or email us directly.",
+    consent:
+      "I consent to the details I enter here being stored to process my enquiry and forwarded to our CRM (GoHighLevel, USA). See our {link} for details.",
+    consentLink: "privacy policy",
     directLabel: "Reach us directly",
     bookLabel: "Book a call",
   },
