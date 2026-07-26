@@ -19,7 +19,7 @@ const lora = Lora({
 });
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://stepinside.eu"),
+  metadataBase: new URL("https://www.myinnsyn.de"),
   title: {
     default: "innsyn - Räume begehbar machen. Von überall.",
     template: "%s · innsyn",
@@ -30,17 +30,17 @@ export const metadata: Metadata = {
     title: "innsyn - Räume begehbar machen. Von überall.",
     description:
       "Fotorealistische, frei begehbare 3D-Touren. Ein Link, jedes Gerät, kein Download.",
-    url: "https://stepinside.eu",
+    url: "https://www.myinnsyn.de",
     siteName: "innsyn",
     locale: "de_DE",
     type: "website",
   },
   alternates: {
-    canonical: "https://stepinside.eu",
+    canonical: "https://www.myinnsyn.de",
     // The English version is deactivated for launch (no switcher in the UI);
     // the EN dictionary is kept in the codebase for later.
     languages: {
-      de: "https://stepinside.eu",
+      de: "https://www.myinnsyn.de",
     },
   },
 };
@@ -60,7 +60,7 @@ export default function RootLayout({
     "@context": "https://schema.org",
     "@type": "Organization",
     name: l.company,
-    url: "https://stepinside.eu",
+    url: "https://www.myinnsyn.de",
     description:
       "Fotorealistische, frei begehbare 3D-Touren für Hotels, Immobilien, Gastronomie und mehr.",
     telephone: l.phone,
