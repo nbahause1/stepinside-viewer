@@ -15,14 +15,11 @@
       GHL-ready: nutzt {{contact.first_name}} und {{contact.company_name}}
       (beim Kontakt-Import fuellen!), {{trigger_link.*}} und {{unsubscribe_link}}.
 
-      RUNDGANG (Studio 11): Beide GHL-Trigger-Links (65hoNMmLPB1g1xeUOoTE am
-      Hero-Bild, npxQxdtxSsfsnX2q0JG6 am CTA-Button) auf diese Ziel-URL stellen
-      (Klick-Tracking bleibt erhalten):
-        https://myinnsyn.de/tour
-      Die Kurz-URL leitet direkt in den Studio-11-Rundgang weiter (voll
-      geladen, ohne sichtbares Nachschaerfen) und uebersteht jedes Copy-Paste.
-      Hero-Bild: https://myinnsyn.de/studio-11-hero.jpg — Bild und Rundgang
-      sind live, sobald der aker-redesign-Deploy durch ist.
+      RUNDGANG (Studio 11): Hero-Bild und CTA-Button verlinken DIREKT auf
+      https://myinnsyn.de/tour (live). Kein Trigger-Link-Setup noetig.
+      Wer geklickt hat, ist damit nicht in GHL nachverfolgbar; fuer
+      Klick-Tracking spaeter beide hrefs wieder durch {{trigger_link.<id>}}
+      ersetzen. Hero-Bild: https://myinnsyn.de/studio-11-hero.jpg (live).
     -->
 
     <!--[if mso]>
@@ -201,7 +198,7 @@
             <!-- Viewer: Grossbild mit Play-Overlay, oeffnet den Rundgang im Browser -->
             <tr>
               <td class="mobile-padding" bgcolor="#070707" style="padding:30px 40px 0; background-color:#070707;">
-                <a href="{{trigger_link.65hoNMmLPB1g1xeUOoTE}}" target="_blank" aria-label="Rundgang im Browser betreten" style="display:block; text-decoration:none;">
+                <a href="https://myinnsyn.de/tour" target="_blank" aria-label="Rundgang im Browser betreten" style="display:block; text-decoration:none;">
                   <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="border-radius:10px; overflow:hidden;">
                     <tr>
                       <td class="viewer-hero" height="400" background="https://myinnsyn.de/studio-11-hero.jpg" bgcolor="#111111" valign="middle" align="center" style="height:400px; background-color:#111111; background-image:url('https://myinnsyn.de/studio-11-hero.jpg'); background-size:cover; background-position:center; background-repeat:no-repeat; border-radius:10px;">
@@ -250,7 +247,7 @@
                   <tr>
                     <td bgcolor="#ffffff" style="border-radius:80px; background-color:#ffffff;">
                       <!--[if mso]>
-                        <v:roundrect href="{{trigger_link.npxQxdtxSsfsnX2q0JG6}}" style="height:52px; v-text-anchor:middle; width:232px;" arcsize="80%" fillcolor="#ffffff" strokecolor="#ffffff">
+                        <v:roundrect href="https://myinnsyn.de/tour" style="height:52px; v-text-anchor:middle; width:232px;" arcsize="80%" fillcolor="#ffffff" strokecolor="#ffffff">
                           <w:anchorlock/>
                           <center style="color:#070707; font-family:Arial,sans-serif; font-size:14px; font-weight:bold;">
                             Sprechen wir dar&#252;ber &#8594;
@@ -258,7 +255,7 @@
                         </v:roundrect>
                       <![endif]-->
                       <!--[if !mso]><!-->
-                        <a href="{{trigger_link.npxQxdtxSsfsnX2q0JG6}}" target="_blank" style="display:inline-block; padding:16px 26px; border-radius:80px; background-color:#ffffff; color:#070707; font-family:'Proxima Nova',Montserrat,Avenir,'Helvetica Neue',Arial,sans-serif; font-size:14px; font-weight:600; line-height:20px; letter-spacing:0.14px;">
+                        <a href="https://myinnsyn.de/tour" target="_blank" style="display:inline-block; padding:16px 26px; border-radius:80px; background-color:#ffffff; color:#070707; font-family:'Proxima Nova',Montserrat,Avenir,'Helvetica Neue',Arial,sans-serif; font-size:14px; font-weight:600; line-height:20px; letter-spacing:0.14px;">
                           Sprechen wir dar&uuml;ber&nbsp;&nbsp;&#8594;
                         </a>
                       <!--<![endif]-->
