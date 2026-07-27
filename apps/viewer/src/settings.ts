@@ -134,6 +134,21 @@ const validateSettings = (settings: unknown): void => {
     }
 };
 
+// Resilient loader for the UNTRUSTED per-scan settings.json: validate first and,
+// on ANY failure, fall back to safe defaults instead of throwing deep in boot /
+// rendering — a malformed settings.json would otherwise black-screen the viewer.
+// The fallback runs the normal v1->v2 migration on a minimal seed, so it yields
+// a fully-defaulted, renderer-valid V2 (empty cameras/annotations, no effects).
+const importSettingsSafe = (settings: unknown): V2 => {
+    try {
+        validateSettings(settings);
+        return importSettings(settings);
+    } catch (err) {
+        console.warn(`[settings] settings.json invalid or unloadable — using safe defaults: ${String(err).slice(0, 200)}`);
+        return importSettings({ camera: {}, animTracks: [], background: {} });
+    }
+};
+
 export type { AnimTrack, Camera, Annotation, PostEffectSettings, ExperienceSettings } from './schemas/v2';
 
-export { importSettings, validateSettings };
+export { importSettings, importSettingsSafe, validateSettings };

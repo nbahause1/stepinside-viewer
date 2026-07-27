@@ -5,7 +5,7 @@ import type { MetadataRoute } from "next";
 export default function robots(): MetadataRoute.Robots {
   return {
     rules: { userAgent: "*", allow: "/" },
-    sitemap: "https://stepinside.eu/sitemap.xml",
-    host: "https://stepinside.eu",
+    sitemap: "https://www.myinnsyn.de/sitemap.xml",
+    host: "https://www.myinnsyn.de",
   };
 }

@@ -3,6 +3,26 @@
     <head>
         <title>innsyn</title>
         <meta charset="UTF-8">
+        <!-- Social share preview (WhatsApp/iMessage/LinkedIn/X unfurl). Without
+             these a shared tour link unfurls to a bare "innsyn" title, throwing
+             away the biggest organic surface of a link-first product. Static for
+             now (every scene shares one branded card) — true PER-SCENE OG (scene
+             still + property title) needs a small server shim and is the v2.
+             Reuses the marketing OG card; crawlers require an absolute URL and
+             don't run JS, so this must be static markup, not set at runtime. -->
+        <meta name="description" content="Ein begehbarer 3D-Rundgang – gehen Sie frei durch die Räume, direkt im Browser. Ohne App, ohne Download.">
+        <meta property="og:type" content="website">
+        <meta property="og:site_name" content="innsyn">
+        <meta property="og:title" content="Virtueller 3D-Rundgang · innsyn">
+        <meta property="og:description" content="Ein begehbarer 3D-Rundgang – gehen Sie frei durch die Räume, direkt im Browser. Ohne App.">
+        <meta property="og:image" content="https://www.myinnsyn.de/opengraph-image">
+        <meta property="og:image:width" content="1200">
+        <meta property="og:image:height" content="630">
+        <meta property="og:locale" content="de_DE">
+        <meta name="twitter:card" content="summary_large_image">
+        <meta name="twitter:title" content="Virtueller 3D-Rundgang · innsyn">
+        <meta name="twitter:description" content="Ein begehbarer 3D-Rundgang – direkt im Browser. Ohne App.">
+        <meta name="twitter:image" content="https://www.myinnsyn.de/opengraph-image">
         <!-- interactive-widget=resizes-content: Android Chrome shrinks the layout
              viewport when the on-screen keyboard opens, so the chat input stays
              visible. iOS ignores it (handled via visualViewport in concierge.ts). -->
@@ -134,8 +154,8 @@
             //   mid  — 12/13/14-class iPhones, Android, iPad-on-WebGL, and
             //          weak desktops (WebGL fallback / few cores / little RAM):
             //          balanced profile.
-            //   high — 14 Pro/15/16/17 class (shortest side >= 393 CSS px at
-            //          DPR 3 with WebGPU), WebGPU iPads, and normal desktops:
+            //   high — iPhone 12/13/14 class and up (shortest side >= 390 CSS
+            //          px at DPR 3 with WebGPU), WebGPU iPads, and normal desktops:
             //          near-native quality.
             // ?tier=low|mid|high forces a profile for A/B.
             // iPadOS 13+ Safari reports the DESKTOP UA ("Macintosh"), so an
@@ -186,7 +206,7 @@
                 // WebGPU iPad + phones from the 14 Pro class up have the fill
                 // rate for high; other WebGPU phones get the balanced mid.
                 (isIPadOS ? 'high' :
-                    (shortSide >= 393 && window.devicePixelRatio >= 3 && renderer === 'webgpu') ? 'high' : 'mid');
+                    (shortSide >= 390 && window.devicePixelRatio >= 3 && renderer === 'webgpu') ? 'high' : 'mid');
 
             diag('detected: iPad=' + isIPadOS + ' mobile=' + isMobileUA + ' renderer=' + renderer + ' tier=' + tier + ' fillrate=' + fillrate);
 

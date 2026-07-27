@@ -40,7 +40,10 @@ if (!input || !outDir) {
     process.exit(1);
 }
 
-const ST = 'npx --yes @playcanvas/splat-transform';
+// Pin the version: splat-transform v3.x is a breaking rewrite (flags renamed,
+// --decimate is .ply-only, etc.) that silently breaks this pipeline. `npx --yes`
+// without a version fetches @latest, so pin @2.7.1 explicitly.
+const ST = 'npx --yes @playcanvas/splat-transform@2.7.1';
 
 // Fast mode (SI_FAST=1): for scans you've ALREADY cleaned yourself (e.g. floaters
 // removed in SuperSplat). Skips the GPU floater filter (redundant + slow + the

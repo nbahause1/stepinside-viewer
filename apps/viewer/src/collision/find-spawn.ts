@@ -7,6 +7,17 @@ const SEARCH_RADIUS_SQ = SEARCH_RADIUS * SEARCH_RADIUS;
 /** Ray budget when probing for ground/ceiling under or above a candidate column. */
 const RAY_MAX_DIST = 1000;
 
+/**
+ * Hard ceiling on collision queries per spawn search. The lattice can span
+ * millions of cells at a fine voxel resolution; a normal spawn resolves within
+ * a few shells and never approaches this. It only bites the pathological case —
+ * an origin embedded in geometry with NO valid placement in radius — where an
+ * unbounded search would freeze the main thread for seconds. On exhaustion the
+ * search returns whatever it found (usually nothing), and the caller falls back
+ * to the raw camera pose. Keep generous so legitimate searches are unaffected.
+ */
+const MAX_SPAWN_QUERIES = 200_000;
+
 interface SpawnOut {
     x: number;
     y: number;
@@ -45,16 +56,17 @@ const findSphereSpawn = (
 
     let bestDistSq = Infinity;
     let found = false;
+    let queries = 0;
 
-    for (let r = 0; r <= maxCells; r++) {
+    for (let r = 0; r <= maxCells && queries < MAX_SPAWN_QUERIES; r++) {
         const shellMinDistSq = (r * step) * (r * step);
         if (shellMinDistSq >= bestDistSq) break;
 
-        for (let dy = -r; dy <= r; dy++) {
+        for (let dy = -r; dy <= r && queries < MAX_SPAWN_QUERIES; dy++) {
             const absDy = dy < 0 ? -dy : dy;
-            for (let dz = -r; dz <= r; dz++) {
+            for (let dz = -r; dz <= r && queries < MAX_SPAWN_QUERIES; dz++) {
                 const absDz = dz < 0 ? -dz : dz;
-                for (let dx = -r; dx <= r; dx++) {
+                for (let dx = -r; dx <= r && queries < MAX_SPAWN_QUERIES; dx++) {
                     const absDx = dx < 0 ? -dx : dx;
                     // Only cells on the Chebyshev shell of radius r.
                     if (absDx < r && absDy < r && absDz < r) continue;
@@ -66,6 +78,7 @@ const findSphereSpawn = (
                     const cy = oy + dy * step;
                     const cz = oz + dz * step;
 
+                    queries++;
                     if (collision.querySphere(cx, cy, cz, radius, scratchPush)) continue;
 
                     bestDistSq = distSq;
@@ -76,6 +89,10 @@ const findSphereSpawn = (
                 }
             }
         }
+    }
+
+    if (queries >= MAX_SPAWN_QUERIES && !found) {
+        console.warn(`findSphereSpawn: query budget exhausted (${MAX_SPAWN_QUERIES}) with no placement — falling back to raw pose`);
     }
 
     return found;
@@ -130,16 +147,17 @@ const findCylinderSpawn = (
 
     let bestDistSq = Infinity;
     let found = false;
+    let queries = 0;
 
-    for (let r = 0; r <= maxCells; r++) {
+    for (let r = 0; r <= maxCells && queries < MAX_SPAWN_QUERIES; r++) {
         const shellMinDistSq = (r * step) * (r * step);
         if (shellMinDistSq >= bestDistSq) break;
 
-        for (let dy = -r; dy <= r; dy++) {
+        for (let dy = -r; dy <= r && queries < MAX_SPAWN_QUERIES; dy++) {
             const absDy = dy < 0 ? -dy : dy;
-            for (let dz = -r; dz <= r; dz++) {
+            for (let dz = -r; dz <= r && queries < MAX_SPAWN_QUERIES; dz++) {
                 const absDz = dz < 0 ? -dz : dz;
-                for (let dx = -r; dx <= r; dx++) {
+                for (let dx = -r; dx <= r && queries < MAX_SPAWN_QUERIES; dx++) {
                     const absDx = dx < 0 ? -dx : dx;
                     if (absDx < r && absDy < r && absDz < r) continue;
 
@@ -154,6 +172,7 @@ const findCylinderSpawn = (
                     // The footprint loop below will reject candidates whose
                     // center column has no ground support, so no separate
                     // down-ray probe is needed here.
+                    queries++;
                     if (!collision.isFreeAt(cx, cy, cz)) continue;
 
                     // Stage 2/3: fan rays through the xz footprint.
@@ -161,16 +180,17 @@ const findCylinderSpawn = (
                     let ceiling = Infinity;
                     let supported = true;
 
-                    for (let i = -footCells; i <= footCells && supported; i++) {
+                    for (let i = -footCells; i <= footCells && supported && queries < MAX_SPAWN_QUERIES; i++) {
                         const fxOff = i * step;
                         const fxOffSq = fxOff * fxOff;
-                        for (let j = -footCells; j <= footCells; j++) {
+                        for (let j = -footCells; j <= footCells && queries < MAX_SPAWN_QUERIES; j++) {
                             const fzOff = j * step;
                             if (fxOffSq + fzOff * fzOff > radiusSq) continue;
 
                             const fx = cx + fxOff;
                             const fz = cz + fzOff;
 
+                            queries++;
                             const down = collision.queryRay(fx, cy, fz, 0, -1, 0, RAY_MAX_DIST);
                             if (!down) {
                                 supported = false;
@@ -178,10 +198,15 @@ const findCylinderSpawn = (
                             }
                             if (down.y > floor) floor = down.y;
 
+                            queries++;
                             const up = collision.queryRay(fx, cy, fz, 0, 1, 0, RAY_MAX_DIST);
                             if (up && up.y < ceiling) ceiling = up.y;
                         }
                     }
+
+                    // A budget-truncated fan leaves floor/ceiling partial — don't
+                    // record such a candidate; stop and fall back instead.
+                    if (queries >= MAX_SPAWN_QUERIES) break;
 
                     if (!supported) continue;
 
@@ -197,6 +222,10 @@ const findCylinderSpawn = (
                 }
             }
         }
+    }
+
+    if (queries >= MAX_SPAWN_QUERIES && !found) {
+        console.warn(`findCylinderSpawn: query budget exhausted (${MAX_SPAWN_QUERIES}) with no placement — falling back to raw pose`);
     }
 
     return found;

@@ -129,6 +129,36 @@ export async function handleConcierge(
   rawBody: unknown,
   deps: ConciergeDeps,
 ): Promise<ConciergeResult> {
+  // Observability for the paid LLM path: one structured line per request so a
+  // "the concierge is slow" report becomes diagnosable — total vs upstream vs
+  // Overpass ms, whether a tool round happened, token usage (incl. cache_read,
+  // which reveals if the prompt cache is actually firing on Haiku), and the
+  // Anthropic request id for support. Logging must never throw or alter output.
+  const t0 = Date.now();
+  let upstreamMs = 0;
+  let toolRound = false;
+  let overpassMs = 0;
+  let requestId: string | null = null;
+  const propertyId = typeof (rawBody as { propertyId?: unknown })?.propertyId === 'string'
+    ? (rawBody as { propertyId: string }).propertyId
+    : null;
+  const logLLM = (status: number, usage?: unknown, note?: string) => {
+    try {
+      console.log(JSON.stringify({
+        tag: 'concierge',
+        propertyId,
+        status,
+        totalMs: Date.now() - t0,
+        upstreamMs,
+        toolRound,
+        ...(toolRound ? { overpassMs } : {}),
+        ...(note ? { note } : {}),
+        ...(usage ? { usage } : {}),
+        requestId,
+      }));
+    } catch { /* never let logging break a response */ }
+  };
+
   // 1. Rate-limit first, keyed on the client IP (fallback to a shared bucket).
   const rateKey = deps.clientIp || 'unknown';
   const rate = await deps.rateLimiter.check(rateKey);
@@ -236,6 +266,7 @@ export async function handleConcierge(
     },
   };
   try {
+    const c1s = Date.now();
     let message = await client.messages.create({
       model: MODEL,
       max_tokens: MAX_TOKENS,
@@ -244,6 +275,8 @@ export async function handleConcierge(
       ...(tools ? { tools } : {}),
       output_config: outputConfig,
     } as Anthropic.MessageCreateParamsNonStreaming);
+    upstreamMs += Date.now() - c1s;
+    requestId = (message as { _request_id?: string | null })._request_id ?? null;
 
     const usageTotal = {
       input_tokens: message.usage.input_tokens,
@@ -267,9 +300,11 @@ export async function handleConcierge(
         let toolResultContent: string;
         let isError = false;
         try {
+          const ovs = Date.now();
           foundPlace = query.length > 0 || category
             ? await findPlace(query, kb.location, category)
             : null;
+          overpassMs += Date.now() - ovs;
           toolResultContent = foundPlace
             ? JSON.stringify({
                 name: foundPlace.name,
@@ -285,6 +320,8 @@ export async function handleConcierge(
           isError = true;
         }
 
+        toolRound = true;
+        const c2s = Date.now();
         message = await client.messages.create({
           model: MODEL,
           max_tokens: MAX_TOKENS,
@@ -306,6 +343,8 @@ export async function handleConcierge(
           tool_choice: { type: 'none' },
           output_config: outputConfig,
         } as Anthropic.MessageCreateParamsNonStreaming);
+        upstreamMs += Date.now() - c2s;
+        requestId = (message as { _request_id?: string | null })._request_id ?? requestId;
 
         usageTotal.input_tokens += message.usage.input_tokens;
         usageTotal.output_tokens += message.usage.output_tokens;
@@ -318,6 +357,7 @@ export async function handleConcierge(
     // unsafe answer. Default to the German fallback as the property's primary
     // language; the system prompt otherwise handles per-language fallbacks.
     if (message.stop_reason === 'refusal') {
+      logLLM(200, usageTotal, 'refusal');
       return {
         status: 200,
         body: { answer: kb.fallback.de, focus: null, mapPoi: null, mapPlace: null, showDimensions: false, fallback: true },
@@ -337,6 +377,7 @@ export async function handleConcierge(
     const answeredFromPlace = foundPlace !== null && !parsed.fallback && !usedServerFallback &&
       !parsed.showDimensions;
 
+    logLLM(200, usageTotal);
     return {
       status: 200,
       body: {
@@ -367,6 +408,7 @@ export async function handleConcierge(
       },
     };
   } catch (err) {
+    logLLM(0, undefined, err instanceof Anthropic.APIError ? `api_${err.status}` : 'error');
     // 6. Typed error mapping. Log BEFORE mapping — a broken API key, a model
     //    deprecation and a network timeout must be distinguishable in the
     //    worker logs (the visitor always just sees "temporarily unavailable").

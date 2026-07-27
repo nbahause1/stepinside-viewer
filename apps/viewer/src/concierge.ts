@@ -489,14 +489,15 @@ const initConcierge = (global: Global) => {
                     });
                 } else if (data.showDimensions === true && !poi &&
                     Array.isArray(settings.rooms) && settings.rooms.length > 0 &&
-                    state.cameraMode !== 'aerial') {
-                    // Size/dimension answer: glide up to the bird's-eye view,
-                    // where the authored room dimensions are overlaid — the
-                    // visitor reads the numbers in space while the chat cites
-                    // them. Camera focus and map win over this (they answer
-                    // more specific intents); no-op when already up there or
-                    // when the scan has no authored dimensions.
-                    events.fire('inputEvent', 'aerial');
+                    state.cameraMode !== 'dollhouse') {
+                    // Size/dimension answer: rise to the DOLLHOUSE view, where the
+                    // authored room dimensions are overlaid (room-dimensions.ts) —
+                    // the bird's-eye/drone mode deliberately shows no dimensions
+                    // any more. The visitor reads the numbers in space while the
+                    // chat cites them. Camera focus and map win over this (more
+                    // specific intents); no-op when already in dollhouse or when
+                    // the scan has no authored dimensions.
+                    events.fire('inputEvent', 'dollhouse');
                 }
                 userTurns += 1;
                 if (data.fallback === true && hasContact && !fallbackCardShown && !contactCardJustShown()) {
@@ -579,8 +580,9 @@ const initConcierge = (global: Global) => {
             });
         } else if (action.type === 'dimensions' &&
             Array.isArray(settings.rooms) && settings.rooms.length > 0 &&
-            state.cameraMode !== 'aerial') {
-            events.fire('inputEvent', 'aerial');
+            state.cameraMode !== 'dollhouse') {
+            // dimensions live in the dollhouse view now (see desktop panel above)
+            events.fire('inputEvent', 'dollhouse');
         }
     };
     const runWhenReady = () => {

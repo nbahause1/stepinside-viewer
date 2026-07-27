@@ -31,7 +31,7 @@ import { initControls } from './controls';
 import { observe } from './core/observe';
 import { initInquiry } from './inquiry';
 import { initLocalization } from './localization';
-import { importSettings } from './settings';
+import { importSettingsSafe } from './settings';
 import { initShare } from './share';
 import { initStaging } from './staging';
 import { initSurvey } from './survey';
@@ -168,6 +168,53 @@ const createApp = async (canvas: HTMLCanvasElement, config: Config) => {
     // crossorigin attribute and WebGL rejects it with SecurityError)
     (app.loader.getHandler('texture') as TextureHandler).imgParser.crossOrigin = 'anonymous';
 
+    // GPU context-loss recovery. With autoRender off (render-on-demand), a lost
+    // WebGL/WebGPU context otherwise leaves a permanently black canvas: nothing
+    // repaints even after the browser restores it. The engine preventDefaults
+    // the WebGL context-loss (so it CAN restore) and fires device events; we
+    // drive a full-screen overlay from them so the visitor is never stuck at a
+    // black frame, and force a repaint once the context is back.
+    {
+        let overlay: HTMLDivElement | null = null;
+        const showOverlay = () => {
+            if (overlay) return;
+            overlay = document.createElement('div');
+            overlay.setAttribute('role', 'alert');
+            Object.assign(overlay.style, {
+                position: 'fixed', inset: '0', zIndex: '99999',
+                display: 'flex', flexDirection: 'column', gap: '18px',
+                alignItems: 'center', justifyContent: 'center', textAlign: 'center',
+                padding: '24px', background: 'rgba(12,12,14,0.9)', color: '#f5f5f7',
+                font: '500 15px/1.5 -apple-system, system-ui, sans-serif'
+            });
+            const msg = document.createElement('div');
+            msg.textContent = 'Die 3D-Ansicht wurde kurz unterbrochen und wird wiederhergestellt …';
+            const btn = document.createElement('button');
+            btn.textContent = 'Neu laden';
+            Object.assign(btn.style, {
+                padding: '10px 22px', borderRadius: '999px', border: '0',
+                background: '#f5f5f7', color: '#0c0c0e', font: '600 14px system-ui, sans-serif',
+                cursor: 'pointer'
+            });
+            btn.addEventListener('click', () => window.location.reload());
+            overlay.append(msg, btn);
+            document.body.appendChild(overlay);
+        };
+        const hideOverlay = () => { overlay?.remove(); overlay = null; };
+
+        device.on('devicelost', showOverlay);
+        device.on('devicerestored', () => { hideOverlay(); app.renderNextFrame = true; });
+
+        // WebGPU loss is not auto-restored; surface it via the underlying
+        // GPUDevice.lost promise (best-effort — internal handle, guarded).
+        try {
+            const wgpu = (device as unknown as { wgpu?: { lost?: Promise<{ reason?: string }> } }).wgpu;
+            wgpu?.lost?.then((info) => {
+                if (info?.reason !== 'destroyed') showOverlay(); // 'destroyed' = intentional teardown
+            });
+        } catch { /* best-effort; device events above are the primary path */ }
+    }
+
     // Create entity hierarchy
     const cameraRoot = new Entity('camera root');
     app.root.addChild(cameraRoot);
@@ -194,6 +241,13 @@ const initCanvas = (global: Global) => {
     const { canvas } = app.graphicsDevice;
     // Effective touch/constrained flag (iPad-aware; see isMobile).
     const mobile = isMobile(config);
+
+    // In-motion render-scale override for A/B tuning on-device (?wscale=1 =
+    // "permanently sharp": full res while BOTH looking around and walking).
+    // The reduced-while-moving scale is the biggest in-motion softness; this
+    // param overrides it wholesale so it can be tuned on a real device. (0,1].
+    const wscaleParam = Number(new URL(location.href).searchParams.get('wscale'));
+    const walkScaleOverride = Number.isFinite(wscaleParam) && wscaleParam > 0 && wscaleParam <= 1 ? wscaleParam : null;
 
     // maximum pixel dimension we will allow along the shortest screen dimension.
     // WebGL (Safari) can't GPU-sort splats and is fill-rate bound on Retina, so
@@ -267,17 +321,21 @@ const initCanvas = (global: Global) => {
         // so when the POSITION is stable (rotation only, no walking) capable
         // phones render at a higher moving scale. Walking through space keeps
         // the hard 0.5x (streaming + fill), and the low tier always stays 0.5x
-        // to protect smoothness. Desktops NEVER get the moving-scale trick any
-        // more — on fillrate-limited Macs the resolution drop while the camera
-        // moves (and the snap back on settle) reads as visible flicker/blur,
-        // which is worse than the fill-rate cost it saves (verified on the
-        // Studio-11 review: 'nofillrate' was the fix). The fillrate profile
-        // keeps its other protections (no post-fx, overdraw culling); desktops
-        // use the static performanceMode scale only.
-        const movingScale = state.positionStable ?
-            (state.deviceTier === 'high' ? 0.85 : (state.deviceTier === 'mid' ? 0.7 : 0.5)) :
-            0.5;
-        const s = mobile ?
+        // to protect smoothness. Fill-rate-limited desktops (Macs — TBDR GPUs,
+        // phone-like fill-rate ceilings) borrow the same trick: reduced scale
+        // only while the camera moves, full resolution the moment it settles.
+        // Other desktops keep the static performanceMode scale.
+        // High-tier devices (iPhone 12/13/14 + up on WebGPU, WebGPU iPads,
+        // desktops): PERMANENTLY SHARP — full render scale even while moving,
+        // both looking around AND walking. It's the premium look the product
+        // wants and A14+ has the fill-rate for it; the runtime tier-demotion
+        // drops them to mid if they ever thermal-throttle, so smoothness holds.
+        // mid/low keep the reduced-while-moving scale to protect FPS (rotating
+        // gets the milder cut, walking the harder). ?wscale= overrides all.
+        const movingScale = walkScaleOverride ?? (
+            state.deviceTier === 'high' ? 1.0 :
+                state.positionStable ? (state.deviceTier === 'mid' ? 0.7 : 0.5) : 0.5);
+        const s = mobile || config.fillrate ?
             (global.cameraMoving ? movingScale : 1.0) :
             (state.performanceMode ? 0.5 : 1.0);
         const w = Math.ceil(deviceSize.width * s);
@@ -382,7 +440,7 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
 
     const global: Global = {
         app,
-        settings: importSettings(settingsJson),
+        settings: importSettingsSafe(settingsJson),
         config,
         state,
         events,

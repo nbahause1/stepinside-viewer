@@ -1,5 +1,11 @@
 name = "concierge-api"
 main = "src/worker.ts"
+# Pin the production Cloudflare account explicitly. The deploy account
+# (haukecux19@gmail.com) has access to MORE than one account; without this,
+# a non-interactive `wrangler deploy` can pick the wrong one and fail with a
+# 10000 auth error / "KV namespace not found". This is the account that owns
+# innsyn-analytics (D1) + RATE_LIMIT_KV (see bindings below).
+account_id = "78f5f61b0df30eff8533ff5cc6ec3eb7"
 compatibility_date = "2026-06-01"
 compatibility_flags = ["nodejs_compat"]
 

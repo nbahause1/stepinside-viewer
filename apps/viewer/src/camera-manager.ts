@@ -445,8 +445,18 @@ class CameraManager {
                         events.fire('dollhouse:close');
                     } else {
                         // enter: rise to the model vantage while dollhouse.ts
-                        // sweeps the ceiling open in sync. Reached from the drone
-                        // row (controls.ts) — the drone is the overview hub.
+                        // sweeps the ceiling open in sync. Usually reached from the
+                        // drone row (controls.ts) — then preAerial* already holds
+                        // the walk pose captured on the walk->drone step, and the
+                        // dive-back-down uses it. But the concierge opens dollhouse
+                        // DIRECTLY (walk -> dollhouse, for a room-dimensions answer),
+                        // so capture the return pose here too when we're NOT coming
+                        // from the drone — otherwise the exit dive lands on a stale
+                        // pose.
+                        if (state.cameraMode !== 'aerial') {
+                            preAerialMode = state.cameraMode;
+                            preAerialCamera.copy(this.camera);
+                        }
                         events.fire('orbitTarget:clear');
                         sourcesByMode[state.cameraMode]?.cancel();
                         state.cameraMode = 'dollhouse';
