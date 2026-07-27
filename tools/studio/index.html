@@ -56,6 +56,23 @@
   .done .ok { color: #46d189; font-weight: 600; font-size: 14px; }
   .done a { background: #34c778; color: #04140b; text-decoration: none; padding: 9px 18px; border-radius: 10px; font-weight: 700; font-size: 13px; }
   .hint { color: #6b7080; font-size: 11.5px; margin-top: 20px; text-align: center; }
+  .checklist { margin-top: 14px; display: none; }
+  .checklist.show { display: block; }
+  .checklist h2 { font-size: 13px; font-weight: 600; color: #8b90a0; text-transform: uppercase; letter-spacing: .06em; margin-bottom: 8px; }
+  .checklist .item {
+    display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border-radius: 10px;
+    background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.06); margin-bottom: 6px; font-size: 12.5px;
+  }
+  .checklist .item .dot { flex: none; width: 8px; height: 8px; border-radius: 50%; margin-top: 5px; background: #6b7080; }
+  .checklist .item.blocking .dot { background: #f1734f; }
+  .checklist .item .what { font-weight: 600; }
+  .checklist .item .why { color: #8b90a0; margin-top: 2px; }
+  .author-row { margin-top: 12px; display: flex; gap: 10px; }
+  .author-row a {
+    flex: 1; text-align: center; background: rgba(110,168,254,.15); border: 1px solid rgba(110,168,254,.4);
+    color: #9dbdfb; text-decoration: none; padding: 10px 14px; border-radius: 10px; font-weight: 600; font-size: 13px;
+  }
+  .author-row a:hover { background: rgba(110,168,254,.25); }
 </style>
 </head>
 <body>
@@ -79,6 +96,14 @@
     <div class="done" id="done">
       <span class="ok">Fertig — dein Produkt ist bereit.</span>
       <a id="view" href="#" target="_blank">Ansehen →</a>
+    </div>
+
+    <div class="checklist" id="checklist">
+      <div class="author-row">
+        <a id="authorLink" href="#" target="_blank">✏️ Maße &amp; Highlights einzeichnen</a>
+      </div>
+      <h2 style="margin-top:16px">Vor Go-Live noch offen</h2>
+      <div id="checkItems"></div>
     </div>
 
     <div class="hint">Verarbeitung dauert je nach Scangröße einige Minuten (Floater, Kompression, Voxel, Geometrie).</div>
@@ -106,6 +131,7 @@
 
   go.onclick = async () => {
     go.disabled = true; done.classList.remove('show'); log.textContent = '';
+    $('checklist').classList.remove('show');   // a previous run's items must not survive into this one
     const id = slug(pid.value);
     line('Lade Scan hoch …', true);
     try {
@@ -120,9 +146,34 @@
         const { previewUrl } = JSON.parse(e.data);
         line('✓ Fertig.', true);
         view.href = previewUrl; done.classList.add('show'); es.close(); go.disabled = false;
+        showChecklist(id, previewUrl);
       });
     } catch (err) { line('Fehler: ' + err.message, true); go.disabled = false; }
   };
+
+  // Post-run checklist: read the pipeline's needs-config.json (what geometry
+  // couldn't derive) and surface it right here, plus the author-mode link
+  // (&author) where Maße + Highlights are drawn directly in the viewer.
+  async function showChecklist(id, previewUrl) {
+    const box = $('checklist'), items = $('checkItems'), authorLink = $('authorLink');
+    authorLink.href = previewUrl + '&author';
+    items.textContent = '';
+    try {
+      const res = await fetch(`/out/${id}/v1/needs-config.json`);
+      if (res.ok) {
+        const { items: list } = await res.json();
+        for (const it of (list || [])) {
+          const div = document.createElement('div');
+          div.className = 'item' + (it.blocking ? ' blocking' : '');
+          div.innerHTML = `<span class="dot"></span><div><div class="what"></div><div class="why"></div></div>`;
+          div.querySelector('.what').textContent = it.field;
+          div.querySelector('.why').textContent = it.why;
+          items.appendChild(div);
+        }
+      }
+    } catch { /* checklist is best-effort; the author link works regardless */ }
+    box.classList.add('show');
+  }
 </script>
 </body>
 </html>

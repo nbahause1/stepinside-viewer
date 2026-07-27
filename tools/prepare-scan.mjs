@@ -61,7 +61,13 @@ const run = (label, cmd) => {
 const mb = p => `${(statSync(p).size / 1e6).toFixed(1)} MB`;
 
 // -- 1. prune -------------------------------------------------------------
-const pruned = join(tmp, 'pruned.compressed.ply');
+// Intermediates are PLAIN .ply on purpose: .compressed.ply quantises
+// positions/attributes per 256-splat chunk, and the final SOG encode is a
+// second lossy pass — that double round-trip visibly degraded a re-encoded
+// .sog vs its original (verified A/B on the Studio-11 scan). Uncompressed
+// intermediates cost a few hundred MB of tmp disk and keep the only lossy
+// step the final SOG encode itself.
+const pruned = join(tmp, 'pruned.ply');
 const floaters = FAST ? '' : '--filter-floaters ';
 run(`1/5 prune (nan${FAST ? '' : ' + floaters'} + opacity)`,
     `${ST} -w "${input}" --filter-nan ${floaters}-V opacity,gt,0.02 "${pruned}"`);
@@ -69,7 +75,7 @@ run(`1/5 prune (nan${FAST ? '' : ' + floaters'} + opacity)`,
 // -- 2. LODs --------------------------------------------------------------
 const lods = [null];
 for (const [i, pct] of [[1, '50%'], [2, '25%'], [3, '10%']]) {
-    const f = join(tmp, `lod${i}.compressed.ply`);
+    const f = join(tmp, `lod${i}.ply`);
     run(`2/5 decimate LOD${i} (${pct})`, `${ST} -w -q "${pruned}" -F ${pct} "${f}"`);
     lods[i] = f;
 }

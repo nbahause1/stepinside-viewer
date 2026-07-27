@@ -86,6 +86,10 @@ console.log(`\n============================================================`);
 console.log(`✓ ONBOARDING COMPLETE in ${mins} min`);
 console.log(`============================================================`);
 console.log(`Asset set:   ${outDir}`);
+console.log(`\n⚠ NEEDS-CONFIG: ${join(outDir, 'NEEDS-CONFIG.md')}`);
+console.log(`  Geometry is auto-derived; per-property wiring is NOT. Before go-live:`);
+console.log(`  Leads misroute to the global inbox until you register this property (D1 write):`);
+console.log(`    cd apps/concierge-api && node scripts/register-property.mjs ${propertyId} "<Label>" <owner-email> <https-webhook-url>`);
 if (noUpload) {
     console.log(`\nNot uploaded (--no-upload). Verify locally, then:`);
     console.log(`  node tools/upload-scan.mjs ${propertyId} ${version} ${outDir}`);

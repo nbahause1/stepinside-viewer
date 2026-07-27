@@ -508,6 +508,15 @@ class Viewer {
                 }).catch(() => { /* authoring-only, never break the viewer */ });
             }
 
+            // Studio authoring mode (?author) — Maße + Highlights einzeichnen,
+            // saved via the Studio server. Same dynamic-import pattern: never
+            // reaches the visitor bundle.
+            if (config.author) {
+                import('./author').then(({ initAuthor }) => {
+                    initAuthor(global, collision ?? null);
+                }).catch(() => { /* authoring-only, never break the viewer */ });
+            }
+
             // verify the scan is at true metric scale (warns if mis-scaled, so a
             // bad scan is caught before its measurements/floor plan mislead anyone)
             verifyScale(global);

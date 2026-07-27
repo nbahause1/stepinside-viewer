@@ -267,14 +267,17 @@ const initCanvas = (global: Global) => {
         // so when the POSITION is stable (rotation only, no walking) capable
         // phones render at a higher moving scale. Walking through space keeps
         // the hard 0.5x (streaming + fill), and the low tier always stays 0.5x
-        // to protect smoothness. Fill-rate-limited desktops (Macs — TBDR GPUs,
-        // phone-like fill-rate ceilings) borrow the same trick: reduced scale
-        // only while the camera moves, full resolution the moment it settles.
-        // Other desktops keep the static performanceMode scale.
+        // to protect smoothness. Desktops NEVER get the moving-scale trick any
+        // more — on fillrate-limited Macs the resolution drop while the camera
+        // moves (and the snap back on settle) reads as visible flicker/blur,
+        // which is worse than the fill-rate cost it saves (verified on the
+        // Studio-11 review: 'nofillrate' was the fix). The fillrate profile
+        // keeps its other protections (no post-fx, overdraw culling); desktops
+        // use the static performanceMode scale only.
         const movingScale = state.positionStable ?
             (state.deviceTier === 'high' ? 0.85 : (state.deviceTier === 'mid' ? 0.7 : 0.5)) :
             0.5;
-        const s = mobile || config.fillrate ?
+        const s = mobile ?
             (global.cameraMoving ? movingScale : 1.0) :
             (state.performanceMode ? 0.5 : 1.0);
         const w = Math.ceil(deviceSize.width * s);

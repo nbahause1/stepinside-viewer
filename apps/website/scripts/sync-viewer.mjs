@@ -19,7 +19,7 @@ if (process.argv.includes('--pre')) {
   let removed = 0;
   if (existsSync(src)) {
     for (const f of readdirSync(src)) {
-      if (/^(index-|tour-generator-|maplibre-gl-).*\.js(\.map)?$/.test(f)) {
+      if (/^(index-|tour-generator-|author-|maplibre-gl-).*\.js(\.map)?$/.test(f)) {
         rmSync(join(src, f));
         removed++;
       }
@@ -33,7 +33,7 @@ mkdirSync(destFonts, { recursive: true });
 
 // drop stale hashed chunks
 for (const f of readdirSync(dest)) {
-  if (/^(index-|tour-generator-|maplibre-gl-).*\.js$/.test(f)) {
+  if (/^(index-|tour-generator-|author-|maplibre-gl-).*\.js$/.test(f)) {
     rmSync(join(dest, f));
   }
 }
@@ -45,7 +45,7 @@ for (const f of readdirSync(src)) {
     f === 'chat.html' ||  // standalone concierge chat page (phone handoff)
     f === 'door-open.mp4' ||  // arrival film behind the boot-splash loader
     f === 'door-open-poster.jpg' ||  // film poster (iOS low-power: autoplay refused -> element renders black without it)
-    /^(index-|tour-generator-|maplibre-gl-).*\.js$/.test(f) ||
+    /^(index-|tour-generator-|author-|maplibre-gl-).*\.js$/.test(f) ||
     f === 'settings.json';
   if (isArtifact) {
     copyFileSync(join(src, f), join(dest, f));

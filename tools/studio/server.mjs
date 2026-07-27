@@ -13,9 +13,9 @@
 // preview works without any cloud step. (Upload to R2 stays the separate,
 // deliberate `tools/upload-scan.mjs` step.)
 import http from 'node:http';
-import { createWriteStream, createReadStream, mkdirSync, existsSync, statSync } from 'node:fs';
+import { createWriteStream, createReadStream, mkdirSync, existsSync, statSync, renameSync, writeFileSync, readFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
-import { join, dirname, resolve, extname, normalize } from 'node:path';
+import { join, dirname, resolve, extname, normalize, sep } from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
@@ -48,14 +48,15 @@ const MIME = {
     '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.mjs': 'text/javascript',
     '.css': 'text/css', '.json': 'application/json', '.webp': 'image/webp', '.png': 'image/png',
     '.svg': 'image/svg+xml', '.wasm': 'application/wasm', '.woff2': 'font/woff2',
-    '.sog': 'application/octet-stream', '.bin': 'application/octet-stream'
+    '.sog': 'application/octet-stream', '.bin': 'application/octet-stream',
+    '.md': 'text/plain; charset=utf-8'
 };
 const mime = p => MIME[extname(p).toLowerCase()] || 'application/octet-stream';
 
 // Serve a file from an allowed root, blocking path traversal.
 const serveFile = (res, root, relPath) => {
     const full = normalize(join(root, relPath));
-    if (!full.startsWith(root) || !existsSync(full) || !statSync(full).isFile()) {
+    if (!full.startsWith(root + sep) || !existsSync(full) || !statSync(full).isFile()) {
         res.writeHead(404).end('not found');
         return;
     }
@@ -116,7 +117,11 @@ const server = http.createServer(async (req, res) => {
                 return;
             }
             const base = `/out/${pid}/v1`;
-            const previewUrl = `/viewer/?assets=${base}&settings=${base}/settings.json`;
+            // tier=high + nofillrate: the Studio preview is for QUALITY review on
+            // a strong local machine — force full resolution (the Mac fillrate
+            // profile otherwise drops resolution while moving, which reads as
+            // flicker/blur). Visitor devices keep their adaptive defaults.
+            const previewUrl = `/viewer/?assets=${base}&settings=${base}/settings.json&tier=high&nofillrate`;
 
             // STAGE: pre-generate the "Möbliert sehen" stills headless — capture
             // the aerial frame from the real viewer, auto-detect furnished, empty
@@ -135,6 +140,74 @@ const server = http.createServer(async (req, res) => {
             });
         });
         req.on('close', () => { try { child.kill(); } catch {} try { staging?.kill(); } catch {} });
+        return;
+    }
+
+    // --- save-settings: the viewer's ?author mode posts authored rooms /
+    // annotations here; they are merged into the asset set's settings.json.
+    // Replace-array semantics: the client always sends the FULL desired array
+    // (it starts from the currently-loaded settings), so add/remove both work
+    // and a re-save is idempotent. Atomic write (tmp + rename) so a crash can
+    // never leave a half-written settings.json behind.
+    if (req.method === 'POST' && path === '/save-settings') {
+        const chunks = [];
+        req.on('data', c => chunks.push(c));
+        req.on('end', () => {
+            try {
+                const body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+                const { pid, version } = body;
+                if (!PID_RE.test(pid || '') || !/^v\d+$/.test(version || '')) {
+                    res.writeHead(400).end('bad pid/version');
+                    return;
+                }
+                const settingsPath = normalize(join(OUTROOT, pid, version, 'settings.json'));
+                if (!settingsPath.startsWith(OUTROOT + sep) || !existsSync(settingsPath)) {
+                    res.writeHead(404).end('no such asset set');
+                    return;
+                }
+                // Structural validation BEFORE writing: a malformed entry that
+                // slips into settings.json would fail the viewer's own boot-time
+                // validate and brick the preview. 400 here beats debugging there.
+                const isNum = n => typeof n === 'number' && Number.isFinite(n);
+                const isVec3 = v => Array.isArray(v) && v.length === 3 && v.every(isNum);
+                const isLine = l => l && isVec3(l.a) && isVec3(l.b);
+                // name/center/area are optional: the pipeline's nameless
+                // dollhouse-footprint entry has only lines[] and must round-trip.
+                const validRoom = r => r && Array.isArray(r.lines) && r.lines.length > 0 && r.lines.every(isLine) &&
+                    (r.name === undefined || typeof r.name === 'string') &&
+                    (r.center === undefined || isVec3(r.center)) &&
+                    (r.area === undefined || isNum(r.area));
+                const validAnn = a => a && isVec3(a.position) &&
+                    typeof a.title === 'string' && a.title.length > 0 &&
+                    typeof a.text === 'string' &&
+                    a.camera && a.camera.initial &&
+                    isVec3(a.camera.initial.position) && isVec3(a.camera.initial.target) &&
+                    isNum(a.camera.initial.fov);
+                const roomsOk = body.rooms === undefined || (Array.isArray(body.rooms) && body.rooms.every(validRoom));
+                const annsOk = body.annotations === undefined || (Array.isArray(body.annotations) && body.annotations.every(validAnn));
+                if (!roomsOk || !annsOk) {
+                    res.writeHead(400).end(!roomsOk ? 'invalid rooms entry' : 'invalid annotations entry');
+                    return;
+                }
+
+                const settings = JSON.parse(readFileSync(settingsPath, 'utf8'));
+                if (Array.isArray(body.rooms)) settings.rooms = body.rooms;
+                if (Array.isArray(body.annotations)) {
+                    settings.annotations = body.annotations;
+                    // annotationMarkers stays UNTOUCHED — the live product runs
+                    // 'hidden' (no numbered dots; highlights surface via the
+                    // ‹ › navigator + proximity/stand-still tooltips). Authored
+                    // scans must behave exactly like the product.
+                }
+                const tmp = `${settingsPath}.tmp`;
+                writeFileSync(tmp, JSON.stringify(settings, null, 2));
+                renameSync(tmp, settingsPath);
+                res.writeHead(200, { 'Content-Type': 'application/json' })
+                    .end(JSON.stringify({ ok: true, rooms: settings.rooms?.length ?? 0, annotations: settings.annotations?.length ?? 0 }));
+            } catch (err) {
+                res.writeHead(400).end(`save failed: ${err.message}`);
+            }
+        });
         return;
     }
 

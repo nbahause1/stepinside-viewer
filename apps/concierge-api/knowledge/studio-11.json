@@ -1,0 +1,73 @@
+{
+  "propertyId": "studio-11",
+  "displayName": "Studio 11 – helle Wohnung mit offenem Wohn- und Essbereich",
+  "context": "kauf",
+  "rooms": [
+    {
+      "id": "wohnzimmer",
+      "label": { "de": "Wohnzimmer", "en": "Living room" }
+    },
+    {
+      "id": "essbereich",
+      "label": { "de": "Essbereich", "en": "Dining area" }
+    },
+    {
+      "id": "kueche",
+      "label": { "de": "Küche", "en": "Kitchen" }
+    }
+  ],
+  "facts": [
+    {
+      "id": "demo",
+      "topic": "basics",
+      "rooms": [],
+      "text": "Dieser Rundgang ist eine Demonstration von innsyn: eine reale Wohnung, aufgenommen in einem Termin vor Ort. Besucher gehen frei durch die Räume; jeder Blickwinkel ist echt, nichts ist nachmodelliert. Fragen zu Kaufpreis oder Verfügbarkeit stellen sich hier nicht, es geht um die Qualität der Aufnahme."
+    },
+    {
+      "id": "layout",
+      "topic": "basics",
+      "rooms": [],
+      "text": "Die Wohnung ist hell und offen geschnitten: Wohnzimmer und Essbereich gehen ineinander über, die kompakte Küche liegt direkt am Essbereich. Durchgehend Fischgrätparkett, weiße Wände mit Wandvertäfelung."
+    },
+    {
+      "id": "ceiling",
+      "topic": "dimensions",
+      "rooms": [],
+      "text": "Die Raumhöhe beträgt ca. 2,50 m, im kalibrierten 3D-Scan nachgemessen."
+    },
+    {
+      "id": "wohnzimmer-desc",
+      "topic": "dimensions",
+      "rooms": ["wohnzimmer"],
+      "text": "Das Wohnzimmer ist der größte Raum der Wohnung, die freie Fläche misst im kalibrierten Scan rund 3,5 m × 5,4 m. Viel Tageslicht durch bodentiefe Vorhangfenster, Sitzbereich mit Blick zum Essbereich."
+    },
+    {
+      "id": "essbereich-desc",
+      "topic": "basics",
+      "rooms": ["essbereich"],
+      "text": "Der offene Essbereich liegt zwischen Küche und Wohnzimmer, mit Esstisch unter einer Pendelleuchte. Kurze Wege in beide Richtungen."
+    },
+    {
+      "id": "kueche-desc",
+      "topic": "dimensions",
+      "rooms": ["kueche"],
+      "text": "Die Küche ist kompakt geschnitten, die freie Fläche misst rund 2,4 m × 2,3 m. Klare Aufteilung, alles in Griffweite, direkt am Essbereich."
+    },
+    {
+      "id": "measure-tool",
+      "topic": "features",
+      "rooms": [],
+      "text": "Im Rundgang kann jeder selbst messen: das Lineal-Werkzeug unten in der Leiste misst die Distanz zwischen zwei angetippten Punkten. Der Scan ist metrisch kalibriert, die Werte sind maßstabsgetreu."
+    },
+    {
+      "id": "innsyn",
+      "topic": "contact",
+      "rooms": [],
+      "text": "innsyn erstellt frei begehbare 3D-Rundgänge für Immobilien. Jede Aufnahme entsteht in einem Termin vor Ort und gehört danach dem Mandat des Maklers, für Exposé, Website und Eigentümergespräch. Kontakt über myinnsyn.de."
+    }
+  ],
+  "fallback": {
+    "de": "Das gibt diese Demo-Aufnahme nicht her. Was ich Ihnen zeigen kann: die Räume selbst, die gemessenen Maße und wie innsyn arbeitet. Alles Weitere gern über myinnsyn.de.",
+    "en": "That's beyond what this demo capture covers. What I can show you: the rooms themselves, the measured dimensions, and how innsyn works. For anything else, myinnsyn.de is the place."
+  }
+}

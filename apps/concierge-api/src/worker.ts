@@ -26,6 +26,7 @@
  */
 import exampleFewo from '../knowledge/example-fewo.json';
 import altbauEppendorf from '../knowledge/altbau-eppendorf.json';
+import studio11 from '../knowledge/studio-11.json';
 // Reference furniture photos, bundled as raw bytes via the wrangler.toml Data
 // rule (Workers has no filesystem). Keyed as `${style.dir}/${file}` below.
 import set1Sofa from '../staging-refs/set1-vitra-klassiker/anagram-sofa.jpg';
@@ -103,6 +104,7 @@ interface Env {
 const KNOWLEDGE: Record<string, KnowledgeBase> = {
   'example-fewo': validateKnowledge(exampleFewo),
   'altbau-eppendorf': validateKnowledge(altbauEppendorf),
+  'studio-11': validateKnowledge(studio11),
 };
 
 function loadKnowledge(propertyId: string): KnowledgeBase | null {

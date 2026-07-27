@@ -220,6 +220,9 @@
                 // dev helpers (window.viewer, captureView, debug panel) are only
                 // exposed for the authoring/tooling entry points, never for visitors
                 devtools: ['debug', 'scout', 'record'].some(p => url.searchParams.has(p)),
+                // Studio authoring mode (Maße + Highlights einzeichnen, saves
+                // via the Studio server) — its own flag, same never-for-visitors rule
+                author: url.searchParams.has('author'),
             };
 
             window.sse = {

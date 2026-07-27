@@ -9,6 +9,18 @@
       "autoPort": true
     },
     {
+      "name": "tour-preview",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["serve", "apps/website/public", "-l", "3000", "-C"],
+      "port": 3000
+    },
+    {
+      "name": "studio",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["tools/studio/server.mjs"],
+      "port": 4545
+    },
+    {
       "name": "root-static",
       "runtimeExecutable": "npx",
       "runtimeArgs": ["serve", ".", "-l", "4600", "-C"],
