@@ -1553,7 +1553,7 @@
 
             // Kick off loading the app bundle immediately (as eagerly as a static
             // import would) but keep the handle so a failure stays catchable.
-            const appModulePromise = import('./index.js');
+            const appModulePromise = import('./index.js?v=2');
 
             // Fatal-error UX: hide the loading UI and show the glass error card.
             // Covers (a) scene/content load failures (signalled via the
