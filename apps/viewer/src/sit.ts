@@ -38,8 +38,10 @@ type Phase = 'idle' | 'turn' | 'descend' | 'settle' | 'seated' | 'stand';
 /** eye height above the SEAT surface when seated (m) */
 const SEATED_EYE_ABOVE_SEAT = 0.62;
 
-/** standing eye height above floor (matches the walk rig) */
-const STANDING_EYE = 1.6;
+/** walk rig eye height above ground: hoverHeight (0.2) + eyeHeight (1.3).
+ *  MUST match walk-controller.ts — the stand-up ends exactly here so the
+ *  hand-back to walking is seamless (no height pop). */
+const WALK_EYE = 1.5;
 
 /** where the body stands before sitting: this far in front of the seat edge */
 const STAND_AHEAD = 0.42;
@@ -90,6 +92,7 @@ const initSit = (global: Global, collision: Collision | null, getCM: () => Camer
     let sitYaw = 0;                     // yaw of the seated person
     let turnDir = 1;                    // over which shoulder the body turns
     let breathe = 0;                    // breathing clock while seated
+    let walkEyeY0 = 0;                  // the walk rig's eye height when the sit began (truth + sanity bound)
 
     const tmp = new Vec3();
 
@@ -138,6 +141,7 @@ const initSit = (global: Global, collision: Collision | null, getCM: () => Camer
         // the walk rig is grounded RIGHT NOW — its eye height is the truth
         // (a fresh floor probe can hit the seat itself and mis-ground)
         standPos.y = startPos.y;
+        walkEyeY0 = startPos.y;
         seatedPos.set(sp.x, sp.y + SEATED_EYE_ABOVE_SEAT, sp.z);
         sitYaw = s.yaw;
         // turn over the shoulder that gives the shorter way
@@ -226,8 +230,9 @@ const initSit = (global: Global, collision: Collision | null, getCM: () => Camer
                 const k = clamp01(t / D);
                 const drop = easeInOut(k);
                 tmp.lerp(standPos, seatedPos, drop);
-                // contact overshoot: sink 18mm past, recovered in 'settle'
-                if (k > 0.92) tmp.y -= 0.018 * easeOut((k - 0.92) / 0.08);
+                // contact: a soft 10mm give as the weight lands, recovered in
+                // 'settle' — spread over the last 15% so it never reads as a jolt
+                if (k > 0.85) tmp.y -= 0.010 * easeInOut((k - 0.85) / 0.15);
                 // torso lean → gaze dips mid-descent, stabilises up at the end
                 const lean = Math.sin(clamp01(k * 1.25) * Math.PI);
                 let pitch = -8 - 7 * lean;                     // to ~-15° mid
@@ -246,12 +251,12 @@ const initSit = (global: Global, collision: Collision | null, getCM: () => Camer
                 const k = clamp01(t / D);
                 const rad = sitYaw * math.DEG_TO_RAD;
                 tmp.copy(seatedPos);
-                tmp.y -= 0.018 * (1 - easeOut(Math.min(1, k * 1.6)));
+                tmp.y -= 0.010 * (1 - easeOut(Math.min(1, k * 1.6)));
                 const shuffle = Math.sin(clamp01(k * 1.4) * Math.PI) * 0.012;
                 tmp.x -= -Math.sin(rad) * shuffle;             // a touch backward
                 tmp.z -= -Math.cos(rad) * shuffle;
                 const pitch = -3 + Math.sin(k * Math.PI * 2) * 0.7;  // final micro-nod
-                const yaw = sitYaw + (1 - k) * 1.2 * turnDir;
+                const yaw = sitYaw + Math.sin(k * Math.PI) * 0.6 * turnDir;
                 setPose(tmp, yaw, pitch);
                 if (t >= D) {
                     phase = 'seated'; t = 0; breathe = 0;
@@ -299,6 +304,21 @@ const initSit = (global: Global, collision: Collision | null, getCM: () => Camer
         startPos.copy(cam.position);
         startYaw = cam.angles.y;
         startPitch = cam.angles.x;
+        // measure the ground where we will stand (slightly further out so the
+        // probe cannot catch the seat's front edge) and end the rise at the
+        // walk rig's exact eye height there → seamless hand-back
+        if (seat) {
+            const rad = seat.yaw * math.DEG_TO_RAD;
+            const px = standPos.x - Math.sin(rad) * 0.15;
+            const pz = standPos.z - Math.cos(rad) * 0.15;
+            // start just above the seat cushion (starting higher can put the
+            // ray inside a LOW ceiling → instant hit → "floor" = ceiling)
+            const ground = collision?.queryRay(px, seatedPos.y + 0.3, pz, 0, -1, 0, 4);
+            const eye = ground ? ground.y + WALK_EYE : walkEyeY0;
+            // sanity: the stand-up end must be near the height we walked in
+            // at — a probe through a hole (or off a seat edge) is rejected
+            standPos.y = Math.abs(eye - walkEyeY0) < 0.6 ? eye : walkEyeY0;
+        }
         pill.classList.remove('show', 'seatedMode');
         pill.textContent = '🪑 Platz nehmen';
     };
