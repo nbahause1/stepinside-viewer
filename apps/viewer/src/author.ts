@@ -194,8 +194,16 @@ const initAuthor = (global: Global, collision: Collision | null) => {
     canvasEl.addEventListener('pointerup', (e) => {
         if (!seatPicking) return;
         if (Math.hypot(e.offsetX - seatDownX, e.offsetY - seatDownY) > 4) return;   // Drag = Umschauen
-        const hit = pickSurface(e.offsetX, e.offsetY);
+        let hit = pickSurface(e.offsetX, e.offsetY);
         if (!hit) { hint('Kein Treffer, klicke direkt auf die Sitzfläche.'); return; }
+        // Der Klick-Strahl kann durch ein Loch im Kollisions-Voxel HINTER die
+        // sichtbare Fläche fallen (z.B. in den Hohlraum unter dem Boden).
+        // Darum wird die Stelle von OBEN nachgetastet: der erste Treffer von
+        // oben ist die echte Oberfläche (Sofa-Sitzfläche), nie das Loch.
+        if (collision) {
+            const top = collision.queryRay(hit.x, hit.y + 1.4, hit.z, 0, -1, 0, 3);
+            if (top && top.y > hit.y + 0.05) hit = new Vec3(top.x, top.y, top.z);
+        }
         const c = camera.getPosition();
         const yawDeg = Math.round(Math.atan2(-(c.x - hit.x), -(c.z - hit.z)) * 180 / Math.PI);
         seats.push({ position: [+hit.x.toFixed(2), +hit.y.toFixed(2), +hit.z.toFixed(2)], yaw: yawDeg });

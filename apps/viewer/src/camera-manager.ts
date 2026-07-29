@@ -76,6 +76,15 @@ class CameraManager {
     // visible instantly.
     snap: () => void;
 
+    // The fly controller writes ITS OWN fov into the camera every frame
+    // (update: camera.fov = applySmoothedZoom(this.fov)), and this manager
+    // runs before any later-registered app update handler — so a feature
+    // that puppets the fly rig per-frame (sit.ts) can never hold a
+    // different fov on screen via camera.fov + snap() alone. It must set
+    // the fov AT the controller, and hand the original back afterwards.
+    getFlyFov: () => number;
+    setFlyFov: (fov: number) => void;
+
     // holds the camera state
     camera = new Camera();
 
@@ -272,6 +281,11 @@ class CameraManager {
             target.copy(this.camera);
             transitionTimer = 1;
             global.app.renderNextFrame = true;
+        };
+
+        this.getFlyFov = () => controllers.fly.fov;
+        this.setFlyFov = (fov: number) => {
+            controllers.fly.fov = fov;
         };
 
         // Tour playback pacing. The authored track is deliberately smooth and

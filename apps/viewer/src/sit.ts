@@ -94,7 +94,8 @@ const initSit = (global: Global, collision: Collision | null, getCM: () => Camer
     let breathe = 0;                    // breathing clock while seated
     let walkEyeY0 = 0;                  // the walk rig's eye height when the sit began (truth + sanity bound)
     const sitEntryPos = new Vec3();     // the PROVEN-VALID walk pose the visitor sat down from — stand-up returns here
-    let sitFov = 80;                    // the WALK camera's fov, held constant through the whole sit — the fly rig has its own fov and letting it apply reads as a zoom pop
+    let sitFov = 80;                    // the WALK camera's fov, held constant through the whole sit — the fly rig has its own (narrower) fov and letting it apply reads as a zoom pop
+    let flyFov0 = 0;                    // the fly rig's OWN fov, restored on exit. The pin must live ON the controller: fly.update() re-writes controllers.fly.fov into the camera every frame BEFORE render, so camera.fov + snap() from this (later-registered) handler never reaches the screen
 
     const tmp = new Vec3();
 
@@ -106,7 +107,7 @@ const initSit = (global: Global, collision: Collision | null, getCM: () => Camer
         cm.camera.position.copy(p);
         cm.camera.angles.set(pitch, yaw, 0);
         cm.camera.distance = 0;        // first-person: eye IS the pose
-        cm.camera.fov = sitFov;        // hold the WALK fov — a mode-fov change reads as a zoom pop
+        cm.camera.fov = sitFov;        // keep the manager's pose coherent (share links etc.) — the RENDERED fov is pinned via setFlyFov in beginSit
         cm.snap();
     };
 
@@ -151,6 +152,10 @@ const initSit = (global: Global, collision: Collision | null, getCM: () => Camer
         sitYaw = s.yaw;
         // turn over the shoulder that gives the shorter way
         turnDir = yawDelta(startYaw, sitYaw) >= 0 ? 1 : -1;
+        // pin the walk fov onto the fly rig itself — its update() writes its
+        // controller fov every frame, so this is the only write that renders
+        flyFov0 = cm.getFlyFov();
+        cm.setFlyFov(sitFov);
         state.cameraMode = 'fly';       // the invisible free rig
         setPose(startPos, startYaw, startPitch);
     };
@@ -162,11 +167,16 @@ const initSit = (global: Global, collision: Collision | null, getCM: () => Camer
         pill.textContent = '🪑 Platz nehmen';
         state.measuring = false;
         IdleLook.suppressed = false;
-        if (standUp) {
-            const cm2 = getCM();
-            if (cm2) cm2.camera.fov = sitFov;   // hand the walk back ITS OWN fov
+        const cm2 = getCM();
+        // hand the fly rig back its own fov (pinned in beginSit)
+        if (cm2 && flyFov0 > 0) {
+            cm2.setFlyFov(flyFov0);
+            flyFov0 = 0;
+        }
+        if (standUp && cm2) {
+            cm2.camera.fov = sitFov;            // walk renders this same fov itself
             state.cameraMode = fromMode;        // walk re-grounds at the current XZ
-            cm2?.snap();
+            cm2.snap();
         }
     };
 
