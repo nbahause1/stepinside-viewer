@@ -3,6 +3,7 @@ import { Vec3, math } from 'playcanvas';
 import type { CameraManager } from './camera-manager';
 import { IdleLook } from './cameras/idle-look';
 import type { Collision } from './collision';
+import { findCylinderSpawn } from './collision/find-spawn';
 import type { Global } from './types';
 
 // Hinsetzen ("Platz nehmen") — a first-person sit-down on authored seats.
@@ -42,6 +43,15 @@ const SEATED_EYE_ABOVE_SEAT = 0.62;
  *  MUST match walk-controller.ts — the stand-up ends exactly here so the
  *  hand-back to walking is seamless (no height pop). */
 const WALK_EYE = 1.5;
+
+/** walk capsule, mirrored from walk-controller.ts: (capsuleHeight 1.5 +
+ *  hoverHeight 0.2) / 2 and capsuleRadius. The stand-up target is computed
+ *  with the SAME findCylinderSpawn call walk's onEnter runs — ending the
+ *  animation exactly on the spot walk will adopt, so the hand-back cannot
+ *  relocate the camera by even a millimetre. */
+const WALK_CAPSULE_HALF = 0.85;
+const WALK_CAPSULE_RADIUS = 0.2;
+const spawnOut = new Vec3();
 
 /** where the body stands before sitting: this far in front of the seat edge */
 const STAND_AHEAD = 0.42;
@@ -307,17 +317,17 @@ const initSit = (global: Global, collision: Collision | null, getCM: () => Camer
         // measure the ground where we will stand (slightly further out so the
         // probe cannot catch the seat's front edge) and end the rise at the
         // walk rig's exact eye height there → seamless hand-back
-        if (seat) {
-            const rad = seat.yaw * math.DEG_TO_RAD;
-            const px = standPos.x - Math.sin(rad) * 0.15;
-            const pz = standPos.z - Math.cos(rad) * 0.15;
-            // start just above the seat cushion (starting higher can put the
-            // ray inside a LOW ceiling → instant hit → "floor" = ceiling)
-            const ground = collision?.queryRay(px, seatedPos.y + 0.3, pz, 0, -1, 0, 4);
-            const eye = ground ? ground.y + WALK_EYE : walkEyeY0;
-            // sanity: the stand-up end must be near the height we walked in
-            // at — a probe through a hole (or off a seat edge) is rejected
-            standPos.y = Math.abs(eye - walkEyeY0) < 0.6 ? eye : walkEyeY0;
+        if (seat && collision &&
+            findCylinderSpawn(collision, standPos.x, walkEyeY0, standPos.z,
+                WALK_CAPSULE_HALF, WALK_CAPSULE_RADIUS, spawnOut)) {
+            const eye = spawnOut.y + WALK_EYE;
+            // sanity: a spawn found through a voxel hole is rejected — then we
+            // end at the height we walked in at and let walk's spring settle
+            if (Math.abs(eye - walkEyeY0) < 0.6) {
+                standPos.set(spawnOut.x, eye, spawnOut.z);
+            } else {
+                standPos.y = walkEyeY0;
+            }
         }
         pill.classList.remove('show', 'seatedMode');
         pill.textContent = '🪑 Platz nehmen';
