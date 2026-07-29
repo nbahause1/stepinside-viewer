@@ -94,6 +94,7 @@ const initSit = (global: Global, collision: Collision | null, getCM: () => Camer
     let breathe = 0;                    // breathing clock while seated
     let walkEyeY0 = 0;                  // the walk rig's eye height when the sit began (truth + sanity bound)
     const sitEntryPos = new Vec3();     // the PROVEN-VALID walk pose the visitor sat down from — stand-up returns here
+    let sitFov = 80;                    // the WALK camera's fov, held constant through the whole sit — the fly rig has its own fov and letting it apply reads as a zoom pop
 
     const tmp = new Vec3();
 
@@ -105,6 +106,7 @@ const initSit = (global: Global, collision: Collision | null, getCM: () => Camer
         cm.camera.position.copy(p);
         cm.camera.angles.set(pitch, yaw, 0);
         cm.camera.distance = 0;        // first-person: eye IS the pose
+        cm.camera.fov = sitFov;        // hold the WALK fov — a mode-fov change reads as a zoom pop
         cm.snap();
     };
 
@@ -130,6 +132,7 @@ const initSit = (global: Global, collision: Collision | null, getCM: () => Camer
         startPos.copy(cam.position);
         startYaw = cam.angles.y;
         startPitch = cam.angles.x;
+        sitFov = cam.fov;
 
         // seat frame
         const sp = new Vec3(s.position[0], s.position[1], s.position[2]);
@@ -160,8 +163,10 @@ const initSit = (global: Global, collision: Collision | null, getCM: () => Camer
         state.measuring = false;
         IdleLook.suppressed = false;
         if (standUp) {
-            state.cameraMode = fromMode; // walk re-grounds at the current XZ
-            getCM()?.snap();
+            const cm2 = getCM();
+            if (cm2) cm2.camera.fov = sitFov;   // hand the walk back ITS OWN fov
+            state.cameraMode = fromMode;        // walk re-grounds at the current XZ
+            cm2?.snap();
         }
     };
 
@@ -277,6 +282,7 @@ const initSit = (global: Global, collision: Collision | null, getCM: () => Camer
                 cam.position.x = seatedPos.x;
                 cam.position.z = seatedPos.z;
                 cam.position.y = seatedPos.y + Math.sin(breathe * 2 * Math.PI * 0.22) * 0.004;
+                cam.fov = sitFov;
                 cm.snap();
                 break;
             }
