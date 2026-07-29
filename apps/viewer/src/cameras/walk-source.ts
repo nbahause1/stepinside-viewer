@@ -12,6 +12,25 @@ import {
 /** XZ distance below which the walker considers itself arrived */
 const ARRIVAL_DIST = 0.5;
 
+/**
+ * Gaze lift: clicking the floor to walk usually means the visitor is LOOKING
+ * at the floor when the walk starts. A person raises their eyes when they
+ * start walking — so does the camera: while auto-walking, the pitch eases up
+ * to a natural walking gaze so the flat (not the parquet) fills the frame.
+ * Any manual look input cancels the lift instantly (the visitor always wins).
+ */
+/** Pitch the lift eases toward (deg; slightly below the horizon reads natural) */
+const GAZE_LIFT_TARGET = -4;
+
+/** Only lift when the visitor is meaningfully looking DOWN at walk start */
+const GAZE_LIFT_ARM_BELOW = -14;
+
+/** Max pitch-raise rate (deg/s) — brisk but never a snap */
+const GAZE_LIFT_MAX_RATE = 40;
+
+/** Proportional gain mapping remaining pitch (deg) to raise rate */
+const GAZE_LIFT_GAIN = 2.2;
+
 /** Minimum XZ speed (m/s) to not count as blocked */
 const BLOCKED_SPEED = 0.6;
 
@@ -58,6 +77,12 @@ class WalkSource implements TargetSource {
 
     private _speedMul = 1;
 
+    /** gaze lift armed for the CURRENT walk (decided on first update) */
+    private _gazeLift = false;
+
+    /** navigateTo just fired — decide on the next update whether to arm */
+    private _gazeLiftPending = false;
+
     get isActive(): boolean {
         return this._target !== null;
     }
@@ -76,6 +101,16 @@ class WalkSource implements TargetSource {
         this._target.copy(target);
         this._speedMul = speedMul;
         this._progress.reset();
+        this._gazeLiftPending = true;
+    }
+
+    /**
+     * Stop raising the gaze for the rest of this walk — called on any manual
+     * look input, so the visitor's own view control always wins.
+     */
+    cancelGazeLift() {
+        this._gazeLift = false;
+        this._gazeLiftPending = false;
     }
 
     /**
@@ -86,6 +121,8 @@ class WalkSource implements TargetSource {
             this._target = null;
             this._yawRate = 0;
             this._progress.reset();
+            this._gazeLift = false;
+            this._gazeLiftPending = false;
             this.onComplete?.();
         }
     }
@@ -129,6 +166,26 @@ class WalkSource implements TargetSource {
 
         // WalkController applies: _angles.y += -rotate[0]
         frame.deltas.rotate.append([-yawStep, 0, 0]);
+
+        // gaze lift: ease the pitch up toward walking height. Armed only when
+        // the walk STARTS with the camera clearly pointed at the floor (the
+        // click-to-walk pose); never pulls a raised view back down, and
+        // cancelGazeLift() (manual look input) stops it for good.
+        if (this._gazeLiftPending) {
+            this._gazeLiftPending = false;
+            this._gazeLift = cameraAngles.x < GAZE_LIFT_ARM_BELOW;
+        }
+        if (this._gazeLift) {
+            const diff = GAZE_LIFT_TARGET - cameraAngles.x;   // >0 while below target
+            if (diff <= 0) {
+                this._gazeLift = false;
+            } else {
+                const rate = Math.min(GAZE_LIFT_MAX_RATE, diff * GAZE_LIFT_GAIN);
+                const step = Math.min(diff, rate * dt);
+                // WalkController applies: _angles.x -= rotate[1] → negative raises
+                frame.deltas.rotate.append([0, -step, 0]);
+            }
+        }
 
         // scale forward speed by alignment: turn in place first, then accelerate
         const alignment = Math.max(0, Math.cos(yawDiff * Math.PI / 180));

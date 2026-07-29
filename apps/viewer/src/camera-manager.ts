@@ -189,6 +189,13 @@ class CameraManager {
         };
 
         const walkSource = new WalkSource();
+        // Manual look input beats the auto-walk gaze lift. The pointerdown of
+        // the walk-triggering click itself lands BEFORE navigateTo arms the
+        // lift (walks start on pointerup), so only a real grab-to-look during
+        // the walk cancels it.
+        (global.app.graphicsDevice.canvas as HTMLCanvasElement).addEventListener(
+            'pointerdown', () => walkSource.cancelGazeLift(), { passive: true }
+        );
         const flySource = new FlySource();
         const sourcesByMode: Partial<Record<CameraMode, TargetSource>> = {
             walk: walkSource,
