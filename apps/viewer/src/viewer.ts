@@ -39,6 +39,7 @@ import type { DebugPanel } from './debug';
 import { InputController } from './input-controller';
 import { initMeasure } from './measure';
 import { initRoomDimensions } from './room-dimensions';
+import { initSit } from './sit';
 import { MeshDebugOverlay } from './mesh-debug-overlay';
 import { NavCursor } from './nav-cursor';
 import { Picker } from './picker';
@@ -555,6 +556,10 @@ class Viewer {
             if (!config.noui) {
                 this.navCursor = new NavCursor(app, camera, collision ?? null, events, state);
             }
+
+            // "Platz nehmen": first-person sit-down on authored seats
+            // (settings.seats). No-ops when the scan has none.
+            initSit(global, collision ?? null, () => this.cameraManager);
 
             // developer panel (exposes window.getCameraState/setCameraState) —
             // authoring/tooling entry points only; dynamically imported so the
