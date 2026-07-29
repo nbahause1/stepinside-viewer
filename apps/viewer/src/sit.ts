@@ -3,7 +3,6 @@ import { Vec3, math } from 'playcanvas';
 import type { CameraManager } from './camera-manager';
 import { IdleLook } from './cameras/idle-look';
 import type { Collision } from './collision';
-import { findCylinderSpawn } from './collision/find-spawn';
 import type { Global } from './types';
 
 // Hinsetzen ("Platz nehmen") — a first-person sit-down on authored seats.
@@ -43,15 +42,6 @@ const SEATED_EYE_ABOVE_SEAT = 0.62;
  *  MUST match walk-controller.ts — the stand-up ends exactly here so the
  *  hand-back to walking is seamless (no height pop). */
 const WALK_EYE = 1.5;
-
-/** walk capsule, mirrored from walk-controller.ts: (capsuleHeight 1.5 +
- *  hoverHeight 0.2) / 2 and capsuleRadius. The stand-up target is computed
- *  with the SAME findCylinderSpawn call walk's onEnter runs — ending the
- *  animation exactly on the spot walk will adopt, so the hand-back cannot
- *  relocate the camera by even a millimetre. */
-const WALK_CAPSULE_HALF = 0.85;
-const WALK_CAPSULE_RADIUS = 0.2;
-const spawnOut = new Vec3();
 
 /** where the body stands before sitting: this far in front of the seat edge */
 const STAND_AHEAD = 0.42;
@@ -103,6 +93,7 @@ const initSit = (global: Global, collision: Collision | null, getCM: () => Camer
     let turnDir = 1;                    // over which shoulder the body turns
     let breathe = 0;                    // breathing clock while seated
     let walkEyeY0 = 0;                  // the walk rig's eye height when the sit began (truth + sanity bound)
+    const sitEntryPos = new Vec3();     // the PROVEN-VALID walk pose the visitor sat down from — stand-up returns here
 
     const tmp = new Vec3();
 
@@ -152,6 +143,7 @@ const initSit = (global: Global, collision: Collision | null, getCM: () => Camer
         // (a fresh floor probe can hit the seat itself and mis-ground)
         standPos.y = startPos.y;
         walkEyeY0 = startPos.y;
+        sitEntryPos.copy(startPos);
         seatedPos.set(sp.x, sp.y + SEATED_EYE_ABOVE_SEAT, sp.z);
         sitYaw = s.yaw;
         // turn over the shoulder that gives the shorter way
@@ -289,9 +281,10 @@ const initSit = (global: Global, collision: Collision | null, getCM: () => Camer
                 break;
             }
             case 'stand': {
-                // condensed reverse: lean forward, push up to standing in
-                // front of the seat, gaze levels — then hand back to walking
-                const D = 1.05;
+                // condensed reverse: lean forward, push up and step back to
+                // where we sat down from, gaze levels — then hand to walking
+                const dist = Math.hypot(standPos.x - seatedPos.x, standPos.z - seatedPos.z);
+                const D = 1.05 + Math.max(0, dist - 0.45) * 0.45;
                 const k = clamp01(t / D);
                 const up = easeInOut(k);
                 tmp.lerp(startPos, standPos, up);
@@ -314,21 +307,12 @@ const initSit = (global: Global, collision: Collision | null, getCM: () => Camer
         startPos.copy(cam.position);
         startYaw = cam.angles.y;
         startPitch = cam.angles.x;
-        // measure the ground where we will stand (slightly further out so the
-        // probe cannot catch the seat's front edge) and end the rise at the
-        // walk rig's exact eye height there → seamless hand-back
-        if (seat && collision &&
-            findCylinderSpawn(collision, standPos.x, walkEyeY0, standPos.z,
-                WALK_CAPSULE_HALF, WALK_CAPSULE_RADIUS, spawnOut)) {
-            const eye = spawnOut.y + WALK_EYE;
-            // sanity: a spawn found through a voxel hole is rejected — then we
-            // end at the height we walked in at and let walk's spring settle
-            if (Math.abs(eye - walkEyeY0) < 0.6) {
-                standPos.set(spawnOut.x, eye, spawnOut.z);
-            } else {
-                standPos.y = walkEyeY0;
-            }
-        }
+        // Stand up TOWARD THE SPOT WE SAT DOWN FROM: that pose is proven
+        // valid (the visitor stood there in walk mode seconds ago), so the
+        // walk hand-back re-grounds on the exact same spot — no relocation,
+        // no pop, regardless of how imperfect the floor voxel is elsewhere.
+        // It also reads naturally: you get up and step back where you stood.
+        standPos.copy(sitEntryPos);
         pill.classList.remove('show', 'seatedMode');
         pill.textContent = '🪑 Platz nehmen';
     };
