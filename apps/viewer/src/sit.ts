@@ -33,7 +33,7 @@ import type { Global } from './types';
 
 type Seat = { position: [number, number, number]; yaw: number };
 
-type Phase = 'idle' | 'align' | 'turn' | 'descend' | 'settle' | 'seated' | 'stand';
+type Phase = 'idle' | 'turn' | 'descend' | 'settle' | 'seated' | 'stand';
 
 /** eye height above the SEAT surface when seated (m) */
 const SEATED_EYE_ABOVE_SEAT = 0.62;
@@ -87,7 +87,6 @@ const initSit = (global: Global, collision: Collision | null, getCM: () => Camer
     let startYaw = 0, startPitch = 0;
     const standPos = new Vec3();        // standing point in front of the seat
     const seatedPos = new Vec3();       // seated eye position
-    let faceSeatYaw = 0;                // yaw looking AT the seat (approach)
     let sitYaw = 0;                     // yaw of the seated person
     let turnDir = 1;                    // over which shoulder the body turns
     let breathe = 0;                    // breathing clock while seated
@@ -117,7 +116,7 @@ const initSit = (global: Global, collision: Collision | null, getCM: () => Camer
         const cm = getCM();
         if (!cm || state.cameraMode !== 'walk' || phase !== 'idle') return;
         seat = s;
-        phase = 'align';
+        phase = 'turn';
         t = 0;
         state.measuring = true;         // blocks click-to-walk / tour / focusPoi hijacks
         IdleLook.suppressed = true;
@@ -141,10 +140,8 @@ const initSit = (global: Global, collision: Collision | null, getCM: () => Camer
         standPos.y = startPos.y;
         seatedPos.set(sp.x, sp.y + SEATED_EYE_ABOVE_SEAT, sp.z);
         sitYaw = s.yaw;
-        // approach yaw: look from standing point AT the seat surface
-        faceSeatYaw = Math.atan2(-(sp.x - standPos.x), -(sp.z - standPos.z)) * math.RAD_TO_DEG;
         // turn over the shoulder that gives the shorter way
-        turnDir = yawDelta(faceSeatYaw, sitYaw) >= 0 ? 1 : -1;
+        turnDir = yawDelta(startYaw, sitYaw) >= 0 ? 1 : -1;
         state.cameraMode = 'fly';       // the invisible free rig
         setPose(startPos, startYaw, startPitch);
     };
@@ -160,13 +157,6 @@ const initSit = (global: Global, collision: Collision | null, getCM: () => Camer
             state.cameraMode = fromMode; // walk re-grounds at the current XZ
             getCM()?.snap();
         }
-    };
-
-    // pitch that looks from `p` at the seat surface
-    const pitchToSeat = (p: Vec3, sp: Vec3) => {
-        tmp.sub2(sp, p);
-        const dxz = Math.hypot(tmp.x, tmp.z);
-        return Math.atan2(tmp.y, dxz) * math.RAD_TO_DEG;
     };
 
     app.on('update', (dt: number) => {
@@ -210,29 +200,18 @@ const initSit = (global: Global, collision: Collision | null, getCM: () => Camer
         t += dt;
 
         switch (phase) {
-            case 'align': {
-                // step slows, body positions itself in front of the seat,
-                // gaze finds the seat surface
+            case 'turn': {
+                // no approach: the visitor is already here. Turn over one
+                // shoulder WHILE the last step settles the body in front of
+                // the seat (position blends over during the turn); brief
+                // weight shift onto one leg as a lateral sway.
                 const D = 0.9;
                 const k = easeInOut(clamp01(t / D));
-                tmp.lerp(startPos, standPos, k);
-                const yaw = startYaw + yawDelta(startYaw, faceSeatYaw) * k;
-                const pitch = startPitch + (pitchToSeat(standPos, sp) - startPitch) * k;
-                setPose(tmp, yaw, pitch);
-                if (t >= D) { phase = 'turn'; t = 0; }
-                break;
-            }
-            case 'turn': {
-                // turn over one shoulder; gaze comes up from the seat toward
-                // room height; brief weight shift onto one leg (lateral sway)
-                const D = 1.0;
-                const k = easeInOut(clamp01(t / D));
-                const yaw = faceSeatYaw + yawDelta(faceSeatYaw, sitYaw) * k;
-                const pitch = pitchToSeat(standPos, sp) * (1 - k) + (-8) * k;
-                // sway: out and back, perpendicular to the facing direction
+                const yaw = startYaw + yawDelta(startYaw, sitYaw) * k;
+                const pitch = startPitch + (-8 - startPitch) * k;
                 const sway = Math.sin(k * Math.PI) * 0.045 * turnDir;
                 const rad = sitYaw * math.DEG_TO_RAD;
-                tmp.copy(standPos);
+                tmp.lerp(startPos, standPos, k);
                 tmp.x += Math.cos(rad) * -sway;
                 tmp.z += Math.sin(rad) * sway;
                 setPose(tmp, yaw, pitch);

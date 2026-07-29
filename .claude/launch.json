@@ -16,8 +16,8 @@
     },
     {
       "name": "studio",
-      "runtimeExecutable": "node",
-      "runtimeArgs": ["tools/studio/server.mjs"],
+      "runtimeExecutable": "env",
+      "runtimeArgs": ["SI_FAST=0", "node", "tools/studio/server.mjs"],
       "port": 4545
     },
     {

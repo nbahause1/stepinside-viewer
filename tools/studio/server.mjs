@@ -183,15 +183,18 @@ const server = http.createServer(async (req, res) => {
                     a.camera && a.camera.initial &&
                     isVec3(a.camera.initial.position) && isVec3(a.camera.initial.target) &&
                     isNum(a.camera.initial.fov);
+                const validSeat = st => st && isVec3(st.position) && isNum(st.yaw);
                 const roomsOk = body.rooms === undefined || (Array.isArray(body.rooms) && body.rooms.every(validRoom));
                 const annsOk = body.annotations === undefined || (Array.isArray(body.annotations) && body.annotations.every(validAnn));
-                if (!roomsOk || !annsOk) {
-                    res.writeHead(400).end(!roomsOk ? 'invalid rooms entry' : 'invalid annotations entry');
+                const seatsOk = body.seats === undefined || (Array.isArray(body.seats) && body.seats.every(validSeat));
+                if (!roomsOk || !annsOk || !seatsOk) {
+                    res.writeHead(400).end(!roomsOk ? 'invalid rooms entry' : (!annsOk ? 'invalid annotations entry' : 'invalid seats entry'));
                     return;
                 }
 
                 const settings = JSON.parse(readFileSync(settingsPath, 'utf8'));
                 if (Array.isArray(body.rooms)) settings.rooms = body.rooms;
+                if (Array.isArray(body.seats)) settings.seats = body.seats;
                 if (Array.isArray(body.annotations)) {
                     settings.annotations = body.annotations;
                     // annotationMarkers stays UNTOUCHED — the live product runs

@@ -31,6 +31,7 @@ const initAuthor = (global: Global, collision: Collision | null) => {
     // Working copies — replace-array semantics on save.
     const rooms: any[] = Array.isArray(global.settings.rooms) ? [...(global.settings.rooms as any[])] : [];
     const annotations: any[] = Array.isArray(global.settings.annotations) ? [...(global.settings.annotations as any[])] : [];
+    const seats: any[] = Array.isArray((global.settings as any).seats) ? [...((global.settings as any).seats as any[])] : [];
     let dirty = false;
 
 
@@ -62,12 +63,14 @@ const initAuthor = (global: Global, collision: Collision | null) => {
     bar.innerHTML = `
         <h3>Autoren-Modus</h3>
         <button data-id="highlight">📍 Highlight: diese Ansicht</button>
+        <button data-id="seat">🪑 Sitz setzen</button>
         <button data-id="save" class="save">Speichern</button>
         <div class="entries" data-id="entries"></div>
         <div class="hintline" data-id="hint"></div>`;
     document.body.appendChild(bar);
 
     const btnHighlight = bar.querySelector('[data-id="highlight"]') as HTMLButtonElement;
+    const btnSeat = bar.querySelector('[data-id="seat"]') as HTMLButtonElement;
     const btnSave = bar.querySelector('[data-id="save"]') as HTMLButtonElement;
     const entriesEl = bar.querySelector('[data-id="entries"]') as HTMLDivElement;
     const hintEl = bar.querySelector('[data-id="hint"]') as HTMLDivElement;
@@ -91,6 +94,7 @@ const initAuthor = (global: Global, collision: Collision | null) => {
         // named rooms only — the pipeline's nameless dollhouse footprint stays out of sight
         rooms.forEach((r, i) => { if (r?.name) add(`📐 ${r.name}`, () => rooms.splice(i, 1)); });
         annotations.forEach((a, i) => add(`📍 ${a.title}`, () => annotations.splice(i, 1)));
+        seats.forEach((st, i) => add(`🪑 Sitz ${i + 1}`, () => seats.splice(i, 1)));
         btnSave.textContent = dirty ? 'Speichern ✓' : 'Speichern';
         btnSave.disabled = !target || !dirty;
     };
@@ -160,6 +164,48 @@ const initAuthor = (global: Global, collision: Collision | null) => {
         hint(`„${title}" gesetzt — exakt diese Ansicht. Weiter oder speichern.`);
     };
 
+    // --- Sitz setzen: Klick auf die Sitzfläche pinnt den Sitz ---------------
+    // yaw zeigt vom Sitz ZUM Autor: wer den Sitz pinnt, steht naturgemäß dort,
+    // wo der Sitzende später hinschauen soll (vor dem Sofa, im Raum).
+    let seatPicking = false;
+    let seatDownX = 0, seatDownY = 0;
+    const seatTmpDir = new Vec3();
+
+    const pickSurface = (offsetX: number, offsetY: number): Vec3 | null => {
+        if (!collision) return null;
+        const cam = camera.camera!;
+        const camPos = camera.getPosition();
+        cam.screenToWorld(offsetX, offsetY, 1.0, seatTmpDir);
+        seatTmpDir.sub(camPos).normalize();
+        const hit = collision.queryRay(camPos.x, camPos.y, camPos.z, seatTmpDir.x, seatTmpDir.y, seatTmpDir.z, cam.farClip);
+        return hit ? new Vec3(hit.x, hit.y, hit.z) : null;
+    };
+
+    btnSeat.onclick = () => {
+        if (seatPicking) { seatPicking = false; state.measuring = false; hint(''); return; }
+        seatPicking = true;
+        state.measuring = true;         // Click-to-walk aus, solange gepinnt wird
+        hint('Klicke auf die SITZFLÄCHE (Sofa/Stuhl) …');
+    };
+    const canvasEl = global.app.graphicsDevice.canvas as HTMLCanvasElement;
+    canvasEl.addEventListener('pointerdown', (e) => {
+        if (seatPicking) { seatDownX = e.offsetX; seatDownY = e.offsetY; }
+    });
+    canvasEl.addEventListener('pointerup', (e) => {
+        if (!seatPicking) return;
+        if (Math.hypot(e.offsetX - seatDownX, e.offsetY - seatDownY) > 4) return;   // Drag = Umschauen
+        const hit = pickSurface(e.offsetX, e.offsetY);
+        if (!hit) { hint('Kein Treffer, klicke direkt auf die Sitzfläche.'); return; }
+        const c = camera.getPosition();
+        const yawDeg = Math.round(Math.atan2(-(c.x - hit.x), -(c.z - hit.z)) * 180 / Math.PI);
+        seats.push({ position: [+hit.x.toFixed(2), +hit.y.toFixed(2), +hit.z.toFixed(2)], yaw: yawDeg });
+        seatPicking = false;
+        state.measuring = false;
+        dirty = true;
+        render();
+        hint(`Sitz ${seats.length} gepinnt (blickt zu deinem Standpunkt). Weiter oder speichern.`);
+    });
+
     // --- Speichern: replace-array POST to the Studio, then reload for review -
     btnSave.onclick = async () => {
         if (!target) return;
@@ -169,7 +215,7 @@ const initAuthor = (global: Global, collision: Collision | null) => {
             const res = await fetch('/save-settings', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ pid: target.pid, version: target.version, rooms, annotations })
+                body: JSON.stringify({ pid: target.pid, version: target.version, rooms, annotations, seats })
             });
             if (!res.ok) throw new Error(await res.text());
             hint('Gespeichert — lade neu zur Kontrolle …');
