@@ -100,7 +100,12 @@
 
     <div class="checklist" id="checklist">
       <div class="author-row">
-        <a id="authorLink" href="#" target="_blank">✏️ Maße &amp; Highlights einzeichnen</a>
+        <a id="authorLink" href="#" target="_blank">✏️ Highlights, Sitze &amp; Drohnenansichten setzen</a>
+      </div>
+      <div class="hint" style="margin-top:8px">
+        Öffnet den Rundgang im Autoren-Modus. <b>2</b> = freie Drohne, <b>1</b> = Orbit, <b>3</b> = zurück ins Gehen, <b>F</b> = ganze Szene einrahmen.
+        Ansicht anfliegen → „📍 Highlight: diese Ansicht“. Sitz: im Gehen → „🪑 Sitz setzen“ → auf die Sitzfläche klicken (Blickrichtung = dein Standpunkt).
+        Zum Schluss <b>Speichern</b>.
       </div>
       <h2 style="margin-top:16px">Vor Go-Live noch offen</h2>
       <div id="checkItems"></div>
@@ -156,7 +161,10 @@
   // (&author) where Maße + Highlights are drawn directly in the viewer.
   async function showChecklist(id, previewUrl) {
     const box = $('checklist'), items = $('checkItems'), authorLink = $('authorLink');
-    authorLink.href = previewUrl + '&author';
+    // &author = Werkzeugleiste (Highlights/Sitze), &scout = devtools und damit die
+    // freien Orbit-/Flugkameras. Beide sind nötig: ohne scout laesst sich die
+    // Drohnenansicht nicht anfliegen, die das Highlight ueberhaupt erst einrahmt.
+    authorLink.href = previewUrl + '&author&scout';
     items.textContent = '';
     try {
       const res = await fetch(`/out/${id}/v1/needs-config.json`);

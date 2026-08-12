@@ -3967,3 +3967,140 @@ body #surroundingsPill.is-open #surroundingsToggle { pointer-events: auto; }
         transition: clip-path 0.35s ease-out;
     }
 }
+
+/* "Platz nehmen" — the seat affordance.
+
+   A hairline white ring with a chevron inside, breathing slowly: down = sit
+   there, up = get back up. No plate, no label, no fill — it marks a place
+   rather than announcing a feature.
+
+   Built as one svg of strokes, drawn twice (dark underlay, white line on top).
+   Two consequences worth keeping:
+     • contrast comes from the dark hairline, not from a glow. A white halo can
+       do nothing against a white wall; a 0.35-alpha outline works everywhere.
+     • the strokes stay crisp. Filling the circle and putting a drop-shadow on
+       the element blurs the whole disc, because a drop-shadow follows the
+       silhouette — that read as a smudge rather than a mark.
+
+   Positioning is split on purpose:
+     • anchored to the seat → an inline `transform` written per frame (placeAt
+       in sit.ts). Transform, not left/top: those are layout properties and made
+       the mark lag a frame behind the image while walking.
+     • seated → the inline transform is cleared and .seatedMode takes over,
+       parking the stand-up arrow bottom centre, identical every time. */
+.sitPill {
+    position: absolute;
+    left: 0;
+    top: 0;
+    z-index: 30;
+    display: grid;
+    place-items: center;
+
+    // hit area only — the visible mark is the svg inside
+    width: 56px;
+    height: 56px;
+    padding: 0;
+    border: 0;
+    background: none;
+    cursor: pointer;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.45s var(--ease-glass);
+
+    &.show {
+        opacity: 1;
+        pointer-events: auto;
+    }
+
+    .sitPill__mark {
+        width: 34px;
+        height: 34px;
+        overflow: visible;
+        animation: sitBreathe 2.6s ease-in-out infinite;
+
+        circle,
+        path {
+            fill: none;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+    }
+
+    // dark hairline underneath: contrast on bright surfaces
+    .sitPill__under {
+        circle,
+        path {
+            stroke: rgba(0, 0, 0, 0.35);
+            stroke-width: 3.4;
+        }
+    }
+
+    // the mark itself; the soft white glow rides on the strokes only, so it
+    // stays a lit line instead of a lit disc
+    .sitPill__line {
+        filter: drop-shadow(0 0 3px rgba(255, 255, 255, 0.45));
+
+        circle {
+            stroke: rgba(255, 255, 255, 0.95);
+            stroke-width: 1.5;
+        }
+
+        path {
+            stroke: #fff;
+            stroke-width: 2;
+        }
+    }
+
+    /* Standing up: only the chevron flips, in place. Its own centre, not the
+       circle's — rotating about the circle centre would swing it off-axis. */
+    &.up .sitPill__chev {
+        transform: rotate(180deg);
+        transform-origin: 20px 20.75px;
+    }
+
+    &:hover .sitPill__mark,
+    &:active .sitPill__mark {
+        animation-play-state: paused;
+    }
+
+    &:hover .sitPill__line {
+        filter: drop-shadow(0 0 5px rgba(255, 255, 255, 0.7));
+    }
+
+    /* Seated: fixed, centred, above the bottom chrome — the same spot every
+       time, wherever the seat happened to be on screen. Centring runs through
+       margin, not transform: transform belongs to the breathing animation. */
+    &.seatedMode {
+        position: fixed;
+        left: 50%;
+        top: auto;
+        bottom: 96px;
+        margin-left: -28px;
+    }
+}
+
+/* Breathing: opacity drift carried by a small rise, ~23 breaths a minute.
+   Deliberately louder than a resting breath — the mark has to be findable
+   across a whole room, and at 4m on a phone it is only a few pixels tall.
+   Travel stays at 4px total so it still reads as breathing, not as bouncing. */
+@keyframes sitBreathe {
+    0%, 100% {
+        opacity: 0.65;
+        transform: translateY(2px) scale(0.94);
+    }
+
+    50% {
+        opacity: 1;
+        transform: translateY(-2px) scale(1.06);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .sitPill .sitPill__mark {
+        animation: none;
+        opacity: 0.95;
+    }
+}

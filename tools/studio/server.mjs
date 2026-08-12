@@ -13,7 +13,7 @@
 // preview works without any cloud step. (Upload to R2 stays the separate,
 // deliberate `tools/upload-scan.mjs` step.)
 import http from 'node:http';
-import { createWriteStream, createReadStream, mkdirSync, existsSync, statSync, renameSync, writeFileSync, readFileSync } from 'node:fs';
+import { createWriteStream, createReadStream, mkdirSync, existsSync, statSync, renameSync, writeFileSync, readFileSync, cpSync, readdirSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { join, dirname, resolve, extname, normalize, sep } from 'node:path';
 import { spawn } from 'node:child_process';
@@ -52,6 +52,12 @@ const MIME = {
     '.md': 'text/plain; charset=utf-8'
 };
 const mime = p => MIME[extname(p).toLowerCase()] || 'application/octet-stream';
+
+// Recursive byte count, so finalize can report what it just committed you to.
+const dirSize = (dir) => readdirSync(dir, { withFileTypes: true }).reduce((sum, e) => {
+    const full = join(dir, e.name);
+    return sum + (e.isDirectory() ? dirSize(full) : statSync(full).size);
+}, 0);
 
 // Serve a file from an allowed root, blocking path traversal.
 const serveFile = (res, root, relPath) => {
@@ -184,17 +190,24 @@ const server = http.createServer(async (req, res) => {
                     isVec3(a.camera.initial.position) && isVec3(a.camera.initial.target) &&
                     isNum(a.camera.initial.fov);
                 const validSeat = st => st && isVec3(st.position) && isNum(st.yaw);
+                // A drone view is a bare pose: where the camera sits, what it
+                // looks at, how wide. No title — it is a viewpoint, not a story.
+                const validAerial = a => a && isVec3(a.position) && isVec3(a.target) && isNum(a.fov);
                 const roomsOk = body.rooms === undefined || (Array.isArray(body.rooms) && body.rooms.every(validRoom));
                 const annsOk = body.annotations === undefined || (Array.isArray(body.annotations) && body.annotations.every(validAnn));
                 const seatsOk = body.seats === undefined || (Array.isArray(body.seats) && body.seats.every(validSeat));
-                if (!roomsOk || !annsOk || !seatsOk) {
-                    res.writeHead(400).end(!roomsOk ? 'invalid rooms entry' : (!annsOk ? 'invalid annotations entry' : 'invalid seats entry'));
+                const aerialsOk = body.aerialViews === undefined || (Array.isArray(body.aerialViews) && body.aerialViews.every(validAerial));
+                if (!roomsOk || !annsOk || !seatsOk || !aerialsOk) {
+                    res.writeHead(400).end(!roomsOk ? 'invalid rooms entry' :
+                        (!annsOk ? 'invalid annotations entry' :
+                            (!seatsOk ? 'invalid seats entry' : 'invalid aerialViews entry')));
                     return;
                 }
 
                 const settings = JSON.parse(readFileSync(settingsPath, 'utf8'));
                 if (Array.isArray(body.rooms)) settings.rooms = body.rooms;
                 if (Array.isArray(body.seats)) settings.seats = body.seats;
+                if (Array.isArray(body.aerialViews)) settings.aerialViews = body.aerialViews;
                 if (Array.isArray(body.annotations)) {
                     settings.annotations = body.annotations;
                     // annotationMarkers stays UNTOUCHED — the live product runs
@@ -209,6 +222,50 @@ const server = http.createServer(async (req, res) => {
                     .end(JSON.stringify({ ok: true, rooms: settings.rooms?.length ?? 0, annotations: settings.annotations?.length ?? 0 }));
             } catch (err) {
                 res.writeHead(400).end(`save failed: ${err.message}`);
+            }
+        });
+        return;
+    }
+
+    // --- finalize: lift the finished asset set OUT of dist/ and INTO the repo
+    //
+    // This is the step whose absence cost us a whole property once: the
+    // pipeline writes to dist/onboard/<pid>/<version>, dist/ is git-ignored,
+    // and Vercel only ever serves what is committed. An authored scan that is
+    // never copied across therefore exists on exactly one machine, until that
+    // folder is cleaned up — and then the highlights, drone views and seats are
+    // gone with it, while the code that reads them is still deployed.
+    //
+    // Copying into apps/website/public/tours/<pid> makes the tour reachable at
+    // /viewer/?assets=/tours/<pid> — the same path the committed studio-11 tour
+    // uses — and puts it in front of git, where `git status` will show it.
+    if (req.method === 'POST' && path === '/finalize') {
+        const chunks = [];
+        req.on('data', c => chunks.push(c));
+        req.on('end', () => {
+            try {
+                const { pid, version } = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+                if (!PID_RE.test(pid || '') || !/^v\d+$/.test(version || '')) {
+                    res.writeHead(400).end('bad pid/version');
+                    return;
+                }
+                const src = normalize(join(OUTROOT, pid, version));
+                if (!src.startsWith(OUTROOT + sep) || !existsSync(src)) {
+                    res.writeHead(404).end('no such asset set');
+                    return;
+                }
+                const dest = join(repo, 'apps', 'website', 'public', 'tours', pid);
+                cpSync(src, dest, { recursive: true });
+                const bytes = dirSize(dest);
+                res.writeHead(200, { 'Content-Type': 'application/json' })
+                    .end(JSON.stringify({
+                        ok: true,
+                        path: `apps/website/public/tours/${pid}`,
+                        url: `/viewer/index.html?assets=/tours/${pid}&settings=/tours/${pid}/settings.json&fullload`,
+                        mb: +(bytes / 1048576).toFixed(1)
+                    }));
+            } catch (err) {
+                res.writeHead(500).end(`finalize failed: ${err.message}`);
             }
         });
         return;
