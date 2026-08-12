@@ -1,0 +1,297 @@
+{
+  "version": 2,
+  "tonemapping": "none",
+  "highPrecisionRendering": false,
+  "sound": {
+    "intro": "sfx/intro.mp3",
+    "door": "sfx/door.mp3?v=2",
+    "volume": 0.32,
+    "gap": 0,
+    "footsteps": "sfx/footsteps.mp3?v=3",
+    "footstepSet": [
+      "sfx/step1.mp3?v=4",
+      "sfx/step2.mp3?v=4",
+      "sfx/step3.mp3?v=4",
+      "sfx/step4.mp3?v=4",
+      "sfx/step5.mp3?v=4",
+      "sfx/step6.mp3?v=4"
+    ],
+    "footstepsVolume": 0.17,
+    "measureStart": "sfx/measure-start.mp3",
+    "measureEnd": "sfx/measure-end.mp3",
+    "measureVolume": 0.18,
+    "droneAmbient": "sfx/drone-ambient.mp3?v=3",
+    "droneSwitch": "sfx/drone-switch.mp3",
+    "droneAmbientVolume": 0.1,
+    "droneSwitchVolume": 0.05,
+    "stagingReveal": "sfx/staging-reveal.mp3",
+    "stagingRevealVolume": 0.4
+  },
+  "background": {
+    "color": [
+      0.05,
+      0.05,
+      0.06
+    ]
+  },
+  "postEffectSettings": {
+    "sharpness": {
+      "enabled": true,
+      "amount": 0.7
+    },
+    "bloom": {
+      "enabled": false,
+      "intensity": 1,
+      "blurLevel": 2
+    },
+    "grading": {
+      "enabled": false,
+      "brightness": 0,
+      "contrast": 1,
+      "saturation": 1,
+      "tint": [
+        1,
+        1,
+        1
+      ]
+    },
+    "vignette": {
+      "enabled": false,
+      "intensity": 0.5,
+      "inner": 0.3,
+      "outer": 0.75,
+      "curvature": 1
+    },
+    "fringing": {
+      "enabled": false,
+      "intensity": 0.5
+    }
+  },
+  "animTracks": [],
+  "cameras": [
+    {
+      "initial": {
+        "position": [
+          -0.3,
+          0.75,
+          -0.15
+        ],
+        "target": [
+          -4.082,
+          0.75,
+          3.632
+        ],
+        "fov": 80
+      }
+    }
+  ],
+  "annotationMarkers": "hidden",
+  "annotations": [
+    {
+      "position": [
+        -2.384,
+        -0.203,
+        2.95
+      ],
+      "title": "Essbereich",
+      "text": "",
+      "camera": {
+        "initial": {
+          "position": [
+            -2.362,
+            0.13,
+            1.647
+          ],
+          "target": [
+            -2.384,
+            -0.203,
+            2.95
+          ],
+          "fov": 96
+        }
+      }
+    },
+    {
+      "position": [
+        1.75,
+        -0.237,
+        2.816
+      ],
+      "title": "Diele",
+      "text": "",
+      "camera": {
+        "initial": {
+          "position": [
+            -0.48,
+            0.1,
+            2.695
+          ],
+          "target": [
+            1.75,
+            -0.237,
+            2.816
+          ],
+          "fov": 96
+        }
+      }
+    },
+    {
+      "position": [
+        -2.995,
+        -0.816,
+        -4.2
+      ],
+      "title": "Wohnzimmer",
+      "text": "",
+      "camera": {
+        "initial": {
+          "position": [
+            -2.771,
+            0.14,
+            1.431
+          ],
+          "target": [
+            -2.995,
+            -0.816,
+            -4.2
+          ],
+          "fov": 96
+        }
+      }
+    }
+  ],
+  "startMode": "default",
+  "dollhouse": {
+    "clipY": 1.15
+  },
+  "staging": {
+    "enabled": false,
+    "mode": "demo",
+    "endpoint": "https://concierge-api.stepinside-eu.workers.dev/stage",
+    "propertyId": "akquise",
+    "styles": []
+  },
+  "inquiry": {
+    "label": "Besichtigung anfragen",
+    "email": "",
+    "url": ""
+  },
+  "concierge": {
+    "mode": "ai",
+    "endpoint": "https://concierge-api.stepinside-eu.workers.dev/concierge",
+    "propertyId": "akquise",
+    "softLimit": 8,
+    "contact": {
+      "name": "",
+      "phone": "",
+      "email": "",
+      "url": "",
+      "exposeUrl": ""
+    }
+  },
+  "pois": [],
+  "analytics": {
+    "endpoint": "https://concierge-api.stepinside-eu.workers.dev/events",
+    "propertyId": "akquise"
+  },
+  "rooms": [
+    {
+      "lines": [
+        {
+          "a": [
+            -4.75,
+            -0.85,
+            -5.15
+          ],
+          "b": [
+            4.65,
+            -0.85,
+            -5.15
+          ]
+        },
+        {
+          "a": [
+            4.65,
+            -0.85,
+            -5.15
+          ],
+          "b": [
+            4.65,
+            -0.85,
+            5.25
+          ]
+        },
+        {
+          "a": [
+            4.65,
+            -0.85,
+            5.25
+          ],
+          "b": [
+            -4.75,
+            -0.85,
+            5.25
+          ]
+        },
+        {
+          "a": [
+            -4.75,
+            -0.85,
+            5.25
+          ],
+          "b": [
+            -4.75,
+            -0.85,
+            -5.15
+          ]
+        }
+      ]
+    }
+  ],
+  "aerialViews": [
+    {
+      "position": [
+        -0.15,
+        0.995,
+        5.05
+      ],
+      "target": [
+        -2.2,
+        -1.01,
+        -1.795
+      ],
+      "fov": 80
+    },
+    {
+      "position": [
+        -0.847,
+        1,
+        -4.342
+      ],
+      "target": [
+        -2.499,
+        -0.2,
+        -2
+      ],
+      "fov": 80
+    }
+  ],
+  "seats": [
+    {
+      "position": [
+        -3.27,
+        -1.05,
+        -0.09
+      ],
+      "yaw": -67
+    },
+    {
+      "position": [
+        -2.98,
+        -1.05,
+        -3.66
+      ],
+      "yaw": 169
+    }
+  ]
+}

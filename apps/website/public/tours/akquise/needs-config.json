@@ -1,0 +1,64 @@
+{
+  "propertyId": "akquise",
+  "version": "v1",
+  "generatedAt": "2026-08-12T21:26:47.683Z",
+  "goLiveBlocked": true,
+  "items": [
+    {
+      "id": "concierge-contact",
+      "field": "settings.json concierge.contact + greeting",
+      "status": "inherited-demo",
+      "blocking": true,
+      "why": "Demo broker contact inherited from the base template; neutralized to empty.",
+      "fix": "Edit C:\\Users\\Hauke\\projekte\\si-sit\\dist\\onboard\\akquise\\v1\\settings.json → concierge.contact (name/phone/email/exposeUrl) + concierge.greeting"
+    },
+    {
+      "id": "surroundings",
+      "field": "settings.json surroundings",
+      "status": "inherited-demo",
+      "blocking": true,
+      "why": "Demo location removed (map would centre on it). No map pill until set.",
+      "fix": "node apps/viewer/scripts/fetch-surroundings.mjs --lat <lat> --lng <lng>  → paste into C:\\Users\\Hauke\\projekte\\si-sit\\dist\\onboard\\akquise\\v1\\settings.json surroundings"
+    },
+    {
+      "id": "inquiry-email",
+      "field": "settings.json inquiry.email",
+      "status": "inherited-demo",
+      "blocking": false,
+      "why": "Demo mailto inbox removed. The in-viewer lead form still routes by propertyId; email is only the mailto fallback.",
+      "fix": "Edit C:\\Users\\Hauke\\projekte\\si-sit\\dist\\onboard\\akquise\\v1\\settings.json → inquiry.email (real mailto fallback recipient)"
+    },
+    {
+      "id": "lead-webhook",
+      "field": "D1 properties.lead_webhook_url",
+      "status": "unknown",
+      "blocking": true,
+      "why": "Without a property row + webhook, hot leads forward to the global inbox with no broker attribution (or nowhere).",
+      "fix": "cd apps/concierge-api && node scripts/register-property.mjs akquise \"<Label>\" <owner-email> <https-webhook-url>"
+    },
+    {
+      "id": "concierge-kb",
+      "field": "apps/concierge-api/knowledge/akquise.json",
+      "status": "missing",
+      "blocking": true,
+      "why": "Concierge has no property facts until a knowledge base is authored, imported in worker.ts and redeployed.",
+      "fix": "Author apps/concierge-api/knowledge/akquise.json, register it in worker.ts, redeploy"
+    },
+    {
+      "id": "room-dimensions",
+      "field": "settings.json rooms (named entries)",
+      "status": "manual",
+      "blocking": false,
+      "why": "Room DIMENSIONS are authored manually per property (like highlights) — auto-derivation is unreliable on open/L-shaped flats. The dollhouse cutaway already spans the whole flat from a nameless footprint entry; no measurement labels show until you author rooms.",
+      "fix": "In the viewer, stand in a room and run roomEntry() (measure tool) to append a NAMED rooms[] entry; repeat per room. Empty is a valid launch state."
+    },
+    {
+      "id": "highlights",
+      "field": "settings.json annotations",
+      "status": "empty",
+      "blocking": false,
+      "why": "Highlights are authored manually; empty is a valid launch state.",
+      "fix": "Author in the viewer annotation tool when ready (each links a camera move)."
+    }
+  ]
+}

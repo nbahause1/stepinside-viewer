@@ -1,0 +1,15 @@
+{
+  "propertyId": "akquise",
+  "mode": "walk",
+  "floorY": -0.85,
+  "ceilingY": 1.15,
+  "heightM": 2,
+  "lengthM": 9.9,
+  "widthM": 2.3,
+  "center": [
+    0,
+    -0.85,
+    0
+  ],
+  "voxelResolution": 0.05
+}
